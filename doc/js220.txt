@@ -1,0 +1,152 @@
+
+
+Parameters include: (order matters, open sets them in order)
+
+Device Prefix
+Parameters use a unique string to identify each device.  This string
+is unique and persistent across invocations.
+{p} = {backend}/{model}/{serial_number}
+   {backend}: 1 character backend identifier 0-9, a-z, A-Z.
+   {model}: The device model number, such as js220.
+   {serial_number}: The device serial number string.
+
+subtopic prefix:
+! = command (not retained)
+
+subtopic suffix:
+% = metadata request
+$ = metadata response
+? = query request
+& = query response
+# = return code
+
+
+@/!add      {p}
+@/!remove   {p}
+@/list      {p},{p},...
+@/version               : The JS driver version
+
+# todo bootloader (auto firmware update?)
+    program control microcontroller
+    program sensor FPGA
+    program sensor microcontroller (JS110)
+
+
+# normal (application) devices
+
+{p}/h/state           : 0=not present / removed, 1=closed, 2=opened
+{p}/@/!open           : open device command (value ignored)
+{p}/@/!close          : close device command (value ignored)
+{p}/h/info            :
+{p}/h/!error          : asynchronous errors
+{p}/h/!status         : periodic operational metrics
+
+# memory interface to erase/write/read and perform firmware updates.
+{p}/h/mem/{xx}/!erase : Erase section xx
+{p}/h/mem/{xx}/!write : Write section xx
+{p}/h/mem/{xx}/!read  : Read request to section xx
+{p}/h/mem/{xx}/!rdata : Read data response
+
+{p}/c/fw/version      : controller-side firmware version
+{p}/c/hw/version      : PCB version
+{p}/c/s/mode          : bootloader, app
+{p}/c/s/power         : 0=off, 1=on
+{p}/c/s/comm          : 0=disconnected, 1=connected
+{p}/c/!status         : periodic operational metrics
+
+{p}/s/fpga/version    : FPGA hardware version
+{p}/s/fs              : output frequency for i, v, p
+{p}/s/!status         : periodic operational metrics
+
+{p}/s/stats/ctrl      : on, [off]
+{p}/s/stats/fs        : update frequency (2 Hz default)
+{p}/s/stats/value
+{p}/s/stats/clear
+
+# current
+{p}/s/i/ctrl          : on, [off]
+{p}/s/i/range/ctrl    : on, [off] (4-bit current range streaming)
+{p}/s/i/range/mode    : [auto], manual, off
+{p}/s/i/range/select  : 0..5 [0]
+{p}/s/i/range/min     : 0..5 [0]
+{p}/s/i/range/max     : 0..5 [5]
+{p}/s/i/range/!data
+{p}/s/i/trim/mode     : [off], on
+{p}/s/i/trim/!go      : perform trim
+{p}/s/i/!data
+
+# voltage
+{p}/s/v/ctrl          : on, [off]
+{p}/s/v/range/ctrl    : on, [off] (1-bit voltage range streaming)
+{p}/s/v/range/mode    : [auto], manual
+{p}/s/v/range/select  : 2V, [15V]
+{p}/s/v/range/!data
+{p}/s/v/trim/mode     : [off], on
+{p}/s/v/trim/!go      : perform trim
+{p}/s/v/!data
+
+# power
+{p}/s/p/ctrl          : on, [off]
+{p}/s/p/!data
+
+# UTC time to sample id
+{p}/s/utc/ctrl        : on, [off]
+{p}/s/utc/!data       : int64_t utc, uint64_t sample_id
+
+# General-purpose inputs & outputs
+{p}/c/gpio/vref       : [external], 3v3
+
+# General-purpose inputs (0-3, trigger_in=31)
+{p}/s/gpi/{N}/ctrl    : on, [off]
+{p}/s/gpi/{N}/!data
+{p}/s/gpi/+/!req      : request !value
+{p}/s/gpi/+/!value    : u32 bitmap
+
+# UART
+{p}/s/uart/{N}/ctrl   : on, [off]
+{p}/s/uart/{N}/baud   : baudrate (always N81) [115200]
+{p}/s/uart/{N}/gpi    : gpi for rx [0]  0-31
+{p}/s/uart/{N}/!data
+{p}/s/uart/{N}/!tx    : transmit bytes
+
+# General purpose output (0, 1, trigger_out=31)
+{p}/s/gpo/{N}/ctrl    : manual, triggerN, uartN, patterns?
+{p}/s/gpo/+/!value    : u32 bitmap
+{p}/s/gpo/+/!set      : u32 bitmap
+{p}/s/gpo/+/!clr      : u32 bitmap
+
+# ADC raw data
+{p}/s/adc/{N}/ctrl      : on, [off]
+{p}/s/adc/{N}/!data
+
+# Trigger configuration - initially 2 to support stream start/stop, trigger_out on/off
+{p}/s/trigger/{N}/ctrl  : on, [off]
+ todo
+ condition:
+    finite state machine states: 4 each?
+    edge conditions
+        AND/OR/XOR combinations with optional NOT from detect
+        timeout
+ state enter action:
+    streaming: on/off/nochange for i,v,p,gpi,i,uart
+    output: on/off/nochange for gpo, trigger_out
+
+{p}/s/detect/{N}/... - initially 16?, 6 cycles each @ 1 Msps
+ signal:
+    source: [i, v, p]
+    threshold: type rising/falling, value
+    level: type above/below, value, duration
+    pulse: type high/low, threshold enter & exit, duration min & max
+ gpi / trigger_in:
+    source: [0, 1, 2, 3, trigger_in]
+    threshold: high/low
+    level: type high/low, duration
+    pulse: type high/low, duration min & max
+ software trigger: {p}/s/detect/{N}/!sw
+
+{p}/s/stream/ctrl       : off, on - global control for all !data streams.
+{p}/s/stream/!data      : provides pointer to stream_buffer
+
+
+
+# Soft fuse configuration todo

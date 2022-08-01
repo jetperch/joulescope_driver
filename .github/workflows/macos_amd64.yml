@@ -1,0 +1,62 @@
+# Copyright 2021-2022 Jetperch LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GitHub actions
+# See documentation: https://docs.github.com/en/actions
+# CMake example: https://github.com/Mizux/cmake-cpp/blob/main/.github/workflows/amd64_windows.yml
+
+name: macOS amd64
+on: [push, pull_request, release]
+
+concurrency:
+  group: macos-amd64
+  cancel-in-progress: false
+
+jobs:
+  build-macos-amd64:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@v2
+
+      - name: Configure build using CMake
+        run: cmake -S . -B cmake_build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build native
+        run: cmake --build cmake_build
+
+      - name: Run native tests
+        run: cmake --build cmake_build --target test
+
+      - name: Install python dependencies
+        run: pip3 install -U -r requirements.txt
+
+      - name: Build python native
+        run: python3 setup.py build_ext --inplace
+
+      - name: Run python unit tests
+        run: python3 -m unittest
+
+      - name: Build python source package
+        run: python3 setup.py sdist
+
+      - name: Build python binary wheel package
+        run: python3 setup.py bdist_wheel
+
+      - name: Upload python packages
+        uses: actions/upload-artifact@v2
+        with:
+          name: macos_amd64
+          path: dist/*

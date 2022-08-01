@@ -1,0 +1,6 @@
+Cython
+numpy
+pyjls
+PySide6
+pyqtgraph
+wheel
