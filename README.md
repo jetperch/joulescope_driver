@@ -44,12 +44,12 @@ This project is currently under active development.  As of 2022 Aug 1,
 this project has the following known limitations:
 
 1. Only Windows support
-   a. Builds under macOS, but libusb_init returns error -99.
-   b. Linux support planned soon.
+   1. Builds under macOS, but libusb_init returns error -99.
+   2. Linux support planned soon.
 2. JS110 support not yet at feature parity to existing [pyjoulescope](https://github.com/jetperch/pyjoulescope).
-   a. No current range suppression filtering yet.
-   b. No downsampling. 
-4. Limited testing - Still a work in progress.  Not yet ready for production use.
+    1. No current range suppression filtering yet.
+    2. No downsampling. 
+3. Limited testing - Still a work in progress.  Not yet ready for production use.
 
 
 ## Building
