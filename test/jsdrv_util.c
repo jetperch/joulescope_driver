@@ -110,6 +110,7 @@ const struct command_s COMMANDS[] = {
         {"demo", on_demo, "Demonstrate streaming"},
         {"dev",  on_dev,  "Developer tools"},
         {"info", on_info, "List connected devices and display device details"},
+        {"mem_erase", on_mem_erase, "Erase memory region"},
         {"mem_read", on_mem_read, "Read memory region"},
         {"scan", on_scan, "List connected devices"},
         {"set",  on_set,  "Set parameters"},
