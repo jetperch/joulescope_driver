@@ -497,7 +497,7 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         return rc;
     }
 
-    d->stream_in_port_enable = (1 << 0) | (1 << 1);  // always enable ports 0 and 1
+    d->stream_in_port_enable = 0x000f;  // always enable ports 0, 1, 2, 3
     rc = jsdrvb_bulk_in_stream_open(d);
     if (rc) {
         d->stream_in_port_enable = 0;
@@ -576,6 +576,17 @@ static int32_t mem_complete(struct dev_s * d, int32_t status) {
     if (JS220_PORT3_OP_NONE == d->mem_hdr.op) {
         return status;
     }
+
+    if ((0 == status) && (JS220_PORT3_OP_READ_REQ == d->mem_hdr.op)) {
+        struct jsdrv_topic_s topic;
+        jsdrv_topic_set(&topic, d->mem_topic.topic);
+        jsdrv_topic_remove(&topic);
+        jsdrv_topic_append(&topic, "!rdata");
+        JSDRV_LOGI("%s with %d bytes", topic.topic, d->mem_hdr.length);
+        struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, topic.topic, &jsdrv_union_bin(d->mem_data, d->mem_hdr.length));
+        jsdrvp_backend_send(d->context, m);
+    }
+
     jsdrv_topic_suffix_add(&d->mem_topic, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
     m->value = jsdrv_union_i32(status);
@@ -612,6 +623,7 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         table = MEM_S;
         table_u8 = MEM_S_U8;
     } else {
+        JSDRV_LOGW("invalid mem region chk1: %s", topic);
         return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
     }
 
@@ -625,17 +637,18 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     if (*t == '/') {
         *t++ = 0;
     } else {
+        JSDRV_LOGW("invalid mem region chk2: %s", topic);
         return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
     }
     char * mem_cmd_str = t;
 
     int idx = 0;
     if (jsdrv_cstr_to_index(region_str, table, &idx)) {
-        JSDRV_LOGW("Invalid mem region: %s", msg->topic);
+        JSDRV_LOGW("Invalid mem region chk3: %s", msg->topic);
         return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
     }
 
-    struct jsdrvp_msg_s * msg_bk = bulk_out_factory(d, 3, JS220_PAYLOAD_SIZE_MAX);
+    struct jsdrvp_msg_s * msg_bk = bulk_out_factory(d, 3, sizeof(struct js220_port3_header_s));
     struct js220_port3_msg_s * m = (struct js220_port3_msg_s *) msg_bk->value.value.bin;
     memset(&m->hdr, 0, sizeof(m->hdr));
     m->hdr.region = table_u8[idx];
@@ -643,6 +656,8 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         m->hdr.op = JS220_PORT3_OP_ERASE;
     } else if (0 == strcmp("!write", mem_cmd_str)) {
         if (msg->value.size > MEM_SIZE_MAX) {
+            JSDRV_LOGW("write size too big: %d > %d", (int) msg->value.size, (int) MEM_SIZE_MAX);
+            --d->out_frame_id;
             jsdrvp_msg_free(d->context, msg_bk);
             return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
         }
@@ -651,14 +666,22 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         d->mem_data = jsdrv_alloc(msg->value.size);
         memcpy(d->mem_data, msg->value.value.bin, msg->value.size);
     } else if (0 == strcmp("!read", mem_cmd_str)) {
-        d->mem_data = jsdrv_alloc(MEM_SIZE_MAX);
+        int32_t sz = MEM_SIZE_MAX;
+        jsdrv_union_as_type(&msg->value, JSDRV_UNION_U32);
+        if (msg->value.value.u32) {
+            sz = msg->value.value.u32;
+        }
+        d->mem_data = jsdrv_alloc(sz);
         m->hdr.op = JS220_PORT3_OP_READ_REQ;
+        m->hdr.length = sz;
     } else {
+        JSDRV_LOGW("invalid mem op: %s", mem_cmd_str);
+        --d->out_frame_id;
         jsdrvp_msg_free(d->context, msg_bk);
         return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
     }
     d->mem_hdr = m->hdr;
-    JSDRV_LOGI("mem cmd: region=%s, op=%s, length=%ul", region_str, mem_cmd_str, d->mem_hdr.length);
+    JSDRV_LOGI("mem cmd: region=%s, op=%s, length=%d", region_str, mem_cmd_str, (int) d->mem_hdr.length);
     msg_queue_push(d->ll.cmd_q, msg_bk);
 
     return 0;
@@ -704,7 +727,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     } else if ((topic[0] == 'h') && (topic[1] == '/')) {
         JSDRV_LOGI("handle_cmd local %s", topic);
         // handle any host-side parameters here.
-        if (jsdrv_cstr_starts_with(topic + 2, "mem/")) {
+        if (jsdrv_cstr_starts_with(topic, "h/mem/")) {
             int32_t rc = handle_cmd_mem(d, msg);
         } else if (0 == strcmp("h/!reset", topic)) {   // value=target
             JSDRV_LOGE("%s not yet supported", topic);  // todo
@@ -932,32 +955,32 @@ static void mem_write_next(struct dev_s * d, uint32_t last_offset) {
     }
 }
 
-static void mem_handle_read_data(struct dev_s * d, struct js220_port3_msg_s * msg) {
-    struct jsdrvp_msg_s * msg_bk = bulk_out_factory(d, 3, JS220_PAYLOAD_SIZE_MAX);
-    struct js220_port3_msg_s * m = (struct js220_port3_msg_s *) msg_bk->value.value.bin;
-    m->hdr = msg->hdr;
-    if (msg->hdr.offset != d->mem_offset_valid) {
-        JSDRV_LOGW("read_data expected offset %lu, received %lu", d->mem_offset_valid, msg->hdr.offset);
-        m->hdr.status = JSDRV_ERROR_SEQUENCE;
-    } else if (msg->hdr.length > JS220_PORT3_DATA_SIZE_MAX) {
-        JSDRV_LOGW("read_data length to long: %lu", msg->hdr.length);
-        m->hdr.status = JSDRV_ERROR_PARAMETER_INVALID;
-    } else {
-        uint32_t sz = d->mem_hdr.length - d->mem_offset_valid;
-        if (sz > msg->hdr.length) {
-            sz = msg->hdr.length;
-        } else if (sz != msg->hdr.length) {
-            JSDRV_LOGI("read size mismatch");
-        }
-        memcpy(d->mem_data + d->mem_offset_valid, msg->data, sz);
-        d->mem_offset_valid += sz;
+static void mem_status(struct dev_s * d, uint8_t status) {
+    if (0 == d->mem_hdr.status) {
+        d->mem_hdr.status = status;
     }
-    m->hdr.arg = m->hdr.op;
-    m->hdr.op = JS220_PORT3_OP_ACK;
-    msg_queue_push(d->ll.cmd_q, msg_bk);
+}
 
-    if (d->mem_offset_valid >= d->mem_hdr.length) {
-        mem_complete(d, 0);
+static void mem_handle_read_data(struct dev_s * d, struct js220_port3_msg_s * msg) {
+    if (msg->hdr.offset != d->mem_offset_valid) {
+        JSDRV_LOGW("read_data expected offset %d, received %d", (int) d->mem_offset_valid, (int) msg->hdr.offset);
+        mem_status(d, JSDRV_ERROR_SEQUENCE);
+    } else if (msg->hdr.length > JS220_PORT3_DATA_SIZE_MAX) {
+        JSDRV_LOGW("read_data length to long: %d", (int) msg->hdr.length);
+        mem_status(d, JSDRV_ERROR_PARAMETER_INVALID);
+    } else {
+        JSDRV_LOGI("mem_read_data offset=%d, sz=%d", (int) d->mem_offset_valid, (int) msg->hdr.length);
+        uint32_t sz_remaining = d->mem_hdr.length - d->mem_offset_valid;
+        uint32_t sz = msg->hdr.length;
+        if (sz > sz_remaining) {
+            sz = sz_remaining;
+        }
+        if (sz) {
+            memcpy(d->mem_data + d->mem_offset_valid, msg->data, sz);
+            d->mem_offset_valid += sz;
+        } else {
+            JSDRV_LOGW("mem_read_data ignore extra data: offset=%d, sz=%d", (int) d->mem_offset_valid, (int) msg->hdr.length);
+        }
     }
 }
 
@@ -965,6 +988,7 @@ static void handle_stream_in_mem(struct dev_s * d, uint32_t * p_u32, uint16_t si
     (void) d;
     (void) p_u32;
     (void) size;
+    size += sizeof(union js220_frame_hdr_u);  // excluded over USB
     size_t hdr_size = sizeof(union js220_frame_hdr_u) + sizeof(struct js220_port3_header_s);
     if (size < hdr_size) {
         JSDRV_LOGE("invalid in mem frame, too small");
@@ -972,34 +996,44 @@ static void handle_stream_in_mem(struct dev_s * d, uint32_t * p_u32, uint16_t si
     }
     struct js220_port3_msg_s * msg = (struct js220_port3_msg_s *) p_u32;
     if (size < (hdr_size + msg->hdr.length)) {
-        JSDRV_LOGE("truncated in mem frame");
+        JSDRV_LOGE("truncated in mem frame: %d < %d", size, (hdr_size + msg->hdr.length));
     }
 
     if ((msg->hdr.op == JS220_PORT3_OP_ACK) && (d->mem_hdr.op == msg->hdr.arg)) {
-        if (msg->hdr.status) {
-            mem_complete(d, msg->hdr.status);
-            return;
+        JSDRV_LOGI("in_mem ack=%d, op=%d, status=%d",
+                   (int) msg->hdr.op, (int) msg->hdr.arg, (int) msg->hdr.status);
+        uint8_t status = d->mem_hdr.status;
+        if (0 == status) {
+            status = msg->hdr.status;
         }
-        switch (msg->hdr.op) {
-            case JS220_PORT3_OP_ERASE: mem_complete(d, msg->hdr.status); break;
+
+        switch (msg->hdr.arg) {
+            case JS220_PORT3_OP_ERASE: mem_complete(d, status); break;
             case JS220_PORT3_OP_WRITE_START:
-                d->mem_hdr.op = JS220_PORT3_OP_WRITE_DATA;
-                mem_write_next(d, 0);
+                if (status) {
+                    mem_complete(d, status);
+                } else {
+                    d->mem_hdr.op = JS220_PORT3_OP_WRITE_DATA;
+                    mem_write_next(d, 0);
+                }
                 break;
             case JS220_PORT3_OP_WRITE_DATA:
-                mem_write_next(d, d->mem_hdr.length);
+                if (status) {
+                    mem_complete(d, status);
+                } else {
+                    mem_write_next(d, d->mem_hdr.length);
+                }
                 break;
-            case JS220_PORT3_OP_WRITE_FINALIZE: mem_complete(d, msg->hdr.status); break;
+            case JS220_PORT3_OP_WRITE_FINALIZE: mem_complete(d, status); break;
             case JS220_PORT3_OP_READ_REQ:
-                d->mem_hdr.op = JS220_PORT3_OP_READ_DATA;
-                break;
-            case JS220_PORT3_OP_READ_DATA:
-                mem_handle_read_data(d, msg);
+                d->mem_hdr.length = d->mem_offset_valid;  // truncate as needed
+                mem_complete(d, status);
                 break;
             default:
+                JSDRV_LOGW("unsupported ack: %d", (int) msg->hdr.arg);
                 break;
         }
-    } else if ((msg->hdr.op == JS220_PORT3_OP_READ_DATA) && (d->mem_hdr.op == msg->hdr.op)) {
+    } else if ((msg->hdr.op == JS220_PORT3_OP_READ_DATA) && (d->mem_hdr.op == JS220_PORT3_OP_READ_REQ)) {
         mem_handle_read_data(d, msg);
     } else {
         JSDRV_LOGW("mem in op %d, received %d", d->mem_hdr.op, msg->hdr.op);
@@ -1021,12 +1055,12 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
     } else if (hdr.h.port_id >= 16U) {
         handle_stream_in_port(d, hdr.h.port_id, p_u32 + 1, hdr.h.length);
     } else {
-        JSDRV_LOGI("stream in port %d", hdr.h.port_id);
+        JSDRV_LOGI("stream in: port=%d, length=%d", hdr.h.port_id, hdr.h.length);
         switch ((uint8_t) hdr.h.port_id) {
             case 0: handle_stream_in_port0(d, p_u32 + 1, hdr.h.length); break;
             case 1: handle_stream_in_pubsub(d, p_u32 + 1, hdr.h.length); break;
             case 2: handle_stream_in_logging(d, p_u32 + 1, hdr.h.length); break;
-            case 3: handle_stream_in_mem(d, p_u32 + 1, hdr.h.length); break;
+            case 3: handle_stream_in_mem(d, p_u32, hdr.h.length); break;
             default: break; // unsupported, discard
         }
     }

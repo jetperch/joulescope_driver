@@ -113,6 +113,28 @@ static void test_suffix_remove(void **state) {
     }
 }
 
+static void test_remove(void **state) {
+    SETUP();
+
+    jsdrv_topic_set(&t, "hello/there/world");
+    assert_int_equal(6, jsdrv_topic_remove(&t));
+    assert_string_equal("hello/there", t.topic);
+
+    jsdrv_topic_set(&t, "hello/there/world/");
+    assert_int_equal(7, jsdrv_topic_remove(&t));
+    assert_string_equal("hello/there", t.topic);
+
+    jsdrv_topic_set(&t, "0");
+    assert_int_equal(1, jsdrv_topic_remove(&t));
+    assert_string_equal("", t.topic);
+
+    jsdrv_topic_set(&t, "/");
+    assert_int_equal(1, jsdrv_topic_remove(&t));
+    assert_string_equal("", t.topic);
+}
+
+JSDRV_API int32_t jsdrv_topic_remove(struct jsdrv_topic_s * topic);
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_append),
@@ -121,6 +143,7 @@ int main(void) {
             cmocka_unit_test(test_set),
             cmocka_unit_test(test_suffix_add),
             cmocka_unit_test(test_suffix_remove),
+            cmocka_unit_test(test_remove),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

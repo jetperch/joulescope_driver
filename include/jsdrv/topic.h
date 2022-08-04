@@ -72,12 +72,25 @@ JSDRV_API void jsdrv_topic_truncate(struct jsdrv_topic_s * topic, uint8_t length
  *
  * @param[inout] topic The topic structure, which is modified in place.
  * @param subtopic The subtopic string to add.
- * @see
+ * @see jsdrv_topic_remove
  *
  * This function intelligently adds the '/' separator.  If the topic
  * does not already end with '/', it will be inserted first.
  */
 JSDRV_API void jsdrv_topic_append(struct jsdrv_topic_s * topic, const char * subtopic);
+
+/**
+ * @brief Remove a subtopic from the end of a topic structure.
+ *
+ * @param[inout] topic The topic structure, which is modified in place.
+ * @return The number of characters removed.
+ * @see jsdrv_topic_append
+ *
+ * This function intelligently removes the '/' separator.  If the topic
+ * already ends with '/', then this it is ignored.  This function then
+ * removes the "/subtopic".  The resulting topic does NOT end in '/'.
+ */
+JSDRV_API int32_t jsdrv_topic_remove(struct jsdrv_topic_s * topic);
 
 /**
  * @brief Set the topic to the provided value.

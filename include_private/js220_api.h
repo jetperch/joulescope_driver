@@ -265,7 +265,16 @@ struct js220_port3_header_s {
     uint8_t status;     ///< 0 or error code.
     uint8_t arg;        ///< The u8 argument.  Set to 0 if unused.
     uint32_t offset;
-    uint32_t length;    ///< Length of data in bytes
+
+    /**
+     * @brief Length of data in bytes
+     *
+     * This length is only for the data[] field, and it excludes
+     * the header bytes.  For JS220_PORT3_OP_READ_REQ, the
+     * length of data[] is zero and this field specifies the
+     * desired maximum read length.
+     */
+    uint32_t length;
 };
 
 #define JS220_PORT3_BUFFER_SIZE (2048U)
