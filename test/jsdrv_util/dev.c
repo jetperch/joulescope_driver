@@ -16,7 +16,12 @@
 
 #include "jsdrv_util_prv.h"
 #include <stdio.h>
+#include <string.h>
 
+static int usage() {
+    printf("usage: jsdrv_util dev [--device {device_path}]} [--reset {app|update1|update2}]\n");
+    return 1;
+}
 
 static void on_pub(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     struct app_s * self = (struct app_s *) user_data;
@@ -27,13 +32,48 @@ static void on_pub(void * user_data, const char * topic, const struct jsdrv_unio
 }
 
 int on_dev(struct app_s * self, int argc, char * argv[]) {
+    char * device = NULL;
+    char * reset = NULL;
     printf("CAUTION: developer tools - not intended for normal operation!\n");
+
     while (argc) {
-        printf("usage: jsdrv_util dev\n");
-        return 1;
+        if (argv[0][0] != '-') {
+            return usage();
+        } else if (0 == strcmp(argv[0], "--device")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            device = argv[0];
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--reset")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            reset = argv[0];
+            ARG_CONSUME();
+        } else if ((0 == strcmp(argv[0], "--verbose")) || (0 == strcmp(argv[0], "-v"))) {
+            self->verbose++;
+            ARG_CONSUME();
+        } else {
+            return usage();
+        }
     }
 
-    jsdrv_subscribe(self->context, "@", JSDRV_SFLAG_PUB, on_pub, self, 1000);
+    ROE(app_match(self, device));
 
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, self->device.topic);
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, JSDRV_MSG_OPEN);
+    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(JSDRV_DEVICE_OPEN_MODE_RESUME), JSDRV_TIMEOUT_MS_DEFAULT));
+
+    if (NULL != reset) {
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, "h/!reset");
+        ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_cstr(reset), JSDRV_TIMEOUT_MS_DEFAULT));
+    }
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, JSDRV_MSG_CLOSE);
+    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
     return 0;
 }

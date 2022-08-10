@@ -100,6 +100,16 @@ static const char * hw_ver_meta = "{"
     "\"flags\": [\"ro\"]"
 "}";
 
+static const char * reset_meta = "{"
+    "\"dtype\": \"u32\","
+    "\"brief\": \"Reset to a boot target.\","
+     "\"options\": ["
+         "[0, \"app\"],"
+         "[1, \"update1\"],"
+         "[2, \"update2\"]"
+     "]"
+"}";
+
 enum state_e { // See opts_state
     ST_NOT_PRESENT = 0,  //
     ST_CLOSED = 1,
@@ -403,6 +413,13 @@ static void send_to_frontend(struct dev_s * d, const char * subtopic, const stru
     jsdrvp_backend_send(d->context, m);
 }
 
+static void send_return_code_to_frontend(struct dev_s * d, const char * subtopic, int32_t rc) {
+    struct jsdrvp_msg_s * m;
+    m = jsdrvp_msg_alloc_value(d->context, "", &jsdrv_union_i32(rc));
+    tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s%c", d->ll.prefix, subtopic, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
+    jsdrvp_backend_send(d->context, m);
+}
+
 static void update_state(struct dev_s * d, enum state_e state) {
     d->state = state;
     send_to_frontend(d, "h/state", &jsdrv_union_u32_r(d->state));
@@ -688,6 +705,22 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     return 0;
 }
 
+static int32_t handle_reset(struct dev_s * d, int32_t target) {
+    // target: boot_target_e in js220_ctrl boot.h: 0=app, 1=update1, 2=update2
+    if ((target < 0) || (target > 2)) {
+        JSDRV_LOGE("reset to invalid target %d", target);
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    JSDRV_LOGI("reset to %d", target);
+    struct jsdrvp_msg_s *msg_bk = bulk_out_factory(d, 3, sizeof(struct js220_port3_header_s));
+    struct js220_port3_msg_s *m = (struct js220_port3_msg_s *) msg_bk->value.value.bin;
+    memset(&m->hdr, 0, sizeof(m->hdr));
+    m->hdr.op = JS220_PORT3_OP_BOOT;
+    m->hdr.arg = target;
+    msg_queue_push(d->ll.cmd_q, msg_bk);
+    return 0;
+}
+
 static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     bool rv = true;
     if (!msg) {
@@ -731,7 +764,11 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         if (jsdrv_cstr_starts_with(topic, "h/mem/")) {
             handle_cmd_mem(d, msg);
         } else if (0 == strcmp("h/!reset", topic)) {   // value=target
-            JSDRV_LOGE("%s not yet supported", topic);  // todo
+            int32_t rc = handle_reset(d, msg->value.value.i32);
+            send_return_code_to_frontend(d, topic, rc);
+        } else {
+            JSDRV_LOGE("topic invalid: %s", msg->topic);
+            send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
         }
     } else {
         JSDRV_LOGI("handle_cmd to device %s", topic);
@@ -837,6 +874,7 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
                      c->app_id, fw_ver_str, hw_ver_str, fpga_ver_str, prot_ver_str);
             send_to_frontend(d, "c/fw/version$", &jsdrv_union_cjson_r(fw_ver_meta));
             send_to_frontend(d, "c/hw/version$", &jsdrv_union_cjson_r(hw_ver_meta));
+            send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
             send_to_frontend(d, "c/fw/version", &jsdrv_union_u32_r(c->fw_version));
             send_to_frontend(d, "c/hw/version", &jsdrv_union_u32_r(c->hw_version));
             send_to_frontend(d, "s/fpga/version", &jsdrv_union_u32_r(c->fpga_version));
@@ -1120,10 +1158,10 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             d->do_exit = true;
             rv = false;
         } else {
-            JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
+            JSDRV_LOGE("handle_rsp unsupported %s", msg->topic);
         }
     } else {
-        JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
+        JSDRV_LOGE("handle_rsp unsupported %s", msg->topic);
     }
     jsdrvp_msg_free(d->context, msg);
     return rv;
