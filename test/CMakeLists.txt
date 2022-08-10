@@ -64,6 +64,7 @@ add_executable(jsdrv_util
         jsdrv_util/info.c
         jsdrv_util/mem_erase.c
         jsdrv_util/mem_read.c
+        jsdrv_util/mem_write.c
         jsdrv_util/scan.c
         jsdrv_util/set.c
         jsdrv_util/version.c

@@ -112,6 +112,7 @@ const struct command_s COMMANDS[] = {
         {"info", on_info, "List connected devices and display device details"},
         {"mem_erase", on_mem_erase, "Erase memory region"},
         {"mem_read", on_mem_read, "Read memory region"},
+        {"mem_write", on_mem_write, "Write memory region"},
         {"scan", on_scan, "List connected devices"},
         {"set",  on_set,  "Set parameters"},
         {"version", on_version, "Display version and platform information"},

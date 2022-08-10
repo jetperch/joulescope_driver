@@ -264,13 +264,25 @@ struct js220_port3_header_s {
     uint8_t region;     ///< The target region.
     uint8_t status;     ///< 0 or error code.
     uint8_t arg;        ///< The u8 argument.  Set to 0 if unused.
+
+    /**
+     * @brief The offset in bytes for data[].
+     *
+     * For JS220_PORT3_OP_ACK to JS220_PORT3_OP_WRITE_DATA, this
+     * holds the highest offset processed by the receiver.
+     */
     uint32_t offset;
 
     /**
      * @brief Length of data in bytes
      *
      * This length is only for the data[] field, and it excludes
-     * the header bytes.  For JS220_PORT3_OP_READ_REQ, the
+     * the header bytes.
+     *
+     * For JS220_PORT3_OP_WRITE_START, the length of data[] is zero
+     * and this field specifies the total write data length.
+     *
+     * For JS220_PORT3_OP_READ_REQ, the
      * length of data[] is zero and this field specifies the
      * desired maximum read length.
      */
