@@ -128,7 +128,13 @@ struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const s
             m->value.value.str = m->payload.str;
             break;
         case JSDRV_UNION_BIN:
-            m->value.value.bin = m->payload.bin;
+            if (m->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
+                uint8_t * ptr = jsdrv_alloc(m->value.size);
+                memcpy(ptr, m->value.value.bin, m->value.size);
+                m->value.value.bin = ptr;
+            } else {
+                m->value.value.bin = m->payload.bin;
+            }
             break;
         default:
             break;
@@ -663,11 +669,12 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
         JSDRV_LOGW("jsdrvp_msg_free but still in list");
     }
     if (msg->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
+        msg->value.flags &= ~JSDRV_UNION_FLAG_HEAP_MEMORY;
         switch (msg->value.type) {
             case JSDRV_UNION_STR:   /* intentional fall-through */
             case JSDRV_UNION_JSON:  /* intentional fall-through */
             case JSDRV_UNION_BIN:   /* intentional fall-through */
-                if (msg->value.value.bin) {
+                if (NULL != msg->value.value.bin) {
                     jsdrv_free((void *) msg->value.value.bin);
                     msg->value.value.bin = NULL;
                 }
