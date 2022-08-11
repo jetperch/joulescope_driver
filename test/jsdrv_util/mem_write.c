@@ -104,7 +104,7 @@ int on_mem_write(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
-    if ((NULL == region) || (NULL == self->filename)) {
+    if (!js220_is_mem_region_valid(region) || (NULL == self->filename)) {
         return usage();
     }
 

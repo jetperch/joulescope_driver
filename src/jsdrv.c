@@ -411,10 +411,12 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
     jsdrv_list_add_tail(&c->devices, &d->item);
 
     int rv;
-    if (0 == strcmp("js220", model))  {
+    if (0 == strcmp("js220", model)) {
         rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
     } else if (0 == strcmp("js110", model)) {
         rv = jsdrvp_ul_js110_usb_factory(&d->device, c, &msg->payload.device);
+    } else if (0 == strcmp("&js220", model))  {
+        rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
 #if UNITTEST == 0
     //} else if (0 == strcmp("emu", model)) {
     //    rv = jsdrvp_ul_emu_factory(&d->device, c, &msg->payload.device);

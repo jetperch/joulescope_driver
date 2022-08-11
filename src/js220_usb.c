@@ -413,11 +413,12 @@ static void send_to_frontend(struct dev_s * d, const char * subtopic, const stru
     jsdrvp_backend_send(d->context, m);
 }
 
-static void send_return_code_to_frontend(struct dev_s * d, const char * subtopic, int32_t rc) {
+static int32_t send_return_code_to_frontend(struct dev_s * d, const char * subtopic, int32_t rc) {
     struct jsdrvp_msg_s * m;
     m = jsdrvp_msg_alloc_value(d->context, "", &jsdrv_union_i32(rc));
     tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s%c", d->ll.prefix, subtopic, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
     jsdrvp_backend_send(d->context, m);
+    return rc;
 }
 
 static void update_state(struct dev_s * d, enum state_e state) {
@@ -632,7 +633,6 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGW("aborting ongoing memory operation");
         mem_complete(d, JSDRV_ERROR_ABORTED);
     }
-    jsdrv_topic_set(&d->mem_topic, msg->topic);
 
     if (jsdrv_cstr_starts_with(topic, "h/mem/c/")) {
         table = MEM_C;
@@ -642,7 +642,7 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         table_u8 = MEM_S_U8;
     } else {
         JSDRV_LOGW("invalid mem region chk1: %s", topic);
-        return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
+        return send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
     }
 
     // parse topic into region/command
@@ -656,16 +656,17 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         *t++ = 0;
     } else {
         JSDRV_LOGW("invalid mem region chk2: %s", topic);
-        return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
+        return send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
     }
     char * mem_cmd_str = t;
 
     int idx = 0;
     if (jsdrv_cstr_to_index(region_str, table, &idx)) {
         JSDRV_LOGW("Invalid mem region chk3: %s", msg->topic);
-        return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
+        return send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
     }
 
+    jsdrv_topic_set(&d->mem_topic, msg->topic);
     struct jsdrvp_msg_s * msg_bk = bulk_out_factory(d, 3, sizeof(struct js220_port3_header_s));
     struct js220_port3_msg_s * m = (struct js220_port3_msg_s *) msg_bk->value.value.bin;
     memset(&m->hdr, 0, sizeof(m->hdr));
@@ -696,7 +697,8 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGW("invalid mem op: %s", mem_cmd_str);
         --d->out_frame_id;
         jsdrvp_msg_free(d->context, msg_bk);
-        return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
+        jsdrv_topic_clear(&d->mem_topic);
+        return send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
     }
     d->mem_hdr = m->hdr;
     JSDRV_LOGI("mem cmd: region=%s, op=%s, length=%d", region_str, mem_cmd_str, (int) d->mem_hdr.length);

@@ -21,6 +21,37 @@
 #include <inttypes.h>
 
 
+const char * JS220_MEM_REGIONS[] = {
+        "c/app",
+        "c/upd1",
+        "c/upd2",
+        "c/storage",
+        "c/log",
+        "c/acfg",
+        "c/bcfg",
+        "c/pers",
+        "s/app1",
+        "s/app2",
+        "s/cal_t",
+        "s/cal_a",
+        "s/cal_f",
+        "s/pers",
+        NULL
+};
+
+bool js220_is_mem_region_valid(const char * region) {
+    int idx = 0;
+    if (region == NULL || jsdrv_cstr_to_index(region, JS220_MEM_REGIONS, &idx)) {
+        printf("Invalid region: %s\n", region);
+        printf("The available regions are:\n");
+        for (char const ** s = JS220_MEM_REGIONS; *s != NULL; ++s) {
+            printf("    %s\n", *s);
+        }
+        return false;
+    }
+    return true;
+}
+
 static int usage() {
     printf("usage: jsdrv_util mem_read [--device {device_path}] {region} [--size {sz}] [--out {file}]\n");
     return 1;
@@ -89,7 +120,7 @@ int on_mem_read(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
-    if (NULL == region) {
+    if (!js220_is_mem_region_valid(region)) {
         return usage();
     }
 

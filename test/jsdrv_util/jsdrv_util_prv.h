@@ -56,6 +56,8 @@ extern volatile bool quit_;
 int app_initialize(struct app_s * self);
 int32_t app_scan(struct app_s * self);
 
+bool js220_is_mem_region_valid(const char * region);
+
 /**
  * @brief Match a specified device.
  *
