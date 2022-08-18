@@ -257,6 +257,7 @@ enum js220_port3_region_e {
     JS220_PORT3_REGION_SENSOR_CAL_ACTIVE        = 0x84, // ewr
     JS220_PORT3_REGION_SENSOR_CAL_FACTORY       = 0x85, // r
     JS220_PORT3_REGION_SENSOR_PERSONALITY       = 0x86, // r (first 256 bytes only)
+    JS220_PORT3_REGION_SENSOR_ID                = 0x8f, // r
 };
 
 struct js220_port3_header_s {

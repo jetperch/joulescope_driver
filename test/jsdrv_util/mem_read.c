@@ -36,6 +36,7 @@ const char * JS220_MEM_REGIONS[] = {
         "s/cal_a",
         "s/cal_f",
         "s/pers",
+        "s/id",
         NULL
 };
 

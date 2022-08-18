@@ -195,7 +195,6 @@ struct dev_s {
 };
 
 const char * MEM_C[] = {"app", "upd1", "upd2", "storage", "log", "acfg", "bcfg", "pers", NULL};
-
 const uint8_t MEM_C_U8[] = {
         JS220_PORT3_REGION_CTRL_APP,
         JS220_PORT3_REGION_CTRL_UPDATER1,
@@ -205,10 +204,11 @@ const uint8_t MEM_C_U8[] = {
         JS220_PORT3_REGION_CTRL_APP_CONFIG,
         JS220_PORT3_REGION_CTRL_BOOTLOADER_CONFIG,
         JS220_PORT3_REGION_CTRL_PERSONALITY,
+        JS220_PORT3_REGION_CTRL_UNKNOWN,
 };
+JSDRV_STATIC_ASSERT(JSDRV_ARRAY_SIZE(MEM_C) == JSDRV_ARRAY_SIZE(MEM_C_U8), mem_c_arrays);
 
-const char * MEM_S[] = {"app1", "app2", "cal_t", "cal_a", "cal_f", "pers", NULL};
-
+const char * MEM_S[] = {"app1", "app2", "cal_t", "cal_a", "cal_f", "pers", "id", NULL};
 const uint8_t MEM_S_U8[] = {
         JS220_PORT3_REGION_SENSOR_APP1,
         JS220_PORT3_REGION_SENSOR_APP2,
@@ -216,7 +216,10 @@ const uint8_t MEM_S_U8[] = {
         JS220_PORT3_REGION_SENSOR_CAL_ACTIVE,
         JS220_PORT3_REGION_SENSOR_CAL_FACTORY,
         JS220_PORT3_REGION_SENSOR_PERSONALITY,
+        JS220_PORT3_REGION_SENSOR_ID,
+        JS220_PORT3_REGION_SENSOR_UNKNOWN,
 };
+JSDRV_STATIC_ASSERT(JSDRV_ARRAY_SIZE(MEM_S) == JSDRV_ARRAY_SIZE(MEM_S_U8), mem_s_arrays);
 
 static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg);
 
