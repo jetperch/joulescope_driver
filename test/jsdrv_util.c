@@ -113,8 +113,10 @@ const struct command_s COMMANDS[] = {
         {"mem_erase", on_mem_erase, "Erase memory region"},
         {"mem_read", on_mem_read, "Read memory region"},
         {"mem_write", on_mem_write, "Write memory region"},
+        {"reset", on_reset, "Reset to target"},
         {"scan", on_scan, "List connected devices"},
         {"set",  on_set,  "Set parameters"},
+        {"statistics",  on_statistics,  "Display statistics from all connected devices"},
         {"version", on_version, "Display version and platform information"},
         {"help", on_help, "Display help"},
         {NULL, NULL, NULL}

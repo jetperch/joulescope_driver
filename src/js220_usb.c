@@ -17,6 +17,7 @@
 #define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
 #include "jsdrv.h"
 #include "js220_api.h"
+#include "jsdrv_prv/js220_stats.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/frontend.h"
@@ -154,7 +155,7 @@ struct field_def_s PORT_MAP[] = {
         FIELD("s/gpi/3/ctrl",   "s/gpi/3/!data",   GPI,         3, UINT,  0, 1),  // 11
         FIELD("s/gpi/255/ctrl", "s/gpi/255/!data", GPI,       255, UINT,  0, 1),  // 12 trigger
         FIELD("s/uart/0/ctrl",  "s/uart/0/!data",  UART,        0, UINT,  3, 1),  // 13 8-bit only
-        FIELD(NULL, NULL, UNDEFINED,   0, UINT,   8, 0),  // 14 reserved
+        FIELD("s/stats/ctrl",   "s/stats/value",   UNDEFINED,   0, UNDEFINED,   0, 0),  // 14 js220_statistics_raw_s
         FIELD(NULL, NULL, UNDEFINED,   0, UINT,   8, 0),  // 15 reserved and unavailable
 };
 
@@ -534,6 +535,8 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         JSDRV_RETURN_ON_ERROR(ping_wait(d, 1));
         JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "?", &jsdrv_union_null()));
         JSDRV_RETURN_ON_ERROR(ping_wait(d, 2));
+    } else {
+        send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
     }
 
     JSDRV_LOGI("open complete");
@@ -840,7 +843,22 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         port->msg_in = NULL;
         jsdrvp_backend_send(d->context, m);
     }
+}
 
+static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t size) {
+    if (size != sizeof(struct js220_statistics_raw_s)) {
+        JSDRV_LOGW("statistics size mismatch");
+        return;
+    }
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
+    tfp_snprintf(m->topic, sizeof(m->topic), "%s/s/stats/value", d->ll.prefix);
+    struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
+    m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
+    m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
+    struct js220_statistics_raw_s * src = (struct js220_statistics_raw_s *) p_u32;
+    if (0 == js220_stats_convert(src, dst)) {
+        jsdrvp_backend_send(d->context, m);
+    }
 }
 
 static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t size) {
@@ -1122,7 +1140,11 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
     if ((d->stream_in_port_enable & (1U << hdr.h.port_id)) == 0U) {
         JSDRV_LOGW("stream in ignore on inactive port %d", hdr.h.port_id);
     } else if (hdr.h.port_id >= 16U) {
-        handle_stream_in_port(d, hdr.h.port_id, p_u32 + 1, hdr.h.length);
+        if (hdr.h.port_id == (16U + 14U)) {
+            handle_statistics_in(d, p_u32 + 1, hdr.h.length);
+        } else {
+            handle_stream_in_port(d, hdr.h.port_id, p_u32 + 1, hdr.h.length);
+        }
     } else {
         JSDRV_LOGI("stream in: port=%d, length=%d", hdr.h.port_id, hdr.h.length);
         switch ((uint8_t) hdr.h.port_id) {

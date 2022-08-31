@@ -261,10 +261,14 @@ static int8_t subscriber_call(struct jsdrv_pubsub_subscriber_s * s, struct jsdrv
     } else if (s->is_internal) {
         rc = s->internal_fn(s->user_data, msg);
     } else {
-        if ((msg->value.app == JSDRV_PAYLOAD_TYPE_UNION) || (msg->value.app == JSDRV_PAYLOAD_TYPE_STREAM)) {
+        if ((msg->value.app == JSDRV_PAYLOAD_TYPE_UNION)
+                || (msg->value.app == JSDRV_PAYLOAD_TYPE_STREAM)
+                || (msg->value.app == JSDRV_PAYLOAD_TYPE_STATISTICS)) {
             s->external_fn(s->user_data, msg->topic, &msg->value);
         } else if ((msg->value.type == JSDRV_UNION_BIN) && (msg->value.app == JSDRV_PAYLOAD_TYPE_DEVICE)) {
             s->external_fn(s->user_data, msg->topic, &jsdrv_union_str(msg->payload.device.prefix));
+        } else {
+            JSDRV_LOGW("unsupported value.app type: %d", (int) msg->value.app);
         }
     }
 

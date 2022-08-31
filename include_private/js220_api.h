@@ -300,4 +300,43 @@ struct js220_port3_msg_s {
     uint8_t data[JS220_PORT3_DATA_SIZE_MAX];
 };
 
+typedef union js220_i128_u {
+    int64_t i64[2];
+    uint64_t u64[2];
+    uint32_t u32[4];
+    uint16_t u16[8];
+    uint8_t u8[16];
+} js220_i128;
+
+struct js220_statistics_raw_s {
+    /**
+     * @brief The statistics message identifier.
+     *
+     * 31:      raw = 1, js220_statistics_api_s uses 0.
+     * 30:28    version, only 1 currently supported
+     * 27:24    The decimate factor from sample_id to calculated samples = 2.
+     * 23:0     block_sample_count - in decimated samples
+     */
+    uint32_t header;
+    uint32_t sample_freq;       ///< The samples per second for *_sample_id (undecimated)
+    uint64_t block_sample_id;   ///< First sample in this block's statistics computation.
+    uint64_t accum_sample_id;   ///< First sample in the integration statistics computation
+    int64_t i_x1;               ///< sum(x)         33Q31 (25Q31 used)
+    int64_t i_min;              ///<                33Q31 (5Q31 used)
+    int64_t i_max;              ///<                33Q31 (5Q31 used)
+    int64_t v_x1;               ///< sum(x)         33Q31 (25Q31 used)
+    int64_t v_min;              ///<                33Q31 (5Q31 used)
+    int64_t v_max;              ///<                33Q31 (5Q31 used)
+    int64_t p_x1;               ///< sum(x)         33Q31 (29Q31 used)
+    int64_t p_min;              ///<                33Q31 (9Q27 used)
+    int64_t p_max;              ///<                33Q31 (9Q27 used)
+    js220_i128 i_x2;            ///< sum(x*x)       66Q62 (29Q62 used)
+    js220_i128 i_int;           ///< sum(i)         97Q31 (53Q31 used)
+    js220_i128 v_x2;            ///< sum(x*x)       66Q62 (29Q62 used)
+    js220_i128 v_int;           ///< reserved = 0
+    js220_i128 p_x2;            ///< sum(x*x)       74Q54 (37Q54 used)
+    js220_i128 p_int;           ///< sum(p)         97Q31 (58Q31 used)
+};
+
+
 #endif  /* JS220_HOST_API_H_ */

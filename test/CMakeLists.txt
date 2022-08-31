@@ -31,6 +31,7 @@ target_link_libraries(dbc_test cmocka)
 
 ADD_CMOCKA_TEST(error_code_test)
 ADD_CMOCKA_TEST(js110_cal_test)
+ADD_CMOCKA_TEST(js220_stats_test)
 ADD_CMOCKA_TEST(json_test)
 ADD_CMOCKA_TEST(meta_test)
 
@@ -65,8 +66,10 @@ add_executable(jsdrv_util
         jsdrv_util/mem_erase.c
         jsdrv_util/mem_read.c
         jsdrv_util/mem_write.c
+        jsdrv_util/reset.c
         jsdrv_util/scan.c
         jsdrv_util/set.c
+        jsdrv_util/statistics.c
         jsdrv_util/version.c
         )
 add_dependencies(jsdrv_util jsdrv)

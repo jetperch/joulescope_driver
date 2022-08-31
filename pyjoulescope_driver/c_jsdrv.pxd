@@ -76,6 +76,7 @@ cdef extern from "jsdrv.h":
     enum jsdrv_payload_type_e:
         JSDRV_PAYLOAD_TYPE_UNION  = 0
         JSDRV_PAYLOAD_TYPE_STREAM = 1
+        JSDRV_PAYLOAD_TYPE_STATISTICS = 2
     enum jsdrv_element_type_e:
         JSDRV_DATA_TYPE_UNDEFINED = 0
         JSDRV_DATA_TYPE_FLOAT = 1
@@ -98,6 +99,32 @@ cdef extern from "jsdrv.h":
         uint8_t element_bit_size_pow2
         uint32_t element_count
         uint8_t data[JSDRV_STREAM_PAYLOAD_LENGTH_MAX]
+    struct jsdrv_statistics_s:
+        uint8_t version
+        uint8_t rsv1_u8
+        uint8_t rsv2_u8
+        uint8_t decimate_factor
+        uint32_t block_sample_count
+        uint32_t sample_freq
+        uint32_t rsv3_u8
+        uint64_t block_sample_id
+        uint64_t accum_sample_id
+        double i_avg
+        double i_std
+        double i_min
+        double i_max
+        double v_avg
+        double v_std
+        double v_min
+        double v_max
+        double p_avg
+        double p_std
+        double p_min
+        double p_max
+        double charge_f64
+        double energy_f64
+        uint64_t charge_i128[2]
+        uint64_t energy_i128[2]
     enum jsdrv_subscribe_flag_e:
         JSDRV_SFLAG_NONE = 0                    # No flags (always 0).
         JSDRV_SFLAG_RETAIN = (1 << 0)           # Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.

@@ -51,8 +51,7 @@ class Info:
 
     def run(self, args):
         with Driver() as d:
-            devices = d.scan()
-            devices = devices.split(',')
+            devices = d.device_paths()
             if self._device_path not in devices:
                 print(f'Device {self._device_path} not found in:')
                 s = "  \n".join(devices)

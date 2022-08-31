@@ -79,6 +79,8 @@ int on_info(struct app_s * self, int argc, char * argv[]);
 int on_mem_erase(struct app_s * self, int argc, char * argv[]);
 int on_mem_read(struct app_s * self, int argc, char * argv[]);
 int on_mem_write(struct app_s * self, int argc, char * argv[]);
+int on_reset(struct app_s * self, int argc, char * argv[]);
 int on_scan(struct app_s * self, int argc, char * argv[]);
+int on_statistics(struct app_s * self, int argc, char * argv[]);
 int on_set(struct app_s * self, int argc, char * argv[]);
 int on_version(struct app_s * self, int argc, char * argv[]);
