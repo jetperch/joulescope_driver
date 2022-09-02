@@ -219,8 +219,7 @@ typedef void (*jsdrv_subscribe_fn)(void * user_data, const char * topic, const s
 enum jsdrv_payload_type_e {
     JSDRV_PAYLOAD_TYPE_UNION        = 0,    // standard jsdrv_union including string, JSON, and raw binary.
     JSDRV_PAYLOAD_TYPE_STREAM       = 1,    // bin with jsdrv_stream_signal_s
-    //JSDRV_PAYLOAD_TYPE_META         = 2,    // JSON
-    //JSDRV_PAYLOAD_TYPE_STATISTICS,  // todo
+    JSDRV_PAYLOAD_TYPE_STATISTICS   = 2,    // bin with jsdrv_statistics_s
     //JSDRV_PAYLOAD_TYPE_STATUS,      // todo
 };
 
@@ -263,6 +262,37 @@ struct jsdrv_stream_signal_s {
     uint8_t element_bit_size_pow2;          ///< The element bit size as 2 ** v
     uint32_t element_count;                 ///< size of data in elements
     uint8_t data[JSDRV_STREAM_DATA_SIZE];   ///< The channel data.
+};
+
+/**
+ * @brief The payload data structure for statistics updates.
+ */
+struct jsdrv_statistics_s {
+    uint8_t version;             ///< The version, only 1 currently supported
+    uint8_t rsv1_u8;             ///< Reserved = 0
+    uint8_t rsv2_u8;             ///< Reserved = 0
+    uint8_t decimate_factor;     ///< The decimate factor from sample_id to calculated samples = 2.
+    uint32_t block_sample_count; ///< Samples used to compute this block, in decimated samples.
+    uint32_t sample_freq;        ///< The samples per second for *_sample_id (undecimated)
+    uint32_t rsv3_u8;            ///< Reserved = 0
+    uint64_t block_sample_id;    ///< First sample in this block's statistics computation.
+    uint64_t accum_sample_id;    ///< First sample in the integration statistics computation.
+    double i_avg;                ///< The average current over the block.
+    double i_std;                ///< The standard deviation of current over the block.
+    double i_min;                ///< The minimum current value in the block.
+    double i_max;                ///< The maximum current value in the block.
+    double v_avg;
+    double v_std;
+    double v_min;
+    double v_max;
+    double p_avg;
+    double p_std;
+    double p_min;
+    double p_max;
+    double charge_f64;           ///< The charge (integral of current) from accum_sample_id as a 64-bit float.
+    double energy_f64;           ///< The energy (integral of power) from accum_sample_id as a 64-bit float.
+    uint64_t charge_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
+    uint64_t energy_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
 };
 
 /// The subscriber flags for jsdrv_subscribe().

@@ -56,6 +56,8 @@ extern volatile bool quit_;
 int app_initialize(struct app_s * self);
 int32_t app_scan(struct app_s * self);
 
+bool js220_is_mem_region_valid(const char * region);
+
 /**
  * @brief Match a specified device.
  *
@@ -74,7 +76,11 @@ int on_help(struct app_s * self, int argc, char * argv[]);
 int on_demo(struct app_s * self, int argc, char * argv[]);
 int on_dev(struct app_s * self, int argc, char * argv[]);
 int on_info(struct app_s * self, int argc, char * argv[]);
+int on_mem_erase(struct app_s * self, int argc, char * argv[]);
+int on_mem_read(struct app_s * self, int argc, char * argv[]);
+int on_mem_write(struct app_s * self, int argc, char * argv[]);
+int on_reset(struct app_s * self, int argc, char * argv[]);
 int on_scan(struct app_s * self, int argc, char * argv[]);
+int on_statistics(struct app_s * self, int argc, char * argv[]);
 int on_set(struct app_s * self, int argc, char * argv[]);
 int on_version(struct app_s * self, int argc, char * argv[]);
-int on_mem_read(struct app_s * self, int argc, char * argv[]);

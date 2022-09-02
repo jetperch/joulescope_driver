@@ -199,6 +199,34 @@ struct value_s {
     union jsdrv_union_inner_u range[3];
 };
 
+static void maybe_convert_str_to_type(struct value_s * s) {
+    int32_t i32 = 0;
+    uint32_t u32 = 0;
+    if (s->value->type != JSDRV_UNION_STR) {
+        return;
+    }
+    switch (s->type) {
+        case JSDRV_UNION_U8:   // intentional fall-through
+        case JSDRV_UNION_U16:  // intentional fall-through
+        case JSDRV_UNION_U32:  // intentional fall-through
+            if (!jsdrv_cstr_to_u32(s->value->value.str, &u32)) {
+                s->value->type = s->type;
+                s->value->value.u32 = u32;
+            }
+            break;
+        case JSDRV_UNION_I8:   // intentional fall-through
+        case JSDRV_UNION_I16:  // intentional fall-through
+        case JSDRV_UNION_I32:  // intentional fall-through
+            if (!jsdrv_cstr_to_i32(s->value->value.str, &i32)) {
+                s->value->type = s->type;
+                s->value->value.i32 = i32;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 static int32_t on_value(void * user_data, const struct jsdrv_union_s * token) {
     int32_t rc = 0;
     struct value_s * s = (struct value_s *) user_data;
@@ -216,6 +244,7 @@ static int32_t on_value(void * user_data, const struct jsdrv_union_s * token) {
                     }
                 } else {
                     rc = dtype_lookup(token, &s->type);
+                    maybe_convert_str_to_type(s);
                     s->state = VALUE_ST_SEARCH;
                 }
             } else if (s->state == VALUE_ST_RANGE_VAL) {

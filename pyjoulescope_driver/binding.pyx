@@ -41,6 +41,14 @@ _log_c_name = 'jsdrv'
 _log_c = logging.getLogger(_log_c_name)
 
 
+cdef object _i128_to_int(uint64_t high, uint64_t low):
+    i = int(high) << 64
+    i |= int(low)
+    if i & 0x8000_0000_0000_0000:
+        i = ((~i) & 0xffff_ffff_ffff_ffff) - 1
+    return i
+
+
 cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
     cdef c_jsdrv.jsdrv_stream_signal_s * stream;
     cdef np.npy_intp shape[1]
@@ -83,6 +91,62 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 else:
                     print('jsdrv._jsdrv_union_to_py: unsupported data type')
                     v['data'] = None
+            elif value[0].app == c_jsdrv.JSDRV_PAYLOAD_TYPE_STATISTICS:
+                stats = <c_jsdrv.jsdrv_statistics_s *> &(value[0].value.bin[0])
+                samples_full_rate = stats[0].block_sample_count * stats[0].decimate_factor
+                sample_id_end = stats[0].block_sample_id + samples_full_rate
+                t_delta = samples_full_rate / stats[0].sample_freq
+                charge = _i128_to_int(stats[0].charge_i128[1], stats[0].charge_i128[0])
+                energy = _i128_to_int(stats[0].energy_i128[1], stats[0].energy_i128[0])
+                v = {
+                    'time': {
+                        'samples': {'value': [stats[0].block_sample_id, sample_id_end], 'units': 'samples'},
+                        'delta': {'value': t_delta, 'units': 's'},
+                        'decimate_factor': {'value': stats[0].decimate_factor, 'units': 'samples'},
+                        'decimate_sample_count': {'value': stats[0].block_sample_count, 'units': 'samples'},
+                        'accum_samples': {'value': [stats[0].accum_sample_id, sample_id_end], 'units': 'samples'},
+                    },
+                    'signals': {
+                        'current': {
+                            'avg': {'value': stats[0].i_avg, 'units': 'A'},
+                            'std': {'value': stats[0].i_std, 'units': 'A'},
+                            'min': {'value': stats[0].i_min, 'units': 'A'},
+                            'max': {'value': stats[0].i_max, 'units': 'A'},
+                            'p2p': {'value': stats[0].i_max - stats[0].i_min, 'units': 'A'},
+                            '∫': {'value': stats[0].i_avg * t_delta, 'units': 'C'},
+                        },
+                        'voltage': {
+                            'avg': {'value': stats[0].v_avg, 'units': 'V'},
+                            'std': {'value': stats[0].v_std, 'units': 'V'},
+                            'min': {'value': stats[0].v_min, 'units': 'V'},
+                            'max': {'value': stats[0].v_max, 'units': 'V'},
+                            'p2p': {'value': stats[0].v_max - stats[0].v_min, 'units': 'V'},
+                        },
+                        'power': {
+                            'avg': {'value': stats[0].p_avg, 'units': 'W'},
+                            'std': {'value': stats[0].p_std, 'units': 'W'},
+                            'min': {'value': stats[0].p_min, 'units': 'W'},
+                            'max': {'value': stats[0].p_max, 'units': 'W'},
+                            'p2p': {'value': stats[0].p_max - stats[0].p_min, 'units': 'W'},
+                            '∫': {'value': stats[0].p_avg * t_delta, 'units': 'J'},
+                        },
+                    },
+                    'accumulators': {
+                        'charge': {
+                            'value': stats[0].charge_f64,
+                            'int_value': charge,
+                            'int_scale': 2 ** -31,
+                            'units': 'C',
+                        },
+                        'energy': {
+                            'value': stats[0].energy_f64,
+                            'int_value': energy,
+                            'int_scale': 2 ** -27,
+                            'units': 'J',
+                        },
+                    },
+                    'source': 'sensor',
+                }
             else:
                 v = value[0].value.bin[:value[0].size]
         elif t == c_jsdrv.JSDRV_UNION_F32:
@@ -107,8 +171,8 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
             v = value[0].value.i64
         else:
             v = None
-    except Exception:
-        print('_jsdrv_union_to_py conversion failed')
+    except Exception as ex:
+        print(f'_jsdrv_union_to_py conversion failed: {ex}')
         v = None
     return v
 
@@ -384,7 +448,7 @@ cdef class Driver:
 
         memset(&v, 0, sizeof(v))
         if isinstance(value, str):
-            py_byte_str = str.encode('utf-8')
+            py_byte_str = value.encode('utf-8')
             byte_str = py_byte_str
             v.type = c_jsdrv.JSDRV_UNION_STR
             v.value.str = &byte_str[0]
@@ -483,6 +547,17 @@ cdef class Driver:
         _handle_rc(rc, 'jsdrv_unsubscribe_all')
 
     def open(self, device_prefix, mode=None, timeout=None):
+        """Open an attached device.
+
+        :param device_prefix: The prefix name for the device.
+        :param mode: The open mode which is one of:
+            * 'defaults': Reconfigure the device for default operation.
+            * 'restore': Update our state with the current device state.
+            * 'raw': Open the device in raw mode for development or firmware update.
+            * None: equivalent to 'defaults'.
+        :param timeout: The timeout in seconds.  None uses the default timeout.
+        """
+
         cdef const uint8_t[:] topic_str
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef c_jsdrv.jsdrv_union_s v

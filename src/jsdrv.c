@@ -128,7 +128,13 @@ struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const s
             m->value.value.str = m->payload.str;
             break;
         case JSDRV_UNION_BIN:
-            m->value.value.bin = m->payload.bin;
+            if (m->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
+                uint8_t * ptr = jsdrv_alloc(m->value.size);
+                memcpy(ptr, m->value.value.bin, m->value.size);
+                m->value.value.bin = ptr;
+            } else {
+                m->value.value.bin = m->payload.bin;
+            }
             break;
         default:
             break;
@@ -141,22 +147,26 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_value(struct jsdrv_context_s * context, c
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(context);
     jsdrv_cstr_copy(m->topic, topic, sizeof(m->topic));
     m->value = *value;
+    m->value.flags &= ~JSDRV_UNION_FLAG_HEAP_MEMORY;
+
     switch (value->type) {
+        case JSDRV_UNION_JSON:  /* intentional fall-through */
+        case JSDRV_UNION_STR:
+            if (m->value.size == 0) {
+                m->value.size = (uint32_t) (strlen(value->value.str) + 1);
+            }
+            /* intentional fall-through */
         case JSDRV_UNION_BIN:
             if (value->size > sizeof(m->payload.bin)) {
-                JSDRV_LOGE("bin payload too big");
-                jsdrvp_msg_free(context, m);
-                return NULL;
+                JSDRV_LOGI("publish %s size %d using heap", topic, (int) value->size);
+                uint8_t * ptr = jsdrv_alloc(value->size);
+                memcpy(ptr, value->value.bin, value->size);
+                m->value.value.bin = ptr;
+                m->value.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
+            } else {
+                m->value.value.bin = m->payload.bin;
+                memcpy(m->payload.bin, value->value.bin, m->value.size);
             }
-            if (value->value.bin) {
-                jsdrv_memcpy(m->payload.bin, value->value.bin, value->size);
-            }
-            m->value.value.bin = m->payload.bin;
-            break;
-        case JSDRV_UNION_JSON:  /** intentional fall-through. */
-        case JSDRV_UNION_STR:
-            jsdrv_cstr_copy(m->payload.str, value->value.str, sizeof(m->payload.str));
-            m->value.value.str = m->payload.str;
             break;
         default:
             break;
@@ -401,10 +411,12 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
     jsdrv_list_add_tail(&c->devices, &d->item);
 
     int rv;
-    if (0 == strcmp("js220", model))  {
+    if (0 == strcmp("js220", model)) {
         rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
     } else if (0 == strcmp("js110", model)) {
         rv = jsdrvp_ul_js110_usb_factory(&d->device, c, &msg->payload.device);
+    } else if (0 == strcmp("&js220", model))  {
+        rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
 #if UNITTEST == 0
     //} else if (0 == strcmp("emu", model)) {
     //    rv = jsdrvp_ul_emu_factory(&d->device, c, &msg->payload.device);
@@ -659,11 +671,12 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
         JSDRV_LOGW("jsdrvp_msg_free but still in list");
     }
     if (msg->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
+        msg->value.flags &= ~JSDRV_UNION_FLAG_HEAP_MEMORY;
         switch (msg->value.type) {
             case JSDRV_UNION_STR:   /* intentional fall-through */
             case JSDRV_UNION_JSON:  /* intentional fall-through */
             case JSDRV_UNION_BIN:   /* intentional fall-through */
-                if (msg->value.value.bin) {
+                if (NULL != msg->value.value.bin) {
                     jsdrv_free((void *) msg->value.value.bin);
                     msg->value.value.bin = NULL;
                 }
@@ -733,36 +746,7 @@ static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m
 int32_t jsdrv_publish(struct jsdrv_context_s * context,
         const char * name, const struct jsdrv_union_s * value,
         uint32_t timeout_ms) {
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(context);
-    jsdrv_cstr_copy(m->topic, name, sizeof(m->topic));
-    m->value = *value;
-    m->value.flags &= ~JSDRV_UNION_FLAG_HEAP_MEMORY;
-    switch (value->type) {
-        case JSDRV_UNION_JSON:  /* intentional fall-through */
-        case JSDRV_UNION_STR:
-            if (m->value.size == 0) {
-                m->value.size = (uint32_t) (strlen(value->value.str) + 1);
-            }
-            /* intentional fall-through */
-        case JSDRV_UNION_BIN:
-            if (value->size > sizeof(m->payload.bin)) {
-                JSDRV_LOGI("publish %s size %lu using heap", name, value->size);
-                uint8_t * ptr = jsdrv_alloc(value->size);
-                if (ptr) {
-                    jsdrvp_msg_free(context, m);
-                    return JSDRV_ERROR_NOT_ENOUGH_MEMORY;
-                }
-                memcpy(ptr, value->value.bin, value->size);
-                m->value.value.bin = ptr;
-                m->value.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
-            } else {
-                m->value.value.bin = m->payload.bin;
-                memcpy(m->payload.bin, value->value.bin, m->value.size);
-            }
-            break;
-        default:
-            break;
-    }
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(context, name, value);
     return api_cmd(context, m, timeout_ms);
 }
 

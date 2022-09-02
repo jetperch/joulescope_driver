@@ -20,7 +20,12 @@ def parser_config(p):
     p.add_argument('--verbose', '-v',
                    action='store_true',
                    help='Display verbose information.')
+    p.add_argument('--open', '-o',
+                   choices=['defaults', 'restore'],
+                   default='defaults',
+                   help='The device open mode.  Defaults to "defaults".')
     p.add_argument('device_path',
+                   nargs='*',
                    help='The target device for this command.')
     return on_cmd
 
@@ -36,8 +41,8 @@ def version_to_str(version):
 
 class Info:
 
-    def __init__(self, device_path):
-        self._device_path = device_path
+    def __init__(self, device_paths):
+        self._device_paths = device_paths
         self._meta = {}
         self._values = {}
 
@@ -51,37 +56,40 @@ class Info:
 
     def run(self, args):
         with Driver() as d:
-            devices = d.scan()
-            devices = devices.split(',')
-            if self._device_path not in devices:
-                print(f'Device {self._device_path} not found in:')
-                s = "  \n".join(devices)
-                print(f'  {s}')
-                return 1
-            d.open(self._device_path)
-            fn = self._on_metadata  # use same bound method for unsubscribe
-            d.subscribe(self._device_path, 'metadata_rsp_retain', fn)
-            d.unsubscribe(self._device_path, fn)
-            fn = self._on_pub  # use same bound method for unsubscribe
-            d.subscribe(self._device_path, 'pub_retain', fn)
-            d.unsubscribe(self._device_path, fn)
-            if args.verbose:
-                print(f'{self._device_path} metadata:')
-                for key, value in self._meta.items():
-                    subtopic = key[len(self._device_path) + 1:]
-                    print(f'  {subtopic} {value}')
-                print(f'\n{self._device_path} values:')
-            for key, value in self._values.items():
-                meta = self._meta.get(key, None)
-                if meta is not None:
-                    fmt = meta.get('format', None)
-                    if fmt == 'version':
-                        value = version_to_str(value)
+            d.log_level = args.jsdrv_log_level
+            devices = d.device_paths()
+            if not len(self._device_paths):
+                self._device_paths = devices
+            for device_path in self._device_paths:
+                if device_path not in devices:
+                    print(f'Device {device_path} not found in:')
+                    s = "  \n".join(devices)
+                    print(f'  {s}')
+                    return 1
+                d.open(device_path, mode=args.open)
+                fn = self._on_metadata  # use same bound method for unsubscribe
+                d.subscribe(device_path, 'metadata_rsp_retain', fn)
+                d.unsubscribe(device_path, fn)
+                fn = self._on_pub  # use same bound method for unsubscribe
+                d.subscribe(device_path, 'pub_retain', fn)
+                d.unsubscribe(device_path, fn)
                 if args.verbose:
-                    subtopic = key[len(self._device_path) + 1:]
-                    print(f'  {subtopic} = {value}')
-                else:
-                    print(f'{key} = {value}')
+                    print(f'{device_path} metadata:')
+                    for key, value in self._meta.items():
+                        subtopic = key[len(device_path) + 1:]
+                        print(f'  {subtopic} {value}')
+                    print(f'\n{device_path} values:')
+                for key, value in self._values.items():
+                    meta = self._meta.get(key, None)
+                    if meta is not None:
+                        fmt = meta.get('format', None)
+                        if fmt == 'version':
+                            value = version_to_str(value)
+                    if args.verbose:
+                        subtopic = key[len(device_path) + 1:]
+                        print(f'  {subtopic} = {value}')
+                    else:
+                        print(f'{key} = {value}')
         return 0
 
 

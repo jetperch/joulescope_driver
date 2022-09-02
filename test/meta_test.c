@@ -32,7 +32,7 @@ const char * META1 = "{"
         "[0, \"zero\"],"
         "[1, \"one\"],"
         "[2, \"two\"],"
-        "[3, \"three\", \"3\"],"
+        "[3, \"three\", \"_3_\"],"
         "[4, \"four\"],"
         "[5, \"five\"],"
         "[6, \"six\"],"
@@ -73,9 +73,13 @@ static void test_value(void **state) {
     assert_int_equal(0, jsdrv_meta_value(META1, &value));
     assert_true(jsdrv_union_eq(&jsdrv_union_u8(3), &value));
 
-    value = cstr("3");
+    value = cstr("_3_");
     assert_int_equal(0, jsdrv_meta_value(META1, &value));
     assert_true(jsdrv_union_eq(&jsdrv_union_u8(3), &value));
+
+    value = cstr("2");
+    assert_int_equal(0, jsdrv_meta_value(META1, &value));
+    assert_true(jsdrv_union_eq(&jsdrv_union_u8(2), &value));
 
     value = cstr("__invalid__");
     assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_meta_value(META1, &value));
