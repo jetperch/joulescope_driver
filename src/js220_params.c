@@ -28,7 +28,8 @@ const struct jsdrvp_param_s js220_params[] = {
             "\"options\": ["
                 "[0, \"not present\"],"
                 "[1, \"closed\"],"
-                "[2, \"open\"]],"
+                "[2, \"opening\"],"
+                "[3, \"open\"]],"
             "\"flags\": [\"ro\", \"hide\"]"
         "}",
     },

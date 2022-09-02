@@ -257,6 +257,7 @@ enum js220_port3_region_e {
     JS220_PORT3_REGION_SENSOR_CAL_ACTIVE        = 0x84, // ewr
     JS220_PORT3_REGION_SENSOR_CAL_FACTORY       = 0x85, // r
     JS220_PORT3_REGION_SENSOR_PERSONALITY       = 0x86, // r (first 256 bytes only)
+    JS220_PORT3_REGION_SENSOR_ID                = 0x8f, // r
 };
 
 struct js220_port3_header_s {
@@ -264,8 +265,29 @@ struct js220_port3_header_s {
     uint8_t region;     ///< The target region.
     uint8_t status;     ///< 0 or error code.
     uint8_t arg;        ///< The u8 argument.  Set to 0 if unused.
+
+    /**
+     * @brief The offset in bytes for data[].
+     *
+     * For JS220_PORT3_OP_ACK to JS220_PORT3_OP_WRITE_DATA, this
+     * holds the highest offset processed by the receiver.
+     */
     uint32_t offset;
-    uint32_t length;    ///< Length of data in bytes
+
+    /**
+     * @brief Length of data in bytes
+     *
+     * This length is only for the data[] field, and it excludes
+     * the header bytes.
+     *
+     * For JS220_PORT3_OP_WRITE_START, the length of data[] is zero
+     * and this field specifies the total write data length.
+     *
+     * For JS220_PORT3_OP_READ_REQ, the
+     * length of data[] is zero and this field specifies the
+     * desired maximum read length.
+     */
+    uint32_t length;
 };
 
 #define JS220_PORT3_BUFFER_SIZE (2048U)
@@ -277,5 +299,44 @@ struct js220_port3_msg_s {
     struct js220_port3_header_s hdr;
     uint8_t data[JS220_PORT3_DATA_SIZE_MAX];
 };
+
+typedef union js220_i128_u {
+    int64_t i64[2];
+    uint64_t u64[2];
+    uint32_t u32[4];
+    uint16_t u16[8];
+    uint8_t u8[16];
+} js220_i128;
+
+struct js220_statistics_raw_s {
+    /**
+     * @brief The statistics message identifier.
+     *
+     * 31:      raw = 1, js220_statistics_api_s uses 0.
+     * 30:28    version, only 1 currently supported
+     * 27:24    The decimate factor from sample_id to calculated samples = 2.
+     * 23:0     block_sample_count - in decimated samples
+     */
+    uint32_t header;
+    uint32_t sample_freq;       ///< The samples per second for *_sample_id (undecimated)
+    uint64_t block_sample_id;   ///< First sample in this block's statistics computation.
+    uint64_t accum_sample_id;   ///< First sample in the integration statistics computation
+    int64_t i_x1;               ///< sum(x)         33Q31 (25Q31 used)
+    int64_t i_min;              ///<                33Q31 (5Q31 used)
+    int64_t i_max;              ///<                33Q31 (5Q31 used)
+    int64_t v_x1;               ///< sum(x)         33Q31 (25Q31 used)
+    int64_t v_min;              ///<                33Q31 (5Q31 used)
+    int64_t v_max;              ///<                33Q31 (5Q31 used)
+    int64_t p_x1;               ///< sum(x)         33Q31 (29Q31 used)
+    int64_t p_min;              ///<                33Q31 (9Q27 used)
+    int64_t p_max;              ///<                33Q31 (9Q27 used)
+    js220_i128 i_x2;            ///< sum(x*x)       66Q62 (29Q62 used)
+    js220_i128 i_int;           ///< sum(i)         97Q31 (53Q31 used)
+    js220_i128 v_x2;            ///< sum(x*x)       66Q62 (29Q62 used)
+    js220_i128 v_int;           ///< reserved = 0
+    js220_i128 p_x2;            ///< sum(x*x)       74Q54 (37Q54 used)
+    js220_i128 p_int;           ///< sum(p)         97Q31 (58Q31 used)
+};
+
 
 #endif  /* JS220_HOST_API_H_ */

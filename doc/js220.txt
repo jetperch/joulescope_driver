@@ -59,9 +59,9 @@ $ = metadata response
 {p}/s/!status         : periodic operational metrics
 
 {p}/s/stats/ctrl      : on, [off]
-{p}/s/stats/fs        : update frequency (2 Hz default)
+{p}/s/stats/scnt      : 1 Msps samples per block. Recommend 500000.
 {p}/s/stats/value
-{p}/s/stats/clear
+{p}/s/stats/!clear
 
 # current
 {p}/s/i/ctrl          : on, [off]

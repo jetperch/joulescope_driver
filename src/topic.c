@@ -54,6 +54,26 @@ void jsdrv_topic_append(struct jsdrv_topic_s * topic, const char * subtopic) {
     topic->length = (uint8_t) (t - topic->topic);
 }
 
+int32_t jsdrv_topic_remove(struct jsdrv_topic_s * topic) {
+    int32_t rv = 0;
+    if ((topic->length > 0) && (topic->topic[topic->length - 1] == '/')) {
+        topic->topic[topic->length - 1] = 0;
+        --topic->length;
+        ++rv;
+    }
+    while (topic->length) {
+        char * c = &topic->topic[topic->length - 1];
+        char ch = *c;
+        ++rv;
+        *c = 0;
+        --topic->length;
+        if (ch == '/') {
+            break;
+        }
+    }
+    return rv;
+}
+
 void jsdrv_topic_set(struct jsdrv_topic_s * topic, const char * str) {
     jsdrv_topic_clear(topic);
     while (*str && (topic->length < JSDRV_TOPIC_LENGTH_MAX)) {

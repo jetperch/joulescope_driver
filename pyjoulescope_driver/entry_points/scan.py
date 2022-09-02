@@ -25,6 +25,7 @@ def parser_config(p):
 
 def on_cmd(args):
     with Driver() as d:
+        d.log_level = args.jsdrv_log_level
         for device in d.device_paths():
             print(device)
     return 0

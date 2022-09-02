@@ -15,35 +15,45 @@
  */
 
 #include "jsdrv_util_prv.h"
+#include "jsdrv/cstr.h"
 #include <stdio.h>
 #include <string.h>
-#include <windows.h>
+#include <inttypes.h>
+
+
+#define ERASE_TIMEOUT_MS (30000)
 
 
 static int usage() {
-    printf("usage: jsdrv_util dev [--device {device_path}]}\n");
+    printf("usage: jsdrv_util mem_erase [--device {device_path}] [--timeout {timeout_ms}] {region}\n");
     return 1;
 }
 
-static void on_pub(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
-    struct app_s * self = (struct app_s *) user_data;
-    (void) self;
-    char buf[32];
-    jsdrv_union_value_to_str(value, buf, sizeof(buf), 1);
-    printf("on_pub(%s, %s)\n", topic, buf);
-}
-
-int on_dev(struct app_s * self, int argc, char * argv[]) {
+int on_mem_erase(struct app_s * self, int argc, char * argv[]) {
     char * device = NULL;
-    char * reset = NULL;
-    printf("CAUTION: developer tools - not intended for normal operation!\n");
+    char * region = NULL;
+    uint32_t erase_timeout_ms = ERASE_TIMEOUT_MS;
 
     while (argc) {
         if (argv[0][0] != '-') {
-            return usage();
+            if (NULL == region) {
+                region = argv[0];
+                ARG_CONSUME();
+            } else {
+                return usage();
+            }
         } else if (0 == strcmp(argv[0], "--device")) {
             ARG_CONSUME();
             ARG_REQUIRE();
+            device = argv[0];
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--timeout")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            if (jsdrv_cstr_to_u32(argv[0], &erase_timeout_ms)) {
+                printf("Could not parse timeout\n");
+                return usage();
+            }
             device = argv[0];
             ARG_CONSUME();
         } else if ((0 == strcmp(argv[0], "--verbose")) || (0 == strcmp(argv[0], "-v"))) {
@@ -54,6 +64,10 @@ int on_dev(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
+    if (!js220_is_mem_region_valid(region)) {
+        return usage();
+    }
+
     ROE(app_match(self, device));
 
     struct jsdrv_topic_s topic;
@@ -61,11 +75,16 @@ int on_dev(struct app_s * self, int argc, char * argv[]) {
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_OPEN);
-    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(JSDRV_DEVICE_OPEN_MODE_RAW), JSDRV_TIMEOUT_MS_DEFAULT));
+    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(JSDRV_DEVICE_OPEN_MODE_RESUME), JSDRV_TIMEOUT_MS_DEFAULT));
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/mem");
+    jsdrv_topic_append(&topic, region);
+    jsdrv_topic_append(&topic, "!erase");
+    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), erase_timeout_ms));
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_CLOSE);
     ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
-
     return 0;
 }

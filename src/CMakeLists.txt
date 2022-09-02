@@ -48,6 +48,7 @@ set(SUPPORT_SOURCES
         cstr.c
         devices.c
         js110_cal.c
+        js220_stats.c
         json.c
         log.c
         pubsub.c

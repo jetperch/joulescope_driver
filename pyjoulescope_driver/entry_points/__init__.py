@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import info, noise, scan, set, ui
+from . import info, scan, set_parameter
 
-__all__ = [info, noise, scan, set, ui]
+__all__ = [info, scan, set_parameter]
 """This list of available command modules.  Each module must contain a 
 parser_config(subparser) function.  The function must return the callable(args)
 that will be executed for the command."""

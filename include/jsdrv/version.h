@@ -59,7 +59,7 @@
  *
  * Changes in the patch version indicate bug fixes and improvements.
  */
-#define JSDRV_VERSION_PATCH 0
+#define JSDRV_VERSION_PATCH 2
 
 /**
  * \brief The maximum version string length.

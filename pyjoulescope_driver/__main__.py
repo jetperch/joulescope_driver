@@ -46,6 +46,14 @@ def get_parser():
         description='Joulescope driver command line tools.',
         epilog=_EPILOG,
     )
+    parser.add_argument('--log_level',
+                        choices=list(_LOG_LEVELS.keys()),
+                        help='Configure the python log level.')
+    parser.add_argument('--jsdrv_log_level',
+                        choices=['off', 'emergency', 'alert', 'critical', 'error', 'warning',
+                                 'notice', 'info', 'debug1', 'debug2', 'debug3', 'all'],
+                        default='error',
+                        help='Configure the joulescope driver native log level.')
     subparsers = parser.add_subparsers(
         dest='subparser_name',
         help='The command to execute')
@@ -66,8 +74,13 @@ def get_parser():
 
 
 def run():
-    log_level = os.environ.get('PYJOULESCOPE_DRIVER_LOG_LEVEL', 'WARNING').upper()
-    log_level = _LOG_LEVELS.get(log_level, logging.WARNING)
+    parser = get_parser()
+    args = parser.parse_args()
+    if args.log_level is not None:
+        log_level = args.log_level
+    else:
+        log_level = os.environ.get('JOULESCOPE_DEV_LOG_LEVEL', 'WARNING')
+    log_level = _LOG_LEVELS.get(log_level.upper(), logging.WARNING)
     logging.basicConfig(level=log_level,
                         format="%(levelname)s:%(asctime)s:%(filename)s:%(lineno)d:%(name)s:%(message)s")
     parser = get_parser()
