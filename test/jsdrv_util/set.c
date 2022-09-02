@@ -31,7 +31,6 @@ static int usage() {
 
 static int set_arg(struct app_s * self, char * device_path, char * arg) {
     struct jsdrv_topic_s topic;
-    char metadata[4096];
     char * value = arg;
     while (1) {
         if (!*value) {
@@ -50,62 +49,7 @@ static int set_arg(struct app_s * self, char * device_path, char * arg) {
         jsdrv_topic_append(&topic, arg);
     }
     printf("%s => %s\n", topic.topic, value);
-
-    jsdrv_topic_suffix_add(&topic, JSDRV_TOPIC_SUFFIX_METADATA_REQ);
-    struct jsdrv_union_s v = jsdrv_union_str(metadata);
-    v.size = (uint32_t) sizeof(metadata);
-    ROE(jsdrv_query(self->context, topic.topic, &v, JSDRV_TIMEOUT_MS_DEFAULT));
-    if (self->verbose) {
-        printf("metadata = %s\n", metadata);
-    }
-
-    v = jsdrv_union_u64_r(0);
-    ROE(jsdrv_meta_dtype(metadata, &v.type));
-    switch (v.type) {
-        case JSDRV_UNION_NULL: break;
-        case JSDRV_UNION_STR:  /** intentional fall-through */
-        case JSDRV_UNION_JSON:
-            v = jsdrv_union_str(value);
-            v.flags = 0;
-            break;
-        case JSDRV_UNION_BIN:  return JSDRV_ERROR_NOT_SUPPORTED;
-        case JSDRV_UNION_RSV0: return JSDRV_ERROR_NOT_SUPPORTED;
-        case JSDRV_UNION_RSV1: return JSDRV_ERROR_NOT_SUPPORTED;
-        case JSDRV_UNION_F32:  return JSDRV_ERROR_NOT_SUPPORTED;
-        case JSDRV_UNION_F64:  return JSDRV_ERROR_NOT_SUPPORTED;
-        case JSDRV_UNION_U8:
-            VALIDATE(arg, 0 == jsdrv_cstr_to_u32(value, &v.value.u32));
-            VALIDATE(arg, v.value.u32 <= UINT8_MAX);
-            break;
-        case JSDRV_UNION_U16:
-            VALIDATE(arg, 0 == jsdrv_cstr_to_u32(value, &v.value.u32));
-            VALIDATE(arg, v.value.u32 <= UINT16_MAX);
-            break;
-        case JSDRV_UNION_U32:
-            VALIDATE(arg, 0 == jsdrv_cstr_to_u32(value, &v.value.u32));
-            break;
-        case JSDRV_UNION_U64:
-            VALIDATE(arg, 0 == jsdrv_cstr_to_u32(value, &v.value.u32));
-            break;
-        case JSDRV_UNION_I8:
-            VALIDATE(arg, 0 == jsdrv_cstr_to_i32(value, &v.value.i32));
-            VALIDATE(arg, (v.value.i32 >= INT8_MIN) && (v.value.i32 <= INT8_MAX));
-            break;
-        case JSDRV_UNION_I16:
-            VALIDATE(arg, 0 == jsdrv_cstr_to_i32(value, &v.value.i32));
-            VALIDATE(arg, (v.value.i32 >= INT16_MIN) && (v.value.i32 <= INT16_MAX));
-            break;
-        case JSDRV_UNION_I32:
-            VALIDATE(arg, 0 == jsdrv_cstr_to_i32(value, &v.value.i32));
-            break;
-        case JSDRV_UNION_I64:
-            VALIDATE(arg, 0 == jsdrv_cstr_to_i32(value, &v.value.i32));
-            break;
-        default:
-            return JSDRV_ERROR_NOT_SUPPORTED;
-    }
-
-    jsdrv_topic_suffix_remove(&topic);
+    struct jsdrv_union_s v = jsdrv_union_str(value);
     int32_t rc = jsdrv_publish(self->context, topic.topic, &v, JSDRV_TIMEOUT_MS_DEFAULT);
     if (rc) {
         printf("publish failed with %d : %s\n", rc, jsdrv_error_code_description(rc));

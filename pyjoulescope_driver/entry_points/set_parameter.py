@@ -24,8 +24,12 @@ python -m pyjoulescope_driver set u/js220/000000 c/led/en=1 c/led/red=0x18 c/led
 Restore normal led operation:
 python -m pyjoulescope_driver set u/js220/000000 c/led/en=0 s/led/en=0
 
+Restore all defaults:
+python -m pyjoulescope_driver set u/js220/000000 --open defaults
+
 """
 
+NAME = 'set'
 
 def _args_validate(v):
     topic, value = v.split('=')
@@ -44,6 +48,10 @@ def parser_config(p):
     p.add_argument('--verbose', '-v',
                    action='store_true',
                    help='Display verbose information.')
+    p.add_argument('--open', '-o',
+                   choices=['defaults', 'restore'],
+                   default='restore',
+                   help='The device open mode.  Defaults to "restore".')
     p.add_argument('device_path',
                    help='The target device for this command.')
     p.add_argument('args',
@@ -55,7 +63,8 @@ def parser_config(p):
 
 def on_cmd(args):
     with Driver() as d:
-        d.open(args.device_path)
+        d.log_level = args.jsdrv_log_level
+        d.open(args.device_path, mode=args.open)
         for topic, value in args.args:
             if not topic.startswith(args.device_path):
                 topic = f'{args.device_path}/{topic}'

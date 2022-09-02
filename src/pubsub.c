@@ -557,9 +557,11 @@ static void publish_normal(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * m
     struct topic_s * t = topic_find(self, msg->topic, true);
     if (t) {
         if (t->meta) {
-            status = jsdrv_meta_value(t->meta->value.value.str, (struct jsdrv_union_s *) &msg->value);
+            status = jsdrv_meta_value(t->meta->value.value.str, &msg->value);
             if (status) {
-                JSDRV_LOGW("pubsub validate failed %s", msg->topic);
+                char buf[32];
+                jsdrv_union_value_to_str(&msg->value, buf, (uint32_t) sizeof(buf), 1);
+                JSDRV_LOGW("pubsub validate failed %s %s", msg->topic, buf);
                 local_return_code(self, msg->topic, status);
                 jsdrvp_msg_free(self->context, msg);
                 return;

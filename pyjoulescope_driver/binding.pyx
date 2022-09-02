@@ -448,7 +448,7 @@ cdef class Driver:
 
         memset(&v, 0, sizeof(v))
         if isinstance(value, str):
-            py_byte_str = str.encode('utf-8')
+            py_byte_str = value.encode('utf-8')
             byte_str = py_byte_str
             v.type = c_jsdrv.JSDRV_UNION_STR
             v.value.str = &byte_str[0]

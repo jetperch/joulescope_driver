@@ -114,8 +114,8 @@ static const char * reset_meta = "{"
 enum state_e { // See opts_state
     ST_NOT_PRESENT = 0,  //
     ST_CLOSED = 1,
-    ST_OPENING = 3,
-    ST_OPEN = 2,
+    ST_OPENING = 2,
+    ST_OPEN = 3,
 };
 
 
