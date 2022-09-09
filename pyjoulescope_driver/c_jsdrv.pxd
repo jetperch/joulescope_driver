@@ -79,9 +79,9 @@ cdef extern from "jsdrv.h":
         JSDRV_PAYLOAD_TYPE_STATISTICS = 2
     enum jsdrv_element_type_e:
         JSDRV_DATA_TYPE_UNDEFINED = 0
-        JSDRV_DATA_TYPE_FLOAT = 1
         JSDRV_DATA_TYPE_INT = 2
         JSDRV_DATA_TYPE_UINT = 3
+        JSDRV_DATA_TYPE_FLOAT = 4
     enum jsdrv_field_e:
         JSDRV_FIELD_UNDEFINED = 0
         JSDRV_FIELD_CURRENT = 1
@@ -96,7 +96,7 @@ cdef extern from "jsdrv.h":
         uint8_t field_id
         uint8_t index
         uint8_t element_type
-        uint8_t element_bit_size_pow2
+        uint8_t element_size_bits
         uint32_t element_count
         uint8_t data[JSDRV_STREAM_PAYLOAD_LENGTH_MAX]
     struct jsdrv_statistics_s:

@@ -20,7 +20,7 @@
  * @brief Joulescope driver winusb backend
  */
 
-#define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
+#define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_INFO
 #include "jsdrv.h"
 #include "jsdrv_prv/platform.h"
 #include "jsdrv_prv/assert.h"
@@ -135,11 +135,12 @@ static struct bulk_in_transfer_s * bulk_in_transfer_alloc(struct bulk_in_s * b) 
     t->bulk = b;
     memset(&t->overlapped, 0, sizeof(t->overlapped));
     t->overlapped.hEvent = b->ep.event;
+    JSDRV_LOGD3("bulk_in_transfer_alloc %p", &t->overlapped);
     return t;
 }
 
 static void bulk_in_transfer_free(struct bulk_in_transfer_s * t) {
-    JSDRV_LOGI("bulk_in_transfer_free %p", &t->overlapped);
+    JSDRV_LOGD3("bulk_in_transfer_free %p", &t->overlapped);
     jsdrv_list_add_tail(&t->bulk->transfers_free, &t->item);
 }
 
@@ -306,7 +307,7 @@ static bool bulk_out_complete_next(struct bulk_out_s * b) {
     if (!jsdrv_list_is_empty(&b->msg_pending)) {
         ULONG sz = 0;
         if (WinUsb_GetOverlappedResult(b->ep.dev->winusb, &b->overlapped, &sz, FALSE)) {
-            JSDRV_LOGI("bulk_out_process ready");
+            JSDRV_LOGD1("bulk_out_process ready");
             struct jsdrv_list_s * item = jsdrv_list_remove_head(&b->msg_pending);
             struct jsdrvp_msg_s * m = JSDRV_CONTAINER_OF(item, struct jsdrvp_msg_s, item);
             m->value = jsdrv_union_i32(0);
@@ -338,13 +339,13 @@ static bool bulk_out_send_next(struct bulk_out_s * b) {
                 return false;
             }
         }
-        JSDRV_LOGI("bulk_out_send_next WinUsb_WritePipe %p", &b->overlapped);
+        JSDRV_LOGD2("bulk_out_send_next WinUsb_WritePipe %p", &b->overlapped);
     }
     return true;
 }
 
 static bool bulk_out_process(struct bulk_out_s * b) {
-    JSDRV_LOGI("bulk_out_process");
+    JSDRV_LOGD1("bulk_out_process");
     ResetEvent(b->ep.event);
     if (!bulk_out_complete_next(b)) {
         return false;
@@ -464,7 +465,7 @@ static void ctrl_start_next(struct dev_s * d) {
     if (!item) {
         return;
     }
-    JSDRV_LOGI("ctrl_start_next");
+    JSDRV_LOGD1("ctrl_start_next");
     struct jsdrvp_msg_s * msg = JSDRV_CONTAINER_OF(item, struct jsdrvp_msg_s, item);
 
     memset(&d->ctrl_overlapped, 0, sizeof(d->ctrl_overlapped));
@@ -479,7 +480,7 @@ static void ctrl_start_next(struct dev_s * d) {
         ctrl_send_done(d, JSDRV_ERROR_UNSPECIFIED);
         return;
     }
-    JSDRV_LOGI("ctrl %" PRIx64 " len=%d", msg->extra.bkusb_ctrl.setup.u64, buf_sz);
+    JSDRV_LOGD1("ctrl %" PRIx64 " len=%d", msg->extra.bkusb_ctrl.setup.u64, buf_sz);
 }
 
 static void ctrl_complete(struct dev_s * d) {
@@ -515,7 +516,7 @@ static void ctrl_complete(struct dev_s * d) {
 }
 
 static void ctrl_add(struct dev_s * d, struct jsdrvp_msg_s * msg) {
-    JSDRV_LOGI("ctrl_add");
+    JSDRV_LOGD1("ctrl_add");
     bool do_issue = jsdrv_list_is_empty(&d->ctrl_list);
     jsdrv_list_add_tail(&d->ctrl_list, &msg->item);
     if (do_issue) {
@@ -600,7 +601,7 @@ static DWORD WINAPI device_thread(LPVOID lpParam) {
                     handles[handle_count++] = ep->event;
                 }
             }
-            JSDRV_LOGI("device_thread handle_count=%d", (int) handle_count);
+            JSDRV_LOGD2("device_thread handle_count=%d", (int) handle_count);
         }
         WaitForMultipleObjects(handle_count, handles, false, 5000);
         //JSDRV_LOGD3("winusb ll thread %s", d->device.prefix);

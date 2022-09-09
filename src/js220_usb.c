@@ -125,7 +125,7 @@ struct field_def_s {
     uint8_t field_id;
     uint8_t index;
     uint8_t element_type;               // jsdrv_data_type_e
-    uint8_t element_bit_size_pow2;
+    uint8_t element_size_bits;
     uint8_t downsample;
 };
 
@@ -135,26 +135,26 @@ struct field_def_s {
     .field_id=JSDRV_FIELD_##field_,                                                     \
     .index=(index_),                                                                    \
     .element_type=JSDRV_DATA_TYPE_##type_,                                              \
-    .element_bit_size_pow2=(size_),                                                     \
+    .element_size_bits=(size_),                                                     \
     .downsample=(downsample_),                                                          \
 }
 
 struct field_def_s PORT_MAP[] = {
         //   (ctrl field,       data field, jsdrv_field_e,  index, type, bit_size_pow2)
-        FIELD("s/adc/0/ctrl",   "s/adc/0/!data",   RAW,         0, INT,   4, 1),  // 0
-        FIELD("s/adc/1/ctrl",   "s/adc/1/!data",   RAW,         1, INT,   4, 1),  // 1
-        FIELD("s/adc/2/ctrl",   "s/adc/2/!data",   RAW,         2, INT,   4, 1),  // 2
-        FIELD("s/adc/3/ctrl",   "s/adc/3/!data",   RAW,         3, INT,   4, 1),  // 3
-        FIELD("s/i/range/ctrl", "s/i/range/!data", RANGE,       0, UINT,  2, 1),  // 4
-        FIELD("s/i/ctrl",       "s/i/!data",       CURRENT,     0, FLOAT, 5, 2),  // 5
-        FIELD("s/v/ctrl",       "s/v/!data",       VOLTAGE,     0, FLOAT, 5, 2),  // 6
-        FIELD("s/p/ctrl",       "s/p/!data",       POWER,       0, FLOAT, 5, 2),  // 7
-        FIELD("s/gpi/0/ctrl",   "s/gpi/0/!data",   GPI,         0, UINT,  0, 1),  // 8
-        FIELD("s/gpi/1/ctrl",   "s/gpi/1/!data",   GPI,         1, UINT,  0, 1),  // 9
-        FIELD("s/gpi/2/ctrl",   "s/gpi/2/!data",   GPI,         2, UINT,  0, 1),  // 10
-        FIELD("s/gpi/3/ctrl",   "s/gpi/3/!data",   GPI,         3, UINT,  0, 1),  // 11
-        FIELD("s/gpi/255/ctrl", "s/gpi/255/!data", GPI,       255, UINT,  0, 1),  // 12 trigger
-        FIELD("s/uart/0/ctrl",  "s/uart/0/!data",  UART,        0, UINT,  3, 1),  // 13 8-bit only
+        FIELD("s/adc/0/ctrl",   "s/adc/0/!data",   RAW,         0, INT,   16, 1),  // 0
+        FIELD("s/adc/1/ctrl",   "s/adc/1/!data",   RAW,         1, INT,   16, 1),  // 1
+        FIELD("s/adc/2/ctrl",   "s/adc/2/!data",   RAW,         2, INT,   16, 1),  // 2
+        FIELD("s/adc/3/ctrl",   "s/adc/3/!data",   RAW,         3, INT,   16, 1),  // 3
+        FIELD("s/i/range/ctrl", "s/i/range/!data", RANGE,       0, UINT,  4, 1),  // 4
+        FIELD("s/i/ctrl",       "s/i/!data",       CURRENT,     0, FLOAT, 32, 2),  // 5
+        FIELD("s/v/ctrl",       "s/v/!data",       VOLTAGE,     0, FLOAT, 32, 2),  // 6
+        FIELD("s/p/ctrl",       "s/p/!data",       POWER,       0, FLOAT, 32, 2),  // 7
+        FIELD("s/gpi/0/ctrl",   "s/gpi/0/!data",   GPI,         0, UINT,  1, 1),  // 8
+        FIELD("s/gpi/1/ctrl",   "s/gpi/1/!data",   GPI,         1, UINT,  1, 1),  // 9
+        FIELD("s/gpi/2/ctrl",   "s/gpi/2/!data",   GPI,         2, UINT,  1, 1),  // 10
+        FIELD("s/gpi/3/ctrl",   "s/gpi/3/!data",   GPI,         3, UINT,  1, 1),  // 11
+        FIELD("s/gpi/255/ctrl", "s/gpi/255/!data", GPI,       255, UINT,  1, 1),  // 12 trigger
+        FIELD("s/uart/0/ctrl",  "s/uart/0/!data",  UART,        0, UINT,  8, 1),  // 13 8-bit only
         FIELD("s/stats/ctrl",   "s/stats/value",   UNDEFINED,   0, UNDEFINED,   0, 0),  // 14 js220_statistics_raw_s
         FIELD(NULL, NULL, UNDEFINED,   0, UINT,   8, 0),  // 15 reserved and unavailable
 };
@@ -167,6 +167,7 @@ enum break_e {
 
 struct port_s {
     uint32_t downsample;
+    uint64_t sample_id_next;
     struct jsdrvp_msg_s * msg_in;  // one for each port
 };
 
@@ -270,7 +271,7 @@ static struct jsdrvp_msg_s * ll_await(struct dev_s * d, msg_filter_fn filter_fn,
 #endif
         struct jsdrvp_msg_s * m = msg_queue_pop_immediate(d->ll.rsp_q);
         if (m) {
-            JSDRV_LOGI("ll_await, process %s", m->topic);
+            JSDRV_LOGD1("ll_await, process %s", m->topic);
             if (filter_fn(filter_user_data, d, m)) {
                 return m;
             } else {
@@ -568,6 +569,7 @@ static void stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
         if (PORT_MAP[i].ctrl_topic && (0 == strcmp(PORT_MAP[i].ctrl_topic, topic))) {
             uint32_t mask = (0x00010000 << i);
             if (enable) {
+                d->ports[i].sample_id_next = 0;
                 d->stream_in_port_enable |= mask;
             } else {
                 d->stream_in_port_enable &= ~mask;
@@ -779,7 +781,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
         }
     } else {
-        JSDRV_LOGI("handle_cmd to device %s", topic);
+        JSDRV_LOGD1("handle_cmd to device %s", topic);
         handle_cmd_ctrl(d, topic, &msg->value);
         bulk_out_publish(d, topic, &msg->value);
     }
@@ -790,6 +792,7 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     struct field_def_s * field_def = &PORT_MAP[port_id & 0x0f];
     struct port_s * port = &d->ports[port_id & 0x0f];
     struct jsdrv_stream_signal_s * s;
+    struct jsdrvp_msg_s * m = port->msg_in;
     if (!field_def->data_topic || !field_def->data_topic[0]) {
         return;
     }
@@ -799,29 +802,34 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     uint32_t sample_id_u32 = *p_u32++;
     size -= sizeof(uint32_t);
 
-    struct jsdrvp_msg_s * m = port->msg_in;
-    if (m) {
-        s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
-        if (sample_id_u32 != m->u32_a) {
-            JSDRV_LOGI("stream_in_port %d, sample_id mismatch, %" PRIu32 " %" PRIu32,
-                     port_id, sample_id_u32, m->u32_a);
-            m->u32_a = 0;
+    if (port->sample_id_next == 0) {
+        port->sample_id_next = sample_id_u32;  // todo correctly initialize u64
+    }
+
+    uint32_t sample_id_u32_expect = (uint32_t) (port->sample_id_next & 0xffffffff); // truncate 64->32
+
+    if (sample_id_u32 != sample_id_u32_expect) {
+        if (m) {
+            JSDRV_LOGI("stream_in_port %d sample_id mismatch: received=%" PRIu32 " expected=%" PRIu32,
+                       port_id, sample_id_u32, sample_id_u32_expect);
             jsdrvp_backend_send(d->context, m);
             m = NULL;
         }
+        port->sample_id_next = (port->sample_id_next & 0xffffffff00000000LLU) | sample_id_u32; // todo correct u64
     }
 
-    if (!m) {
+    if (m) {
+        s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+    } else {
         m = jsdrvp_msg_alloc_data(d->context, "");
         tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s", d->ll.prefix, field_def->data_topic);
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
-        s->sample_id = sample_id_u32; // todo extend to 64-bit
+        s->sample_id = sample_id_u32_expect;
         s->index = field_def->index;
         s->field_id = field_def->field_id;
         s->element_type = field_def->element_type;
-        s->element_bit_size_pow2 = field_def->element_bit_size_pow2;
+        s->element_size_bits = field_def->element_size_bits;
         s->element_count = 0;
-        m->u32_a = (uint32_t) sample_id_u32;
         m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
         m->value.size = JSDRV_STREAM_HEADER_SIZE;
         port->msg_in = m;
@@ -832,14 +840,14 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     uint8_t * p = (uint8_t *) &m->value.value.bin[m->value.size];
     memcpy(p, p_u32, size);
     m->value.size += size;
-    uint32_t sample_count = (size << 3) >> s->element_bit_size_pow2;
+    uint32_t sample_count = (size << 3) / s->element_size_bits;
     s->element_count += sample_count;
-    m->u32_a += sample_count * port->downsample;
+    port->sample_id_next += sample_count * port->downsample;
 
     // determine if need to send
-    uint32_t sample_id_delta = m->u32_a - ((uint32_t) s->sample_id);
-    if ((sample_id_delta > 100000) || ((m->value.size + JS220_USB_FRAME_LENGTH) > (JSDRV_STREAM_HEADER_SIZE + JSDRV_STREAM_DATA_SIZE))) {
-        JSDRV_LOGI("stream_in_port: port_id=%d, sample_id_delta=%d, size=%d", (int) port_id, (int) sample_id_delta, (int) m->value.size);
+    uint64_t sample_id_delta = port->sample_id_next - s->sample_id;
+    if ((sample_id_delta > 100000LLU) || ((m->value.size + JS220_USB_FRAME_LENGTH) > (JSDRV_STREAM_HEADER_SIZE + JSDRV_STREAM_DATA_SIZE))) {
+        JSDRV_LOGD1("stream_in_port: port_id=%d, sample_id_delta=%d, size=%d", (int) port_id, (int) sample_id_delta, (int) m->value.size);
         port->msg_in = NULL;
         jsdrvp_backend_send(d->context, m);
     }
@@ -1146,7 +1154,7 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
             handle_stream_in_port(d, hdr.h.port_id, p_u32 + 1, hdr.h.length);
         }
     } else {
-        JSDRV_LOGI("stream in: port=%d, length=%d", hdr.h.port_id, hdr.h.length);
+        JSDRV_LOGD1("stream in: port=%d, length=%d", hdr.h.port_id, hdr.h.length);
         switch ((uint8_t) hdr.h.port_id) {
             case 0: handle_stream_in_port0(d, p_u32 + 1, hdr.h.length); break;
             case 1: handle_stream_in_pubsub(d, p_u32 + 1, hdr.h.length); break;
@@ -1228,7 +1236,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
 #else
         poll(fds, 2, 5000);
 #endif
-        JSDRV_LOGI("ul thread tick");
+        JSDRV_LOGD2("ul thread tick");
         while (handle_cmd(d, msg_queue_pop_immediate(d->ul.cmd_q))) {
             ;
         }

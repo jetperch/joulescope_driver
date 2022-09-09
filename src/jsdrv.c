@@ -874,7 +874,7 @@ void jsdrvp_backend_send(struct jsdrv_context_s * context, struct jsdrvp_msg_s *
     char buf[32];
     jsdrv_union_value_to_str(&msg->value, buf, (uint32_t) sizeof(buf), 1);
     if (context->msg_backend) {
-        JSDRV_LOGI("jsdrvp_backend_send %s %s", msg->topic, buf);
+        JSDRV_LOGD2("jsdrvp_backend_send %s %s", msg->topic, buf);
         msg_queue_push(context->msg_backend, msg);
     } else {  // should never happen
         JSDRV_LOGW("jsdrvp_backend_send but no backend queue!");

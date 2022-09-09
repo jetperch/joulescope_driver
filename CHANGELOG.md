@@ -6,7 +6,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 0.2.2
 
-2022 Sep 2 [in progress]
+2022 Sep 9 [in progress]
 
 * Completed JS220 memory read operation.
 * Completed JS220 memory erase operation.
@@ -22,6 +22,12 @@ This file contains the list of changes made to the Joulescope driver.
 * Renamed python "set.py" to "set_parameter.py" to avoid reserved word "set".
 * Added JS220 "opening" state to "h/state" metadata.
 * Simplified native jsdrv_util set to use native support for string values. 
+* Fixed driver based upon beta build feedback.
+* Fixed JS220 handling of missing/duplicated sample ids.
+* Converted to element_size_bits from element_size_pow2.
+* Added GPIO streaming support (u1 data type).
+* Redefined JSDRV_DATA_TYPE_FLOAT to align with JLS v2.
+* Reduced logging verbosity.
 
 
 ## 0.2.1

@@ -230,9 +230,9 @@ enum jsdrv_payload_type_e {
  */
 enum jsdrv_element_type_e {
     JSDRV_DATA_TYPE_UNDEFINED = 0,
-    JSDRV_DATA_TYPE_FLOAT = 1,
     JSDRV_DATA_TYPE_INT = 2,
     JSDRV_DATA_TYPE_UINT = 3,
+    JSDRV_DATA_TYPE_FLOAT = 4,
 };
 
 /**
@@ -259,7 +259,7 @@ struct jsdrv_stream_signal_s {
     uint8_t field_id;                       ///< jsdrv_field_e
     uint8_t index;                          ///< The channel index within the field.
     uint8_t element_type;                   ///< jsdrv_element_type_e
-    uint8_t element_bit_size_pow2;          ///< The element bit size as 2 ** v
+    uint8_t element_size_bits;              ///< The element size in bits
     uint32_t element_count;                 ///< size of data in elements
     uint8_t data[JSDRV_STREAM_DATA_SIZE];   ///< The channel data.
 };

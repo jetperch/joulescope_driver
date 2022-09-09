@@ -20,7 +20,7 @@ Python binding for the native Joulescope driver implementation.
 
 # cython: boundscheck=True, wraparound=True, nonecheck=True, overflowcheck=True, cdivision=True
 
-from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int32_t, int64_t
+from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t
 from libc.float cimport DBL_MAX
 from libc.math cimport isfinite, NAN
 from libc.string cimport memset
@@ -67,27 +67,37 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
         elif t == c_jsdrv.JSDRV_UNION_BIN:
             if value[0].app == c_jsdrv.JSDRV_PAYLOAD_TYPE_STREAM:
                 stream = <c_jsdrv.jsdrv_stream_signal_s *> &(value[0].value.bin[0])
-                el = (stream[0].element_type, stream[0].element_bit_size_pow2)
+                el = (stream[0].element_type, stream[0].element_size_bits)
                 v = {
                     'sample_id': stream[0].sample_id,
                     'field_id': stream[0].field_id,
                     'index': stream[0].index
                 }
-                if el == (c_jsdrv.JSDRV_DATA_TYPE_INT, 4):  # int16
+                if el == (c_jsdrv.JSDRV_DATA_TYPE_FLOAT, 32):  # float32
+                    shape[0] = <np.npy_intp> stream[0].element_count
+                    ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> stream[0].data)
+                    v['data'] = ndarray.copy()
+                elif el == (c_jsdrv.JSDRV_DATA_TYPE_UINT, 1):  # uint1, 8 per uint8
+                    shape[0] = <np.npy_intp> ((stream[0].element_count + 7) / 8)
+                    ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> stream[0].data)
+                    v['data'] = ndarray.copy()
+                elif el == (c_jsdrv.JSDRV_DATA_TYPE_INT, 16):  # int16
                     shape[0] = <np.npy_intp> stream[0].element_count
                     ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_INT16, <void *> stream[0].data)
                     v['data'] = ndarray.copy()
-                elif el == (c_jsdrv.JSDRV_DATA_TYPE_UINT, 2):  # uint4 -> uint8
+                elif el == (c_jsdrv.JSDRV_DATA_TYPE_UINT, 8):  # uint8
+                    shape[0] = <np.npy_intp> stream[0].element_count
+                    ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> stream[0].data)
+                    v['data'] = ndarray.copy()
+                elif el == (c_jsdrv.JSDRV_DATA_TYPE_UINT, 4):  # uint4 -> uint8
+                    # unpack to make i/range support easy
+                    # future uses may want to leave packed, so may need to check JSDRV_FIELD_RANGE
                     ndarray = np.empty(stream[0].element_count, dtype=np.uint8)
                     u8_mem = ndarray
                     for idx in range(0, stream[0].element_count >> 1):
                         u8_mem[2 * idx] = stream[0].data[idx] & 0x0f
                         u8_mem[2 * idx + 1] = (stream[0].data[idx] >> 4) & 0x0f
                     v['data'] = ndarray
-                elif el == (c_jsdrv.JSDRV_DATA_TYPE_FLOAT, 5):  # float32
-                    shape[0] = <np.npy_intp> stream[0].element_count
-                    ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> stream[0].data)
-                    v['data'] = ndarray.copy()
                 else:
                     print('jsdrv._jsdrv_union_to_py: unsupported data type')
                     v['data'] = None

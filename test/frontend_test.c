@@ -418,8 +418,8 @@ static void test_stream_raw_0(void ** state) {
     s->field_id = JSDRV_FIELD_RAW;
     s->index = 0;
     s->element_type = JSDRV_DATA_TYPE_INT;
-    s->element_bit_size_pow2 = 4;
-    s->element_count = ((sizeof(expected_u32) - JSDRV_STREAM_HEADER_SIZE) << 3) >> s->element_bit_size_pow2;
+    s->element_size_bits = 16;
+    s->element_count = ((sizeof(expected_u32) - JSDRV_STREAM_HEADER_SIZE) << 3) / s->element_size_bits;
     uint16_t * expected_u16 = (uint16_t *) &s->data[0];
     union js220_frame_hdr_u hdr;
 

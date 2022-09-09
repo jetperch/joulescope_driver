@@ -47,7 +47,7 @@ struct field_def_s {
     uint8_t field_id;
     uint8_t index;
     uint8_t element_type;               // jsdrv_data_type_e
-    uint8_t element_bit_size_pow2;
+    uint8_t element_size_bits;
     uint8_t downsample;
 };
 
@@ -56,15 +56,15 @@ struct field_def_s {
     .field_id=JSDRV_FIELD_##field_,                                                     \
     .index=(index_),                                                                    \
     .element_type=JSDRV_DATA_TYPE_##type_,                                              \
-    .element_bit_size_pow2=(size_),                                                     \
+    .element_size_bits=(size_),                                                         \
     .downsample=(downsample_),                                                          \
 }
 
 struct field_def_s FIELDS[] = {
-        //   (ctrl field,       data field, jsdrv_field_e,  index, type, bit_size_pow2)
-        FIELD("s/i/!data",       CURRENT,     0, FLOAT, 5, 1),  // 5
-        FIELD("s/v/!data",       VOLTAGE,     0, FLOAT, 5, 1),  // 6
-        FIELD("s/p/!data",       POWER,       0, FLOAT, 5, 1),  // 7
+        //   (ctrl field,       data field, jsdrv_field_e,  index, el_type, el_size_bits, downsample)
+        FIELD("s/i/!data",       CURRENT,     0, FLOAT, 32, 1),  // 5
+        FIELD("s/v/!data",       VOLTAGE,     0, FLOAT, 32, 1),  // 6
+        FIELD("s/p/!data",       POWER,       0, FLOAT, 32, 1),  // 7
         // FIELD("s/i/range/!data", RANGE,       0, UINT,  2, 1),  // 4  todo i_range
         // FIELD("s/gpi/0/!data",   GPI,         0, UINT,  0, 1),  // 8  todo gpi0
         // FIELD("s/gpi/1/!data",   GPI,         1, UINT,  0, 1),  // 9  todo gpi1
@@ -758,7 +758,7 @@ static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_ran
             s->index = field_def->index;
             s->field_id = field_def->field_id;
             s->element_type = field_def->element_type;
-            s->element_bit_size_pow2 = field_def->element_bit_size_pow2;
+            s->element_size_bits = field_def->element_size_bits;
             s->element_count = 0;
             m->u32_a = (uint32_t) d->sample_id;
             m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
