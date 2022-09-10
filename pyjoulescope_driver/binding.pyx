@@ -123,7 +123,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                             'min': {'value': stats[0].i_min, 'units': 'A'},
                             'max': {'value': stats[0].i_max, 'units': 'A'},
                             'p2p': {'value': stats[0].i_max - stats[0].i_min, 'units': 'A'},
-                            '∫': {'value': stats[0].i_avg * t_delta, 'units': 'C'},
+                            'integral': {'value': stats[0].i_avg * t_delta, 'units': 'C'},
                         },
                         'voltage': {
                             'avg': {'value': stats[0].v_avg, 'units': 'V'},
@@ -138,7 +138,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                             'min': {'value': stats[0].p_min, 'units': 'W'},
                             'max': {'value': stats[0].p_max, 'units': 'W'},
                             'p2p': {'value': stats[0].p_max - stats[0].p_min, 'units': 'W'},
-                            '∫': {'value': stats[0].p_avg * t_delta, 'units': 'J'},
+                            'integral': {'value': stats[0].p_avg * t_delta, 'units': 'J'},
                         },
                     },
                     'accumulators': {
