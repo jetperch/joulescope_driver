@@ -4,9 +4,16 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 0.2.3
+
+2022 Sep 16 [in progress]
+
+* Fixed support for multiple (not just first found) of same device type.
+
+
 ## 0.2.2
 
-2022 Sep 9 [in progress]
+2022 Sep 9
 
 * Completed JS220 memory read operation.
 * Completed JS220 memory erase operation.

@@ -838,6 +838,7 @@ static void device_scan(struct backend_s * s) {
                 WINDOWS_LOGE("SetupDiGetDeviceInterfaceDetailW failed %d", dt->device_type);
             }
             jsdrv_memset(&dev_interface, 0, sizeof(dev_interface));
+            dev_interface.cbSize = sizeof(dev_interface);
             ++member_index;
         }
         SetupDiDestroyDeviceInfoList(handle);
