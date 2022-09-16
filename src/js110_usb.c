@@ -21,6 +21,7 @@
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/js110_cal.h"
+#include "jsdrv_prv/js110_sample_processor.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/usb_spec.h"
 #include "jsdrv_prv/thread.h"
@@ -61,13 +62,14 @@ struct field_def_s {
 }
 
 struct field_def_s FIELDS[] = {
-        //   (ctrl field,       data field, jsdrv_field_e,  index, el_type, el_size_bits, downsample)
+        //   (ctrl field,       data field, index, el_type, el_size_bits, downsample)
         FIELD("s/i/!data",       CURRENT,     0, FLOAT, 32, 1),  // 5
         FIELD("s/v/!data",       VOLTAGE,     0, FLOAT, 32, 1),  // 6
         FIELD("s/p/!data",       POWER,       0, FLOAT, 32, 1),  // 7
-        // FIELD("s/i/range/!data", RANGE,       0, UINT,  2, 1),  // 4  todo i_range
-        // FIELD("s/gpi/0/!data",   GPI,         0, UINT,  0, 1),  // 8  todo gpi0
-        // FIELD("s/gpi/1/!data",   GPI,         1, UINT,  0, 1),  // 9  todo gpi1
+        // todo support remaining fields
+        //FIELD("s/i/range/!data", RANGE,       0, UINT,  2, 1),   // 4
+        //FIELD("s/gpi/0/!data",   GPI,         0, UINT,  0, 1),   // 8
+        //FIELD("s/gpi/1/!data",   GPI,         1, UINT,  0, 1),   // 9
 };
 
 typedef void (*param_fn)(struct js110_dev_s * d, const struct jsdrv_union_s * value);
@@ -253,8 +255,8 @@ struct js110_dev_s {
     struct jsdrv_context_s * context;
 
     struct jsdrv_union_s param_values[JSDRV_ARRAY_SIZE(PARAMS)];
-    double cal[2][2][9];  // current/voltage, offset/gain
     uint64_t packet_index;
+    struct js110_sp_s sample_processor;
 
     struct jsdrvp_msg_s * data_msg[JSDRV_ARRAY_SIZE(FIELDS)];
     uint64_t sample_id;
@@ -262,6 +264,7 @@ struct js110_dev_s {
 
     volatile bool do_exit;
     jsdrv_thread_t thread;
+
 };
 
 static bool handle_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg);
@@ -476,7 +479,7 @@ static int32_t calibration_get(struct js110_dev_s * d) {
     }
 
     if (0 == rv) {
-        rv = js110_cal_parse(cal, d->cal);
+        rv = js110_cal_parse(cal, d->sample_processor.cal);
     }
     jsdrv_free(cal);
     return rv;
@@ -733,20 +736,8 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
 }
 
 static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_range) {
-    double i;
-    double v;
     struct jsdrv_stream_signal_s * s;
-    if (sample == 0xffffffffLU) {
-        i = NAN;
-        v = NAN;
-    } else {
-        i = (double) ((sample >> 2) & 0x3fff);
-        v = (double) ((sample >> 18) & 0x3fff);
-        uint8_t i_range = (sample & 3) | ((sample >> (16 - 2)) & 4);
-        i = (i + d->cal[0][0][i_range]) * d->cal[0][1][i_range];
-        v = (v + d->cal[1][0][v_range]) * d->cal[1][1][v_range];
-    }
-    // todo handle current range changes, glitch suppression.
+    struct js110_sample_s z = js110_sp_process(&d->sample_processor, sample, v_range);
 
     if (NULL == d->data_msg[0]) {
         for (size_t i = 0; i < JSDRV_ARRAY_SIZE(FIELDS); ++i) {
@@ -768,12 +759,12 @@ static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_ran
         d->msg_sample_count = 0;
     }
 
-    float values[] = {(float) i, (float) v, (float) (i * v)};
+    float values[] = {(float) z.i, (float) z.v, (float) z.p};
     uint8_t enables[] = {
             d->param_values[PARAM_I_CTRL].value.u8,
             d->param_values[PARAM_V_CTRL].value.u8,
             d->param_values[PARAM_P_CTRL].value.u8};
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < JSDRV_ARRAY_SIZE(FIELDS); ++i) {
         struct jsdrvp_msg_s *m = d->data_msg[i];
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
         float *data = (float *) s->data;
@@ -917,6 +908,7 @@ int32_t jsdrvp_ul_js110_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     d->ll = *ll;
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
+    js110_sp_initialize(&d->sample_processor);
 
     for (int i = 0; NULL != PARAMS[i].topic; ++i) {
         jsdrv_meta_default(PARAMS[i].meta, &d->param_values[i]);

@@ -31,6 +31,7 @@ target_link_libraries(dbc_test cmocka)
 
 ADD_CMOCKA_TEST(error_code_test)
 ADD_CMOCKA_TEST(js110_cal_test)
+ADD_CMOCKA_TEST(js110_sp_test)
 ADD_CMOCKA_TEST(js220_stats_test)
 ADD_CMOCKA_TEST(json_test)
 ADD_CMOCKA_TEST(meta_test)

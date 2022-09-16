@@ -41,7 +41,7 @@
 #define DEVICE_COUNT_MAX    (256U)  // 255 Joulescopes attached to 1 host should be enough
 #define BACKEND_COUNT_MAX   (127U)  // Allow prefixes 0-9, a-z, A-Z
 #define DEVICE_LOOKUP_MAX   (BACKEND_COUNT_MAX * DEVICE_COUNT_MAX)
-#define API_TIMEOUT_MS      (300000)   // todo put back to 3000
+#define API_TIMEOUT_MS      (3000)
 
 #ifndef UNITTEST
 #define UNITTEST 0
