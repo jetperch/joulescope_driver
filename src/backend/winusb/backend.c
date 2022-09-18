@@ -61,7 +61,7 @@ struct dev_s;
 struct bulk_in_s;
 struct endpoint_s;
 
-typedef int32_t (*ep_process)(struct endpoint_s *);
+typedef int32_t (*ep_process)(struct endpoint_s *);  // 0 or error code
 typedef void (*ep_finalize)(struct endpoint_s *);
 
 struct endpoint_s {
@@ -144,7 +144,8 @@ static void bulk_in_transfer_free(struct bulk_in_transfer_s * t) {
     jsdrv_list_add_tail(&t->bulk->transfers_free, &t->item);
 }
 
-static void bulk_in_finalize(struct bulk_in_s * b) {
+static void bulk_in_finalize(struct endpoint_s * ep) {
+    struct bulk_in_s * b = (struct bulk_in_s *) ep;
     JSDRV_LOGI("bulk_in_finalize ep=0x%02x", b->ep.pipe_id);
     WinUsb_AbortPipe(b->ep.dev->winusb, b->ep.pipe_id);
     while (!jsdrv_list_is_empty(&b->transfers_pending)) {
@@ -168,7 +169,7 @@ static void bulk_in_finalize(struct bulk_in_s * b) {
     jsdrv_free(b);
 }
 
-static bool bulk_in_pend(struct bulk_in_s * b) {
+static int32_t bulk_in_pend(struct bulk_in_s * b) {
     JSDRV_LOGD2("bulk_in_pend");
     // Pend read operations
     size_t pending = jsdrv_list_length(&b->transfers_pending);
@@ -179,17 +180,18 @@ static bool bulk_in_pend(struct bulk_in_s * b) {
             if (ec != ERROR_IO_PENDING) {
                 WINDOWS_LOGE("%s", "bulk_in_pend WinUsb_ReadPipe error");
                 bulk_in_transfer_free(t);
-                return false;
+                return 1;
             }
         }
         JSDRV_LOGD3("bulk_in_pend WinUsb_ReadPipe %p", &t->overlapped);
         jsdrv_list_add_tail(&b->transfers_pending, &t->item);
     }
-    return true;
+    return 0;
 }
 
-static bool bulk_in_process(struct bulk_in_s * b) {
+static int32_t bulk_in_process(struct endpoint_s * ep) {
     JSDRV_LOGD2("bulk_in_process");
+    struct bulk_in_s * b = (struct bulk_in_s *) ep;
     ResetEvent(b->ep.event);
 
     // Handle completed read operations
@@ -218,7 +220,7 @@ static bool bulk_in_process(struct bulk_in_s * b) {
             } else {
                 WINDOWS_LOGE("%s", "bulk_in_process WinUsb_GetOverlappedResult error");
                 bulk_in_transfer_free(t);
-                return false;   // stream error!
+                return 1;   // stream error!
             }
         }
     }
@@ -232,8 +234,8 @@ static struct bulk_in_s * bulk_in_initialize(struct dev_s * dev, uint8_t pipe_id
     struct bulk_in_s * b = jsdrv_alloc_clr(sizeof(struct bulk_in_s));
     b->ep.dev = dev;
     b->ep.pipe_id = pipe_id;
-    b->ep.process = (ep_process) bulk_in_process;
-    b->ep.finalize = (ep_finalize) bulk_in_finalize;
+    b->ep.process = bulk_in_process;
+    b->ep.finalize = bulk_in_finalize;
     b->ep.event = CreateEvent(
             NULL,  // default security attributes
             TRUE,  // manual reset event
@@ -281,7 +283,8 @@ static struct bulk_in_s * bulk_in_initialize(struct dev_s * dev, uint8_t pipe_id
 //# BULK OUT                                                                  #
 //#############################################################################
 
-static void bulk_out_finalize(struct bulk_out_s * b) {
+static void bulk_out_finalize(struct endpoint_s * ep) {
+    struct bulk_out_s * b = (struct bulk_out_s *) ep;
     WinUsb_AbortPipe(b->ep.dev->winusb, b->ep.pipe_id);
     if (!jsdrv_list_is_empty(&b->msg_pending)) {
         ULONG sz = 0;
@@ -324,7 +327,7 @@ static bool bulk_out_complete_next(struct bulk_out_s * b) {
     return true;
 }
 
-static bool bulk_out_send_next(struct bulk_out_s * b) {
+static int32_t bulk_out_send_next(struct bulk_out_s * b) {
     if (!jsdrv_list_is_empty(&b->msg_pending)) {
         struct jsdrv_list_s * item = jsdrv_list_peek_head(&b->msg_pending);
         struct jsdrvp_msg_s * m = JSDRV_CONTAINER_OF(item, struct jsdrvp_msg_s, item);
@@ -336,19 +339,20 @@ static bool bulk_out_send_next(struct bulk_out_s * b) {
                 WINDOWS_LOGE("%s", "bulk_out_send_next error");
                 m->value = jsdrv_union_i32(JSDRV_ERROR_IO);
                 msg_queue_push(b->ep.dev->device.rsp_q, m);
-                return false;
+                return 1;
             }
         }
         JSDRV_LOGD2("bulk_out_send_next WinUsb_WritePipe %p", &b->overlapped);
     }
-    return true;
+    return 0;
 }
 
-static bool bulk_out_process(struct bulk_out_s * b) {
+static int32_t bulk_out_process(struct endpoint_s * ep) {
     JSDRV_LOGD1("bulk_out_process");
+    struct bulk_out_s * b = (struct bulk_out_s *) ep;
     ResetEvent(b->ep.event);
     if (!bulk_out_complete_next(b)) {
-        return false;
+        return 1;
     }
     return bulk_out_send_next(b);
 }
@@ -364,8 +368,8 @@ static struct bulk_out_s * bulk_out_initialize(struct dev_s * dev, uint8_t pipe_
             NULL   // no name
     );
     JSDRV_ASSERT(b->ep.event);
-    b->ep.process = (ep_process) bulk_out_process;
-    b->ep.finalize = (ep_finalize) bulk_out_finalize;
+    b->ep.process = bulk_out_process;
+    b->ep.finalize = bulk_out_finalize;
     jsdrv_list_initialize(&b->ep.item);
     jsdrv_list_initialize(&b->msg_pending);
     return b;
@@ -807,7 +811,7 @@ static void device_scan(struct backend_s * s) {
     const struct device_type_s * dt = device_types;
 
     JSDRV_LOGI("device_scan");
-    for (int i = 0; i < DEVICES_MAX; ++i) {
+    for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
         s->devices[i].mark = DEVICE_MARK_NONE;
     }
 

@@ -25,17 +25,8 @@ static int usage() {
     return 1;
 }
 
-static void on_pub(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
-    struct app_s * self = (struct app_s *) user_data;
-    (void) self;
-    char buf[32];
-    jsdrv_union_value_to_str(value, buf, sizeof(buf), 1);
-    printf("on_pub(%s, %s)\n", topic, buf);
-}
-
 int on_dev(struct app_s * self, int argc, char * argv[]) {
     char * device = NULL;
-    char * reset = NULL;
     printf("CAUTION: developer tools - not intended for normal operation!\n");
 
     while (argc) {

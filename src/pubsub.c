@@ -80,12 +80,13 @@ static void topic_str_append(char * topic_str, const char * topic_sub_str) {
     *t = 0;  // null terminate
 }
 
+#if 0
 static void topic_str_pop(char * topic_str) {
     char * end = topic_str;
     if (!topic_str || !topic_str[0]) {
         return;  // nothing to pop
     }
-    for (int i = 1; i < JSDRV_TOPIC_LENGTH_MAX; ++i) {
+    for (uint32_t i = 1; i < JSDRV_TOPIC_LENGTH_MAX; ++i) {
         if (!topic_str[i]) {
             *end = topic_str[i - 1];
         }
@@ -98,6 +99,7 @@ static void topic_str_pop(char * topic_str) {
         *end-- = 0;
     }
 }
+#endif
 
 static struct subscriber_s * subscriber_alloc(struct jsdrv_pubsub_s * self) {
     struct subscriber_s * sub;
@@ -168,7 +170,7 @@ static void topic_free(struct jsdrv_pubsub_s * self, struct topic_s * topic) {
  */
 static bool subtopic_get_str(const char ** topic, char * subtopic) {
     const char * t = *topic;
-    for (int i = 0; i < JSDRV_TOPIC_LENGTH_PER_LEVEL; ++i) {
+    for (uint32_t i = 0; i < JSDRV_TOPIC_LENGTH_PER_LEVEL; ++i) {
         if (*t == 0) {
             *subtopic = 0;
             *topic = t;

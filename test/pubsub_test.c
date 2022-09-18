@@ -60,6 +60,7 @@ static const char * META2 = "{"
                     cast_to_largest_integral_type(parameter))
 
 static uint8_t on_subscribe_internal(void * user_data, struct jsdrvp_msg_s * msg) {
+    (void) user_data;
     char * topic = msg->topic;
     uint8_t type = msg->value.type;
     check_expected_ptr(topic);
@@ -89,6 +90,7 @@ static uint8_t on_subscribe_internal(void * user_data, struct jsdrvp_msg_s * msg
 }
 
 static void on_subscribe_external(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) user_data;
     uint8_t type = value->type;
     check_expected_ptr(topic);
     check_expected(type);
@@ -137,6 +139,7 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
 }
 
 static struct jsdrvp_msg_s * subscribe_msg(struct jsdrv_pubsub_s * p, const char * topic, uint8_t flags, const char * op) {
+    (void) p;
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(NULL);
     jsdrv_cstr_copy(m->topic, op, sizeof(m->topic));
     m->value.type = JSDRV_UNION_BIN;
@@ -347,18 +350,14 @@ static void test_query(void ** state) {
     const char * str1 = "hello world";
     char buf[256];
 
-    subscribe_external(p, "", JSDRV_SFLAG_RETURN_CODE);
-    expect_publish_external(JSDRV_PUBSUB_SUBSCRIBE "#", &jsdrv_union_i32(0));
     publish(p, "u/hello", &jsdrv_union_cstr_r(str1));
     publish(p, "u/there", &jsdrv_union_u32_r(42));
     jsdrv_pubsub_process(p);
 
-    expect_publish_external(JSDRV_PUBSUB_QUERY "#", &jsdrv_union_i32(0));
     query("u/hello", buf);
     jsdrv_pubsub_process(p);
     assert_string_equal(str1, buf);
 
-    expect_publish_external(JSDRV_PUBSUB_QUERY "#", &jsdrv_union_i32(0));
     query("u/there", buf);
     jsdrv_pubsub_process(p);
     assert_int_equal(42, v.value.u32);
@@ -380,7 +379,7 @@ int main(void) {
             cmocka_unit_test(test_external_retain),
             cmocka_unit_test(test_return_code),
             cmocka_unit_test(test_meta),
-            //cmocka_unit_test(test_query),  // todo
+            cmocka_unit_test(test_query),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

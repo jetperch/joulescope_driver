@@ -144,7 +144,7 @@ int32_t jsdrv_union_as_type(struct jsdrv_union_s * x, uint8_t type) {
                 case JSDRV_UNION_U8:  AS_TYPE((v < 0) || (v > UINT8_MAX));
                 case JSDRV_UNION_U16: AS_TYPE((v < 0) || (v > UINT16_MAX));
                 case JSDRV_UNION_U32: AS_TYPE((v < 0) || (v > UINT32_MAX));
-                case JSDRV_UNION_U64: AS_TYPE((v < 0) || (v > UINT64_MAX));
+                case JSDRV_UNION_U64: AS_TYPE(v < 0);
                 case JSDRV_UNION_I8:  AS_TYPE((v < INT8_MIN) || (v > INT8_MAX));
                 case JSDRV_UNION_I16: AS_TYPE((v < INT16_MIN) || (v > INT16_MAX));
                 case JSDRV_UNION_I32: AS_TYPE((v < INT32_MIN) || (v > INT32_MAX));

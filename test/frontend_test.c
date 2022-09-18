@@ -113,8 +113,10 @@ static void expect_subscribe_cmd(struct test_s * t, const char * parameter_, con
     struct jsdrvp_msg_s * msg;
     assert_int_equal(0, msg_queue_pop(t->sub_msgs, &msg, SUB_TIMEOUT_MS));
     assert_string_equal(parameter_, msg->topic);
-    assert_int_equal(value->type, msg->value.type);
-    assert_true(jsdrv_union_eq(value, &msg->value));
+    if (NULL != value) {
+        assert_int_equal(value->type, msg->value.type);
+        assert_true(jsdrv_union_eq(value, &msg->value));
+    }
     jsdrvp_msg_free(t->context, msg);
 }
 
@@ -140,6 +142,7 @@ static void expect_subscribe_cmd_json(struct test_s * t, const char * parameter_
     jsdrvp_msg_free(t->context, msg);
 }
 
+#if 0
 static void expect_subscribe_cmd_bin(struct test_s * t, const char * parameter_, void * data, uint32_t sz) {
     struct jsdrvp_msg_s * msg;
     assert_int_equal(0, msg_queue_pop(t->sub_msgs, &msg, SUB_TIMEOUT_MS));
@@ -152,12 +155,14 @@ static void expect_subscribe_cmd_bin(struct test_s * t, const char * parameter_,
     jsdrvp_msg_free(t->context, msg);
 }
 #endif
+#endif
 
 static void bk_finalize(struct jsdrvbk_s * backend) {
     msg_queue_finalize(backend->cmd_q);
     // function_called();
 }
 
+#if 0
 static void dev_expect_bin_ptr(struct jsdrvp_ll_device_s * d, const char * parameter_, uint8_t * p_expect, uint32_t sz_expect) {
     struct jsdrvp_msg_s * msg;
     assert_int_equal(0, msg_queue_pop(d->cmd_q, &msg, DEV_TIMEOUT_MS));
@@ -227,6 +232,7 @@ static void dev_expect_bulk_out(struct jsdrvp_ll_device_s * d, uint16_t frame_id
     assert_true(jsdrv_union_eq(expect, &pv));
     msg_queue_push(d->rsp_q, msg);
 }
+#endif
 
 int32_t jsdrv_unittest_backend_factory(struct jsdrv_context_s * context, struct jsdrvbk_s ** backend) {
     struct test_s * self = &self_;
@@ -242,6 +248,7 @@ int32_t jsdrv_unittest_backend_factory(struct jsdrv_context_s * context, struct 
     return 0;
 }
 
+#if 0
 static void publish_to_dev(struct test_s * self, const char * subtopic, const struct jsdrv_union_s * value) {
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     snprintf(topic, sizeof(topic), DEVICE_PREFIX "/%s", subtopic);
@@ -279,6 +286,7 @@ static void publish_from_dev(struct test_s * self, const char * subtopic, const 
 
     dev_expect_bin_ptr(&self->ll_dev1, JSDRV_USBBK_MSG_STREAM_IN_DATA, m->payload.bin, m->value.size);
 }
+#endif
 
 static void device1_add(struct test_s * self) {
     assert_int_equal(0, jsdrv_subscribe(self->context, DEVICE_PREFIX,
@@ -311,6 +319,7 @@ static void device1_remove(struct test_s * self) {
     expect_subscribe_cmd_str(self, JSDRV_MSG_DEVICE_LIST, "");
 }
 
+#if 0
 static void device1_open(struct test_s * self) {
     assert_int_equal(0, jsdrv_publish(self->context, DEVICE_PREFIX "/" JSDRV_MSG_OPEN, &jsdrv_union_i32(0), 0));
     expect_subscribe_cmd(self, DEVICE_PREFIX "/" JSDRV_MSG_OPEN, &jsdrv_union_i32(0));
@@ -340,6 +349,10 @@ static void device1_open(struct test_s * self) {
     m->extra.bkusb_stream.endpoint = JS220_USB_EP_BULK_IN;
     msg_queue_push(self->ll_dev1.rsp_q, m);
 
+    expect_subscribe_cmd(self, DEVICE_PREFIX "/h/state" , &jsdrv_union_u32_r(2));
+    expect_subscribe_cmd(self, DEVICE_PREFIX "/c/fw/version$" , NULL);
+    expect_subscribe_cmd(self, DEVICE_PREFIX "/c/hw/version$" , NULL);
+    expect_subscribe_cmd(self, DEVICE_PREFIX "/h/!reset$" , NULL);
     expect_subscribe_cmd(self, DEVICE_PREFIX "/c/fw/version" , &jsdrv_union_u32_r(0x00010002));
     expect_subscribe_cmd(self, DEVICE_PREFIX "/c/hw/version" , &jsdrv_union_u32_r(0x01000000));
     expect_subscribe_cmd(self, DEVICE_PREFIX "/s/fpga/version" , &jsdrv_union_u32_r(0x00010000));
@@ -366,6 +379,8 @@ static void device1_close(struct test_s * self) {
     expect_subscribe_cmd(self, DEVICE_PREFIX "/h/state", &jsdrv_union_u32_r(1));
     expect_subscribe_cmd(self, DEVICE_PREFIX "/" JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(0));
 }
+#endif
+
 
 #define ASSERT_QUEUES_EMPTY(self) do {                              \
     assert_true(msg_queue_is_empty(self->sub_msgs));                \
@@ -391,6 +406,7 @@ static void test_discovery(void ** state) {
     }
 }
 
+#if 0
 static void test_device_open(void ** state) {
     SETUP();
     device1_add(self);
@@ -528,6 +544,7 @@ static void test_timeout(void ** state) {
     ASSERT_QUEUES_EMPTY(self);
     TEARDOWN();
 }
+#endif
 
 void log_recv(void * user_data, struct jsdrv_log_header_s const * header,
               const char * filename, const char * message) {

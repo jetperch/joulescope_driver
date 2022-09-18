@@ -301,6 +301,9 @@ struct js220_port3_msg_s {
 };
 
 typedef union js220_i128_u {
+#if defined(__clang__) || defined(__GNUC__)
+    __extension__ __int128 i128;
+#endif
     int64_t i64[2];
     uint64_t u64[2];
     uint32_t u32[4];

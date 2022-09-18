@@ -37,10 +37,9 @@ enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
     JSDRV_PAYLOAD_TYPE_USB_BULK,
 };
 
-enum jsdrvp_msg_type_e {
-    JSDRV_MSG_TYPE_NORMAL = 0x55aa1234U,
-    JSDRV_MSG_TYPE_DATA = 0xaa55F00FU,
-};
+// enum jsdrvp_msg_type_e
+#define JSDRV_MSG_TYPE_NORMAL   0x55aa1234U
+#define JSDRV_MSG_TYPE_DATA     0xaa55F00FU
 
 struct jsdrvp_payload_subscribe_s {  // also for unsubscribe
     char topic[JSDRV_TOPIC_LENGTH_MAX];

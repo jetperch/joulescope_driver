@@ -79,6 +79,7 @@ static void generate(struct js110_sp_s * s, uint8_t current_range, uint8_t gap, 
 
 static void expect_nan(void * user_data, size_t i, struct js110_sample_s sample) {
     (void) user_data;
+    (void) i;
     assert_true(isnan(sample.i));
     assert_true(isnan(sample.v));
     assert_true(isnan(sample.p));
@@ -124,6 +125,7 @@ struct mean_s {
 };
 
 static void expect_mean(void * user_data, size_t i, struct js110_sample_s sample) {
+    (void) i;
     struct mean_s * m = (struct mean_s *) user_data;
     //printf("mean %f %f %f\n", sample.i, sample.v, sample.p);
     assert_false(isnan(sample.i));

@@ -59,6 +59,7 @@ static int usage() {
 }
 
 void on_mem_rdata(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) topic;
     struct app_s * self = (struct app_s *) user_data;
     if (JSDRV_UNION_BIN != value->type) {
         printf("Read data not in BIN format\n");

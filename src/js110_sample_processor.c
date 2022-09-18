@@ -104,7 +104,7 @@ void js110_sp_reset(struct js110_sp_s * self) {
     self->_idx_out = 0;
     self->_idx_suppress_start = 0;
 
-    for (int idx = 0; idx < JS110_SUPPRESS_SAMPLES_MAX; ++idx) {
+    for (uint32_t idx = 0; idx < JS110_SUPPRESS_SAMPLES_MAX; ++idx) {
         self->samples[idx] = SAMPLE_MISSING;
     }
 }

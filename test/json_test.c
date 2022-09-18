@@ -174,6 +174,7 @@ static void test_array_trailing_comma(void **state) {
 }
 
 static void test_strcmp(void **state) {
+    (void) state;
     assert_int_equal(-2, jsdrv_json_strcmp(NULL, &cstr("b")));  // include null terminator in size!
     assert_int_equal(-1, jsdrv_json_strcmp("", &cstr("b")));
     assert_int_equal(-1, jsdrv_json_strcmp("a", &cstr("b")));
@@ -189,6 +190,7 @@ static void test_strcmp(void **state) {
 }
 
 static void test_f64(void **state) {
+    (void) state;
     expect_array_start();
     expect_tk(&jsdrv_union_f64(2.25));
     expect_tk(&jsdrv_union_f64(-2.25));

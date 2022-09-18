@@ -21,7 +21,7 @@
 #include <string.h>
 
 
-static const uint8_t CALIBRATION_MAGIC[] = "\xd3tagfmt \r\n \n  \x1a\x1c";
+//static const uint8_t CALIBRATION_MAGIC[] = "\xd3tagfmt \r\n \n  \x1a\x1c";
 
 struct tl_s {
     uint32_t tag;

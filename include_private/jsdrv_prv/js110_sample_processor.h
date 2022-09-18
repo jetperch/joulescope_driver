@@ -30,8 +30,8 @@
 
 JSDRV_CPP_GUARD_START
 
-#define JS110_SUPPRESS_SAMPLES_MAX 64  // must be power of 2
-#define JS110_I_RANGE_MISSING 8
+#define JS110_SUPPRESS_SAMPLES_MAX 64U  // must be power of 2
+#define JS110_I_RANGE_MISSING 8U
 
 enum js110_supress_mode_e {
     JS110_SUPPRESS_MODE_OFF       = 0,    // disabled, force zero delay

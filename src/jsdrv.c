@@ -476,7 +476,7 @@ static void device_remove_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * 
 static void handle_backend_init_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg) {
     JSDRV_ASSERT(c && msg);
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_I32);
-    char prefix = msg->payload.str[0];
+    uint8_t prefix = (uint8_t) msg->payload.str[0];
     if ((prefix >= BACKEND_COUNT_MAX) || !c->backends[prefix]) {
         JSDRV_LOGE("invalid backend: %d = %c", (int) prefix, prefix);
     } else {
@@ -592,15 +592,15 @@ static int32_t backend_init(struct jsdrv_context_s * c, jsdrv_backend_factory fa
         return JSDRV_ERROR_UNSPECIFIED;
     }
     backend->status = JSDRVBK_STATUS_INITIALIZING;
-    if (backend->prefix > BACKEND_COUNT_MAX) {
+    if ((uint8_t) backend->prefix > BACKEND_COUNT_MAX) {
         JSDRV_LOGE("invalid backend prefix value: ord=%d", (int) backend->prefix);
         return JSDRV_ERROR_UNSPECIFIED;
     }
-    if (c->backends[backend->prefix]) {
+    if (c->backends[(uint8_t) backend->prefix]) {
         JSDRV_LOGE("duplicate backend prefix: %c", backend->prefix);
         return JSDRV_ERROR_UNSPECIFIED;
     }
-    c->backends[backend->prefix] = backend;
+    c->backends[(uint8_t) backend->prefix] = backend;
     return 0;
 }
 
@@ -849,6 +849,7 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
 }
 
 void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
+    timeout_ms = timeout_ms ? timeout_ms : API_TIMEOUT_MS;
     JSDRV_LOGI("jsdrv_finalize %p", context);
     struct jsdrv_context_s * c = context;
     if (c && (NULL != context->msg_cmd)) {
@@ -857,7 +858,7 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(context);
         jsdrv_cstr_copy(msg->topic, JSDRV_MSG_FINALIZE, sizeof(msg->topic));
         msg_queue_push(context->msg_cmd, msg);
-        jsdrv_thread_join(&context->thread, API_TIMEOUT_MS);
+        jsdrv_thread_join(&context->thread, timeout_ms);
         jsdrv_pubsub_finalize(c->pubsub);
         c->pubsub = NULL;
 

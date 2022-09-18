@@ -280,7 +280,7 @@ static struct jsdrvp_msg_s * ll_await(struct dev_s * d, msg_filter_fn filter_fn,
         }
         t_now = jsdrv_time_ms_u32();
         timeout_ms = t_end - t_now;
-        if ((timeout_ms > (1 << 31U)) || (timeout_ms == 0)) {
+        if ((timeout_ms > (1U << 31U)) || (timeout_ms == 0)) {
             JSDRV_LOGW("ll_await timed out");
             return NULL;
         }
@@ -292,6 +292,7 @@ static struct jsdrvp_msg_s * ll_await_topic(struct dev_s * d, const char * topic
     return ll_await(d, msg_filter_by_topic, (void *) topic, timeout_ms);
 }
 
+#if 0
 static int32_t jsdrvb_ctrl_out(struct dev_s * d, usb_setup_t setup, const void * buffer) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
     jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_CTRL_OUT, sizeof(m->topic));
@@ -316,6 +317,7 @@ static int32_t jsdrvb_ctrl_out(struct dev_s * d, usb_setup_t setup, const void *
     jsdrvp_msg_free(d->context, m);
     return 0;
 }
+#endif
 
 static int32_t jsdrvb_ctrl_in(struct dev_s * d, usb_setup_t setup, void * buffer, uint32_t * size) {
     int32_t rv = 0;

@@ -394,7 +394,7 @@ static struct jsdrvp_msg_s * ll_await_topic(struct js110_dev_s * d, const char *
         }
         t_now = jsdrv_time_ms_u32();
         timeout_ms = t_end - t_now;
-        if ((timeout_ms > (1 << 31U)) || (0 == timeout_ms)) {
+        if ((timeout_ms > (1U << 31U)) || (0 == timeout_ms)) {
             return NULL;
         }
     }
@@ -852,9 +852,9 @@ static void add_f32_field(struct js110_dev_s * d, uint8_t idx, float value) {
     struct jsdrvp_msg_s * m;
     struct port_s * p = &d->ports[idx];
 
-
-    if (!d->param_values[field_def->param].value.u8) {
+    if (0 == d->param_values[field_def->param].value.u8) {
         if (p->msg) {
+            JSDRV_LOGI("channel disabled, discard partial message");
             jsdrvp_msg_free(d->context, p->msg);
             p->msg = NULL;
         }
@@ -883,7 +883,7 @@ static void add_f32_field(struct js110_dev_s * d, uint8_t idx, float value) {
     data[s->element_count++] = value;
     ++p->sample_id_next;
 
-    if ((s->element_count * sizeof(float)) >= JSDRV_STREAM_DATA_SIZE) {
+    if ((s->element_count * s->element_size_bits / 8) >= JSDRV_STREAM_DATA_SIZE) {
         jsdrvp_backend_send(d->context, p->msg);
         p->msg = NULL;
     }
@@ -919,14 +919,14 @@ static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
         d->packet_index = pkt_index;
     }
     while ((d->packet_index & 0xffff) != pkt_index) {
-        JSDRV_LOGI("pkt_index skip: expected %d, received %d", d->packet_index, pkt_index);
-        for (int i = 0; i < (FRAME_SIZE_BYTES - 8) / 4; ++i) {
+        JSDRV_LOGW("pkt_index skip: expected %d, received %d", d->packet_index, pkt_index);
+        for (uint32_t i = 2; i < (FRAME_SIZE_BYTES / 4); ++i) {
             handle_sample(d, 0xffffffffLU, voltage_range);
         }
         ++d->packet_index;
     }
-    for (int i = 0; i < (FRAME_SIZE_BYTES - 8) / 4; ++i) {
-        handle_sample(d, p_u32[i + 2], voltage_range);
+    for (uint32_t i = 2; i < (FRAME_SIZE_BYTES / 4); ++i) {
+        handle_sample(d, p_u32[i], voltage_range);
     }
     ++d->packet_index;
 }

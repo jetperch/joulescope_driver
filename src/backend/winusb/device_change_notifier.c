@@ -58,8 +58,8 @@ static LRESULT CALLBACK window_callback(HWND hwnd, UINT nMsg, WPARAM wParam, LPA
 
         case WM_DEVICECHANGE: {
             // Should start with DEV_BROADCAST_HDR and validate.
-            DEV_BROADCAST_DEVICEINTERFACE* hdr;
-            hdr = (DEV_BROADCAST_DEVICEINTERFACE*) lParam;
+            //DEV_BROADCAST_DEVICEINTERFACE* hdr;
+            //hdr = (DEV_BROADCAST_DEVICEINTERFACE*) lParam;
 
             // Only handle all devices arrived or all devices removed.
             if ((LOWORD(wParam) != DBT_DEVICEARRIVAL) &&
@@ -91,7 +91,7 @@ static LRESULT CALLBACK window_callback(HWND hwnd, UINT nMsg, WPARAM wParam, LPA
 }
 
 static DWORD WINAPI window_create(LPVOID lpParam) {
-    lpParam; // unused
+    (void) lpParam; // unused
     DEV_BROADCAST_DEVICEINTERFACE NotificationFilter;
     MSG event;
     WNDCLASSEXW* wndclass;

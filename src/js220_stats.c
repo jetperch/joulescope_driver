@@ -47,9 +47,14 @@ static js220_i128 udiv(js220_i128 dividend, uint64_t divisor, uint64_t * remaind
         remainder = &r;
     }
     js220_i128 result;
+#if defined(__clang__) || defined(__GNUC__)
+    result.i128 = dividend.i128 / divisor;
+    *remainder = dividend.i128 - (result.i128 * divisor);
+#else
     result.u64[1] = dividend.u64[1] / divisor;
     dividend.u64[1] -= result.u64[1] * divisor;
     result.u64[0] = _udiv128(dividend.u64[1], dividend.u64[0], divisor, remainder);
+#endif
     return result;
 }
 
@@ -105,7 +110,7 @@ static double compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q) {
 }
 
 static js220_i128 compute_integral(js220_i128 x, uint32_t n) {
-    if (x.i64 < 0) {
+    if (x.i64[1] < 0) {
         x = neg(x);
         x = udiv(x, n, NULL);
         x = neg(x);

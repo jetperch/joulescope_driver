@@ -24,12 +24,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-#include <Windows.h>
+#include "jsdrv_prv/thread.h"
 
 
 typedef int32_t (*device_fn)(const char * device, void * user_data);
 
-static int usage() {
+static int usage(void) {
     printf("usage: jsdrv_util statistics\n");
     return 1;
 }
@@ -107,6 +107,7 @@ static int32_t device_initialize(const char * device, void * user_data) {
 }
 
 int on_statistics(struct app_s * self, int argc, char * argv[]) {
+    (void) argv;
     while (argc) {
         return usage();
     }
@@ -122,7 +123,7 @@ int on_statistics(struct app_s * self, int argc, char * argv[]) {
            "charge,energy\n");
 
     while (1) {
-        Sleep(1); // do nothing
+        jsdrv_thread_sleep_ms(1); // do nothing
     }
 
     return 0;

@@ -137,6 +137,9 @@ static int usage() {
 }
 
 int on_help(struct app_s * self, int argc, char * argv[]) {
+    (void) self;
+    (void) argc;
+    (void) argv;
     usage();
     return 0;
 }

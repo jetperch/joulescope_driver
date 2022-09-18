@@ -47,7 +47,7 @@ JSDRV_CPP_GUARD_START
 #define THREAD_RETURN_TYPE DWORD WINAPI
 #define THREAD_ARG_TYPE LPVOID
 #define THREAD_RETURN() return 0
-typedef DWORD (*jsdrv_thread_fn)(LPVOID arg);
+typedef DWORD (__stdcall *jsdrv_thread_fn)(LPVOID arg);
 struct jsdrv_thread_s {
     HANDLE thread;
     DWORD thread_id;

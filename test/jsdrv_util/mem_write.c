@@ -54,7 +54,7 @@ static int32_t file_read(const char * filename, uint8_t ** data, uint32_t * size
     size_t sz_read = fread(p, 1, sz, fh);
     fclose(fh);
 
-    if (sz_read != sz) {
+    if (sz_read != (size_t) sz) {
         printf("Could not read entire file: %d != %d\n", (int) sz_read, (int) sz);
         return 1;
     }

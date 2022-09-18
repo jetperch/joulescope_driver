@@ -396,34 +396,6 @@ JSDRV_API struct jsdrv_list_s * jsdrv_list_index(struct jsdrv_list_s * list,
                                            size_t index);
 
 /**
- * @brief Get the index of the item.
- *
- * @param list The list pointer.
- * @param item The pointer to the item to get.
- * @return The index of item or -1 if not found in the list.  The first
- *      item in the list is at index 0.
- *
- * This operation is O(n).
- */
-JSDRV_API size_t jsdrv_list_index_of(struct jsdrv_list_s * list,
-                                     struct jsdrv_list_s * item);
-
-/**
- * @brief Check if a list contains an item.
- *
- * @param list The list pointer.
- * @param item The pointer to the item to check.
- * @return true if the item was found in the list or false if it was
- *      not found in the list.
- *
- * This operation is O(n).
- */
-JSDRV_INLINE_FN bool jsdrv_list_contains(struct jsdrv_list_s * list,
-                                     struct jsdrv_list_s * item) {
-    return (jsdrv_list_index_of(list, item) < 0);
-}
-
-/**
  * @brief Append all items in list to list_tgt.
  *
  * @param list_tgt The target list that will be modified to have append
