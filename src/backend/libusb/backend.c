@@ -157,12 +157,13 @@ static int32_t device_add(struct backend_s * s, libusb_device * usb_device, stru
                 JSDRV_LOGE("could not set device prefix");
                 break;
             }
-            jsdrv_list_append(&s->devices_active, &d->item);
+            jsdrv_list_add_tail(&s->devices_active, &d->item);
             device_announce(s, d, JSDRV_MSG_DEVICE_ADD);
             return 0;
         }
+        ++dt;
     }
-    jsdrv_list_append(&s->devices_free, &d->item);
+    jsdrv_list_add_tail(&s->devices_free, &d->item);
     return 1;
 }
 
@@ -174,7 +175,7 @@ static void device_remove(struct backend_s * s, struct dev_s * d) {
         libusb_unref_device(d->usb_device);
     }
     device_announce(s, d, JSDRV_MSG_DEVICE_REMOVE);
-    jsdrv_list_append(&s->devices_free, &d->item);
+    jsdrv_list_add_tail(&s->devices_free, &d->item);
 }
 
 static void handle_hotplug(struct backend_s * s) {
@@ -316,7 +317,7 @@ exit:
     libusb_hotplug_deregister_callback(s->ctx, s->hotplug_callback_handle);
     // todo deinitialize
     libusb_exit(s->ctx);
-    JSDRV_LOGI("jsdrv_usb_backend_thread start");
+    JSDRV_LOGI("jsdrv_usb_backend_thread exit");
     return NULL;
 }
 
@@ -324,6 +325,7 @@ static void finalize(struct jsdrvbk_s * backend) {
     struct backend_s * s = (struct backend_s *) backend;
     char topic[2] = {backend->prefix, 0};
     s->do_exit = true;
+    JSDRV_LOGI("backend finalize");
     if (s->thread_id) {
         jsdrvp_send_finalize_msg(s->context, s->backend.cmd_q, topic);
         int rv = pthread_join(s->thread_id, NULL);
@@ -338,10 +340,14 @@ static void finalize(struct jsdrvbk_s * backend) {
     }
     for (int i = 0; i < DEVICES_MAX; ++i) {
         struct dev_s * d = &s->devices[i];
-        msg_queue_finalize(d->ll_device.cmd_q);
-        d->ll_device.cmd_q = NULL;
-        msg_queue_init(d->ll_device.rsp_q);
-        d->ll_device.rsp_q = NULL;
+        if (d->ll_device.cmd_q) {
+            msg_queue_finalize(d->ll_device.cmd_q);
+            d->ll_device.cmd_q = NULL;
+        }
+        if (d->ll_device.rsp_q) {
+            msg_queue_finalize(d->ll_device.rsp_q);
+            d->ll_device.rsp_q = NULL;
+        }
         if (d->handle) {
             libusb_close(d->handle);
             d->handle = NULL;
@@ -366,7 +372,7 @@ int32_t jsdrv_usb_backend_factory(struct jsdrv_context_s * context, struct jsdrv
         d->ll_device.cmd_q = msg_queue_init();
         d->ll_device.rsp_q = msg_queue_init();
         jsdrv_list_initialize(&d->item);
-        jsdrv_list_append(&s->devices_free, &d->item);
+        jsdrv_list_add_tail(&s->devices_free, &d->item);
     }
 
     if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
