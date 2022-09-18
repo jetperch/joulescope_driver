@@ -304,7 +304,7 @@ static const struct param_s PARAMS[] = {
 
 struct field_def_s {
     const char * data_topic;
-    uint8_t field_id;
+    uint8_t field_id;                   // jsdrv_field_e
     uint8_t index;
     uint8_t element_type;               // jsdrv_data_type_e
     uint8_t element_size_bits;
