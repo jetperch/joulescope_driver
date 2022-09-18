@@ -298,7 +298,9 @@ static void * log_thread(void * arg) {
     while (!self->quit) {
         fds.revents = 0;
         poll(&fds, 1, 100);
-        read(self->fd_read, rd_buf, sizeof(rd_buf));
+        if (read(self->fd_read, rd_buf, sizeof(rd_buf)) <= 0) {
+            break;  // EOF or error
+        }
         process(self);
     }
     return 0;
@@ -306,7 +308,7 @@ static void * log_thread(void * arg) {
 
 static void thread_notify(struct log_s * self) {
     uint8_t wr_buf[] = {1};
-    write(self->fd_write, wr_buf, 1);
+    (void) write(self->fd_write, wr_buf, 1);  //
 }
 
 static int32_t thread_start(struct log_s * self) {
@@ -328,7 +330,7 @@ static int32_t thread_start(struct log_s * self) {
 static void thread_stop(struct log_s * self) {
     uint8_t wr_buf[] = {1};
     self->quit = 1;
-    write(self->fd_write, wr_buf, 1);
+    (void) write(self->fd_write, wr_buf, 1);
     int rc = pthread_join(self->thread_id, NULL);
     if (rc) {
         printf("ERROR: log thread_stop not closed cleanly: %d\n", rc);

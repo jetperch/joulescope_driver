@@ -31,6 +31,9 @@ jobs:
       - name: Checkout the code
         uses: actions/checkout@v2
 
+      - name: Install libusb
+        run: brew install libusb
+
       - name: Configure build using CMake
         run: cmake -S . -B cmake_build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
 
