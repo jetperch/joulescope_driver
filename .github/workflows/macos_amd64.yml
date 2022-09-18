@@ -38,7 +38,7 @@ jobs:
         run: cmake --build cmake_build
 
       - name: Run native tests
-        run: cmake --build cmake_build --target test
+        run: env CTEST_OUTPUT_ON_FAILURE=1 cmake --build cmake_build --target test
 
       - name: Install python dependencies
         run: pip3 install -U -r requirements.txt
