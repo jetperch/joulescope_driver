@@ -40,6 +40,11 @@ enum js110_supress_mode_e {
     JS110_SUPPRESS_MODE_NAN       = 3,
 };
 
+enum js110_suppress_win_e {
+    JS110_SUPPRESS_WIN_MANUAL  = 0,
+    JS110_SUPPRESS_WIN_M       = 1,
+    JS110_SUPPRESS_WIN_N       = 2,
+};
 
 struct js110_sample_s {
     float i;
@@ -56,6 +61,7 @@ struct js110_sp_s {
 
     struct js110_sample_s samples[JS110_SUPPRESS_SAMPLES_MAX];
     uint8_t head;
+    uint8_t start;
 
     int32_t is_skipping;
     int32_t _idx_suppress_start;
@@ -88,6 +94,7 @@ void js110_sp_reset(struct js110_sp_s * self);
 
 struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample_u32, uint8_t v_range);
 
+int32_t js110_sp_suppress_win(struct js110_sp_s * self, uint8_t window);
 
 JSDRV_CPP_GUARD_END
 

@@ -6,9 +6,10 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 0.2.3
 
-2022 Sep 16 [in progress]
+2022 Sep 18 [in progress]
 
 * Fixed support for multiple (not just first found) of same device type.
+* Improved JS110 support.
 
 
 ## 0.2.2

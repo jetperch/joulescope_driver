@@ -43,35 +43,6 @@
 
 struct js110_dev_s;  // forward declaration, see below
 
-struct field_def_s {
-    const char * data_topic;
-    uint8_t field_id;
-    uint8_t index;
-    uint8_t element_type;               // jsdrv_data_type_e
-    uint8_t element_size_bits;
-    uint8_t downsample;
-};
-
-#define FIELD(data_topic_, field_, index_, type_, size_, downsample_) {    \
-    .data_topic = (data_topic_),                                                        \
-    .field_id=JSDRV_FIELD_##field_,                                                     \
-    .index=(index_),                                                                    \
-    .element_type=JSDRV_DATA_TYPE_##type_,                                              \
-    .element_size_bits=(size_),                                                         \
-    .downsample=(downsample_),                                                          \
-}
-
-struct field_def_s FIELDS[] = {
-        //   (ctrl field,       data field, index, el_type, el_size_bits, downsample)
-        FIELD("s/i/!data",       CURRENT,     0, FLOAT, 32, 1),  // 5
-        FIELD("s/v/!data",       VOLTAGE,     0, FLOAT, 32, 1),  // 6
-        FIELD("s/p/!data",       POWER,       0, FLOAT, 32, 1),  // 7
-        // todo support remaining fields
-        //FIELD("s/i/range/!data", RANGE,       0, UINT,  2, 1),   // 4
-        //FIELD("s/gpi/0/!data",   GPI,         0, UINT,  0, 1),   // 8
-        //FIELD("s/gpi/1/!data",   GPI,         1, UINT,  0, 1),   // 9
-};
-
 typedef void (*param_fn)(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 
 struct param_s {
@@ -90,6 +61,13 @@ static void on_voltage_lsb_source(struct js110_dev_s * d, const struct jsdrv_uni
 static void on_current_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_voltage_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_power_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+
+static void on_i_range_mode(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_i_range_pre(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_i_range_win(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_i_range_win_sz(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_i_range_post(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 
 
 enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
@@ -103,6 +81,12 @@ enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
     PARAM_I_CTRL,
     PARAM_V_CTRL,
     PARAM_P_CTRL,
+    PARAM_STATS_CTRL,
+    PARAMS_I_RANGE_MODE,
+    PARAMS_I_RANGE_PRE,
+    PARAMS_I_RANGE_WIN,
+    PARAMS_I_RANGE_WIN_SZ,
+    PARAMS_I_RANGE_POST,
 };
 
 
@@ -143,19 +127,19 @@ static const struct param_s PARAMS[] = {
     {
         "s/extio/voltage",
         "{"
-            "\"dtype\": \"u8\","
+            "\"dtype\": \"u32\","
             "\"brief\": \"The external IO voltage.\","
-            "\"default\": 0,"
+            "\"default\": 3300,"
             "\"options\": ["
-                "[0, \"0 V\", \"off\"],"
-                "[1800, \"1.8 V\"],"
-                "[2100, \"2.1 V\"],"
-                "[2500, \"2.5 V\"],"
-                "[2700, \"2.7 V\"],"
-                "[3000, \"3.0 V\"],"
-                "[3300, \"3.3 V\"],"
-                "[3600, \"3.6 V\"],"
-                "[5000, \"5.0 V\"]"
+                "[0, \"0V\", \"off\"],"
+                "[1800, \"1.8V\"],"
+                "[2100, \"2.1V\"],"
+                "[2500, \"2.5V\"],"
+                "[2700, \"2.7V\"],"
+                "[3000, \"3.0V\"],"
+                "[3300, \"3.3V\"],"
+                "[3600, \"3.6V\"],"
+                "[5000, \"5.0V\"]"
             "]"
         "}",
         on_extio_voltage,
@@ -174,7 +158,7 @@ static const struct param_s PARAMS[] = {
         on_gpo0_value,
     },
     {
-        "s/gpo/0/value",
+        "s/gpo/1/value",
         "{"
             "\"dtype\": \"bool\","
             "\"brief\": \"The general-purpose output 1 value.\","
@@ -194,8 +178,8 @@ static const struct param_s PARAMS[] = {
             "\"default\": 0,"
             "\"options\": ["
                 "[0, \"normal\"],"
-                "[1, \"gpi0\"],"
-                "[2, \"gpi1\"]"
+                "[2, \"gpi0\"],"
+                "[3, \"gpi1\"]"
             "]"
         "}",
         on_current_lsb_source,
@@ -208,8 +192,8 @@ static const struct param_s PARAMS[] = {
             "\"default\": 0,"
             "\"options\": ["
                 "[0, \"normal\"],"
-                "[1, \"gpi0\"],"
-                "[2, \"gpi1\"]"
+                "[2, \"gpi0\"],"
+                "[3, \"gpi1\"]"
             "]"
         "}",
         on_voltage_lsb_source
@@ -241,12 +225,117 @@ static const struct param_s PARAMS[] = {
         "}",
         on_power_ctrl,
     },
-
+    {
+        "s/stats/ctrl",
+        "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable stats input data stream (u8).\","
+            "\"default\": 0"
+        "}",
+        on_stats_ctrl,
+    },
+    {
+        "s/i/range/mode",
+        "{"
+            "\"dtype\": \"u8\","
+            "\"brief\": \"The current range suppression mode.\","
+            "\"default\": 2,"
+            "\"options\": ["
+                "[0, \"off\"],"
+                "[1, \"mean\"],"
+                "[2, \"interp\", \"interpolate\"],"
+                "[3, \"nan\"]"
+            "]"
+        "}",
+        on_i_range_mode,
+    },
+    {
+        "s/i/range/pre",
+        "{"
+            "\"dtype\": \"u8\","
+            "\"brief\": \"The number of samples before the range switch to include.\","
+            "\"default\": 1,"
+            "\"range\": [0, 8]"
+        "}",
+        on_i_range_pre,
+    },
+    {
+        "s/i/range/win",
+        "{"
+            "\"dtype\": \"u8\","
+            "\"brief\": \"The window type.\","
+            "\"default\": 2,"
+            "\"options\": ["
+                "[0, \"manual\"],"
+                "[1, \"m\"],"
+                "[2, \"n\"]"
+            "]"
+        "}",
+        on_i_range_win,
+    },
+    {
+        "s/i/range/win_sz",
+        "{"
+            "\"dtype\": \"u8\","
+            "\"brief\": \"The manual window size.\","
+            "\"default\": 10,"
+            "\"range\": [0, 31]"
+        "}",
+        on_i_range_win_sz,
+    },
+    {
+        "s/i/range/post",
+        "{"
+            "\"dtype\": \"u8\","
+            "\"brief\": \"The number of samples after the range switch to include.\","
+            "\"default\": 1,"
+            "\"range\": [0, 8]"
+        "}",
+        on_i_range_post,
+    },
     // todo current_range, current_ranging_type, current_ranging_samples_pre, current_ranging_samples_window, current_ranging_samples_post
     // buffer_duration
     // reduction_frequency
     // sampling_frequency
+    // on-instrument statistics
     {NULL, NULL, NULL},  // MUST BE LAST
+};
+
+
+struct field_def_s {
+    const char * data_topic;
+    uint8_t field_id;
+    uint8_t index;
+    uint8_t element_type;               // jsdrv_data_type_e
+    uint8_t element_size_bits;
+    uint8_t downsample;
+    enum param_e param;
+};
+
+#define FIELD(data_topic_, field_, index_, type_, size_, downsample_, param_) {    \
+    .data_topic = (data_topic_),                                                        \
+    .field_id=JSDRV_FIELD_##field_,                                                     \
+    .index=(index_),                                                                    \
+    .element_type=JSDRV_DATA_TYPE_##type_,                                              \
+    .element_size_bits=(size_),                                                         \
+    .downsample=(downsample_),                                                          \
+    .param=(param_),                                                                    \
+}
+
+struct field_def_s FIELDS[] = {
+        //   (ctrl field,       data field, index, el_type, el_size_bits, downsample, param)
+        FIELD("s/i/!data",       CURRENT,     0, FLOAT, 32, 1, PARAM_I_CTRL),
+        FIELD("s/v/!data",       VOLTAGE,     0, FLOAT, 32, 1, PARAM_V_CTRL),
+        FIELD("s/p/!data",       POWER,       0, FLOAT, 32, 1, PARAM_P_CTRL),
+        // todo support remaining fields
+        //FIELD("s/i/range/!data", RANGE,       0, UINT,  2, 1, 4),
+        //FIELD("s/gpi/0/!data",   GPI,         0, UINT,  0, 1, 8),
+        //FIELD("s/gpi/1/!data",   GPI,         1, UINT,  0, 1, 9),
+};
+
+struct port_s {
+    uint64_t sample_id_next;
+    struct jsdrvp_msg_s * msg;
 };
 
 struct js110_dev_s {
@@ -258,9 +347,7 @@ struct js110_dev_s {
     uint64_t packet_index;
     struct js110_sp_s sample_processor;
 
-    struct jsdrvp_msg_s * data_msg[JSDRV_ARRAY_SIZE(FIELDS)];
-    uint64_t sample_id;
-    uint32_t msg_sample_count;
+    struct port_s ports[JSDRV_ARRAY_SIZE(FIELDS)];
 
     volatile bool do_exit;
     jsdrv_thread_t thread;
@@ -529,7 +616,7 @@ static int32_t extio_settings_send(struct js110_dev_s * d) {
     pkt.payload.extio.current_gpi = d->param_values[PARAM_I_LSB_SOURCE].value.u8;
     pkt.payload.extio.voltage_gpi = d->param_values[PARAM_V_LSB_SOURCE].value.u8;
     pkt.payload.extio.gpo0 = d->param_values[PARAM_GPO0_VALUE].value.u8;
-    pkt.payload.extio.gpo1 = d->param_values[PARAM_GPO0_VALUE].value.u8;
+    pkt.payload.extio.gpo1 = d->param_values[PARAM_GPO1_VALUE].value.u8;
     pkt.payload.extio.io_voltage_mv = d->param_values[PARAM_EXTIO_VOLTAGE].value.u32;
 
     usb_setup_t setup = { .s = {
@@ -603,6 +690,30 @@ static void on_voltage_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s *
 
 static void on_power_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
     on_update_ctrl(d, value, PARAM_P_CTRL);
+}
+
+static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    on_update_ctrl(d, value, PARAM_STATS_CTRL);
+}
+
+static void on_i_range_mode(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    d->sample_processor._suppress_mode = value->value.u8;
+}
+
+static void on_i_range_pre(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    d->sample_processor._suppress_samples_pre = value->value.u8;
+}
+
+static void on_i_range_win(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    js110_sp_suppress_win(&d->sample_processor, value->value.u8);
+}
+
+static void on_i_range_win_sz(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    d->sample_processor._suppress_samples_window = value->value.u8;
+}
+
+static void on_i_range_post(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    d->sample_processor._suppress_samples_post = value->value.u8;
 }
 
 static int32_t d_open(struct js110_dev_s * d) {
@@ -735,54 +846,54 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
-static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_range) {
+static void add_f32_field(struct js110_dev_s * d, uint8_t idx, float value) {
     struct jsdrv_stream_signal_s * s;
-    struct js110_sample_s z = js110_sp_process(&d->sample_processor, sample, v_range);
+    struct field_def_s * field_def = &FIELDS[idx];
+    struct jsdrvp_msg_s * m;
+    struct port_s * p = &d->ports[idx];
 
-    if (NULL == d->data_msg[0]) {
-        for (size_t i = 0; i < JSDRV_ARRAY_SIZE(FIELDS); ++i) {
-            struct field_def_s * field_def = &FIELDS[i];
-            struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_data(d->context, "");
-            tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s", d->ll.prefix, field_def->data_topic);
-            s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
-            s->sample_id = d->sample_id;
-            s->index = field_def->index;
-            s->field_id = field_def->field_id;
-            s->element_type = field_def->element_type;
-            s->element_size_bits = field_def->element_size_bits;
-            s->element_count = 0;
-            m->u32_a = (uint32_t) d->sample_id;
-            m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
-            m->value.size = JSDRV_STREAM_HEADER_SIZE;
-            d->data_msg[i] = m;
+
+    if (!d->param_values[field_def->param].value.u8) {
+        if (p->msg) {
+            jsdrvp_msg_free(d->context, p->msg);
+            p->msg = NULL;
         }
-        d->msg_sample_count = 0;
+        return;
     }
 
-    float values[] = {(float) z.i, (float) z.v, (float) z.p};
-    uint8_t enables[] = {
-            d->param_values[PARAM_I_CTRL].value.u8,
-            d->param_values[PARAM_V_CTRL].value.u8,
-            d->param_values[PARAM_P_CTRL].value.u8};
-    for (int i = 0; i < JSDRV_ARRAY_SIZE(FIELDS); ++i) {
-        struct jsdrvp_msg_s *m = d->data_msg[i];
+    if (NULL == p->msg) {
+        m = jsdrvp_msg_alloc_data(d->context, "");
+        tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s", d->ll.prefix, field_def->data_topic);
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
-        float *data = (float *) s->data;
-        data[s->element_count++] = values[i];
+        s->sample_id = p->sample_id_next;
+        s->index = field_def->index;
+        s->field_id = field_def->field_id;
+        s->element_type = field_def->element_type;
+        s->element_size_bits = field_def->element_size_bits;
+        s->element_count = 0;
+        m->u32_a = (uint32_t) p->sample_id_next;
+        m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
+        m->value.size = JSDRV_STREAM_HEADER_SIZE;
+        p->msg = m;
     }
-    ++d->sample_id;
-    ++d->msg_sample_count;
-    if (d->msg_sample_count >= 0x4000) {
-        for (size_t i = 0; i < JSDRV_ARRAY_SIZE(FIELDS); ++i) {
-            if (enables[i]) {
-                jsdrvp_backend_send(d->context, d->data_msg[i]);
-            } else {
-                jsdrvp_msg_free(d->context, d->data_msg[i]);
-            }
-            d->data_msg[i] = NULL;
-        }
-        d->msg_sample_count = 0;
+
+    m = p->msg;
+    s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+    float *data = (float *) s->data;
+    data[s->element_count++] = value;
+    ++p->sample_id_next;
+
+    if ((s->element_count * sizeof(float)) >= JSDRV_STREAM_DATA_SIZE) {
+        jsdrvp_backend_send(d->context, p->msg);
+        p->msg = NULL;
     }
+}
+
+static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_range) {
+    struct js110_sample_s z = js110_sp_process(&d->sample_processor, sample, v_range);
+    add_f32_field(d, 0, z.i);
+    add_f32_field(d, 1, z.v);
+    add_f32_field(d, 2, z.p);
 }
 
 static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
@@ -808,6 +919,7 @@ static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
         d->packet_index = pkt_index;
     }
     while ((d->packet_index & 0xffff) != pkt_index) {
+        JSDRV_LOGI("pkt_index skip: expected %d, received %d", d->packet_index, pkt_index);
         for (int i = 0; i < (FRAME_SIZE_BYTES - 8) / 4; ++i) {
             handle_sample(d, 0xffffffffLU, voltage_range);
         }
@@ -834,7 +946,6 @@ static bool handle_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
         return false;
     }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
-        JSDRV_LOGI("stream_in_data sz=%d", (int) msg->value.size);
         handle_stream_in(d, msg);
         msg_queue_push(d->ll.cmd_q, msg);  // return
         return true;

@@ -15,6 +15,7 @@
  */
 
 #include "jsdrv_prv/js110_sample_processor.h"
+#include "jsdrv/error_code.h"
 #include <string.h>
 #include <float.h>
 #include <math.h>
@@ -136,12 +137,100 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
         s.gpi0 = (sample_u32 >> 2) & 1;
         s.gpi1 = (sample_u32 >> 18) & 1;
     }
+
+    if ((self->_i_range_last != i_range) && (self->_i_range_last != JS110_I_RANGE_MISSING)) {
+        uint8_t suppress_window;
+        if (self->_suppress_matrix != NULL) {
+            suppress_window = self->_suppress_matrix[0][i_range][self->_i_range_last];
+        } else {
+            suppress_window = self->_suppress_samples_window;
+        }
+        self->_suppress_samples_counter = suppress_window;
+        if (suppress_window) {
+            if (0 == self->_suppress_samples_remaining) {
+                self->start = self->head;
+            }
+            self->_suppress_samples_remaining = suppress_window + 1;
+        }
+    }
+    self->_i_range_last = i_range;
+
+    if ((self->_suppress_mode == JS110_SUPPRESS_MODE_NAN) && (self->_suppress_samples_counter)) {
+        s.i = NAN;
+        s.v = NAN;
+        s.p = NAN;
+        --self->_suppress_samples_counter;
+    }
+
     self->samples[self->head] = s;
     self->head = ptr_incr(self->head);
 
-    if (self->sample_count >= _SUPPRESS_SAMPLES_MASK) {
-        return self->samples[self->head];
-    } else {
-        return SAMPLE_MISSING;
+    if (self->_suppress_samples_remaining) {
+        ++self->_suppress_samples_counter;
+        --self->_suppress_samples_remaining;
+        if (0 == self->_suppress_samples_remaining) {
+            if (self->_suppress_mode == JS110_SUPPRESS_MODE_MEAN) {
+                for (int32_t j = 0; j < 3; ++j) {
+                    double accum = 0.0f;
+                    uint8_t ptr = self->start;
+                    for (int32_t k = 0; k < self->_suppress_samples_pre; ++k) {
+                        ptr = ptr_decr(ptr);
+                        accum += ((float *) &self->samples[ptr])[j];
+                    }
+
+                    ptr = self->head;
+                    for (int32_t k = 0; k < self->_suppress_samples_post; ++k) {
+                        ptr = ptr_decr(ptr);
+                        accum += ((float *) &self->samples[ptr])[j];
+                    }
+                    accum /= (self->_suppress_samples_pre + self->_suppress_samples_post);
+                    float mean = (float) accum;
+                    ptr = self->start;
+                    for (int32_t k = 0; k < self->_suppress_samples_window; ++k) {
+                        float * f = (float *) &self->samples[ptr];
+                        f[j] = mean;
+                        ptr = ptr_incr(ptr);
+                    }
+                }
+            } else if (self->_suppress_mode == JS110_SUPPRESS_MODE_INTERP) {
+                for (int32_t j = 0; j < 3; ++j) {
+                    double pre = 0.0f;
+                    double post = 0.0f;
+                    uint8_t ptr = self->start;
+                    for (int32_t k = 0; k < self->_suppress_samples_pre; ++k) {
+                        ptr = ptr_decr(ptr);
+                        pre += ((float *) &self->samples[ptr])[j];
+                    }
+                    pre /= self->_suppress_samples_pre;
+
+                    ptr = self->head;
+                    for (int32_t k = 0; k < self->_suppress_samples_post; ++k) {
+                        ptr = ptr_decr(ptr);
+                        post += ((float *) &self->samples[ptr])[j];
+                    }
+                    post /= self->_suppress_samples_post;
+                    double step = (post - pre) / (self->_suppress_samples_window + 1);
+
+                    ptr = self->start;
+                    for (int32_t k = 0; k < self->_suppress_samples_window; ++k) {
+                        float * f = (float *) &self->samples[ptr];
+                        f[j] = (float) (pre + (step * (k + 1)));
+                        ptr = ptr_incr(ptr);
+                    }
+                }
+            }
+        }
     }
+
+    return self->samples[self->head];
+}
+
+int32_t js110_sp_suppress_win(struct js110_sp_s * self, uint8_t window) {
+    switch (window) {
+        case 0: self->_suppress_matrix = NULL; break;
+        case 1: self->_suppress_matrix = &SUPPRESS_MATRIX_M; break;
+        case 2: self->_suppress_matrix = &SUPPRESS_MATRIX_N; break;
+        default: return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    return 0;
 }

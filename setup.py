@@ -102,6 +102,7 @@ extensions = [
                                      #'src/emulated.c',
                                      'src/error_code.c',
                                      'src/js110_cal.c',
+                                     'src/js110_sample_processor.c',
                                      'src/js110_usb.c',
                                      'src/js220_params.c',
                                      'src/js220_usb.c',
