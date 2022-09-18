@@ -50,7 +50,7 @@ static int32_t on_token(void * user_data, const struct jsdrv_union_s * token) {
             break;
         }
         case JSDRV_UNION_I32: check_expected_value(token->value.i32); break;
-        case JSDRV_UNION_F64: check_expected_value(token->value.f64); break;
+        case JSDRV_UNION_F64: check_expected_value(token->value.u64); break;  // check binary representation
         default:
             assert_true(false);
     }
@@ -70,7 +70,7 @@ static int32_t on_token(void * user_data, const struct jsdrv_union_s * token) {
             break;                                                                                  \
         }                                                                                           \
         case JSDRV_UNION_I32:  expect_value(on_token, value, token_->value.i32); break;             \
-        case JSDRV_UNION_F64:  expect_value(on_token, value, token_->value.f64); break;             \
+        case JSDRV_UNION_F64:  expect_value(on_token, value, token_->value.u64); break;             \
         default: assert_true(false); break;                                                         \
     }                                                                                               \
 }
