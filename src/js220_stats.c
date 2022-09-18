@@ -18,8 +18,10 @@
 #include "jsdrv.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/log.h"
+#if _WIN32
 #include <intrin.h>
 #include <immintrin.h>
+#endif
 #include <math.h>
 
 // See https://docs.microsoft.com/en-us/cpp/intrinsics/udiv128
@@ -92,7 +94,12 @@ static double compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q) {
     }
     js220_i128 m;
     js220_i128 d;
+#if defined(__clang__) || defined(__GNUC__)
+    __extension__ __int128 x1_i128 = x1;
+    m.i128 = x1_i128 * x1_i128;
+#else
     m.u64[0] = _umul128(x1, x1, &m.u64[1]);
+#endif
     d = udiv(m, n, NULL);
 
     if (d.u64[0] > x2.u64[0]) {

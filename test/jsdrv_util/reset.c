@@ -17,7 +17,7 @@
 #include "jsdrv_util_prv.h"
 #include <stdio.h>
 #include <string.h>
-#include <windows.h>
+#include "jsdrv_prv/thread.h"
 
 
 static int usage() {
@@ -81,7 +81,7 @@ int on_reset(struct app_s * self, int argc, char * argv[]) {
 
     //printf("Wait for reconnect\n");
     while (!counter) {
-        Sleep(1);
+        jsdrv_thread_sleep_ms(1);
     }
     jsdrv_unsubscribe(self->context, JSDRV_MSG_DEVICE_ADD, on_add, &counter, JSDRV_TIMEOUT_MS_DEFAULT);
     return 0;

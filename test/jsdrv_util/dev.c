@@ -17,7 +17,6 @@
 #include "jsdrv_util_prv.h"
 #include <stdio.h>
 #include <string.h>
-#include <windows.h>
 
 
 static int usage() {
