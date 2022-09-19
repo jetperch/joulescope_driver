@@ -67,7 +67,7 @@ void jsdrv_os_event_free(jsdrv_os_event_t ev) ;
  *
  * @return The event or NULL.
  */
-JSDRV_COMPILER_ALLOC(jsdrv_os_event_free) jsdrv_os_event_t jsdrv_os_event_alloc();
+JSDRV_COMPILER_ALLOC(jsdrv_os_event_free) jsdrv_os_event_t jsdrv_os_event_alloc(void);
 
 /**
  * @brief Signal an event.

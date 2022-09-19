@@ -156,14 +156,14 @@ JSDRV_COMPILER_ALLOC(jsdrv_free) JSDRV_INLINE_FN void * jsdrv_alloc_clr(size_t s
  *      epoch = dateutil.parser.parse('2018-01-01T00:00:00Z').timestamp()
  *      datetime.datetime.fromtimestamp((my_time >> 30) + epoch)
  */
-int64_t jsdrv_time_utc();
+int64_t jsdrv_time_utc(void);
 
 /**
  * @brief Get a monotonically incrementing counter in milliseconds.
  *
  * @return The current tick value.  This rolls over every 49 days.
  */
-uint32_t jsdrv_time_ms_u32();
+uint32_t jsdrv_time_ms_u32(void);
 
 /**
  * Additional functions to define:

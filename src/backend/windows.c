@@ -58,7 +58,7 @@ BOOL GetErrorMessage(DWORD dwErrorCode, char * pBuffer, DWORD cchBufferLength) {
     return (cchMsg > 0);
 }
 
-int64_t jsdrv_time_utc() {
+int64_t jsdrv_time_utc(void) {
     // Contains a 64-bit value representing the number of 100-nanosecond intervals since January 1, 1601 (UTC).
     // python
     // import dateutil.parser
@@ -72,7 +72,7 @@ int64_t jsdrv_time_utc() {
     return JSDRV_COUNTER_TO_TIME(t, frequency);
 }
 
-uint32_t jsdrv_time_ms_u32() {
+uint32_t jsdrv_time_ms_u32(void) {
     return GetTickCount();
 }
 
@@ -131,7 +131,7 @@ void jsdrv_os_event_free(jsdrv_os_event_t ev) {
     CloseHandle(ev);
 }
 
-jsdrv_os_event_t jsdrv_os_event_alloc() {
+jsdrv_os_event_t jsdrv_os_event_alloc(void) {
     return CreateEvent(
             NULL,  // default security attributes
             TRUE,  // manual reset event

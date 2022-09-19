@@ -29,8 +29,9 @@
 #include <poll.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 
-int64_t jsdrv_time_utc() {
+int64_t jsdrv_time_utc(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     int64_t t = JSDRV_TIME_SECOND * (int64_t) ts.tv_sec;
@@ -38,7 +39,7 @@ int64_t jsdrv_time_utc() {
     return t;
 }
 
-uint32_t jsdrv_time_ms_u32() {
+uint32_t jsdrv_time_ms_u32(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint32_t) (((uint64_t) ts.tv_sec) * 1000 + (uint64_t) (ts.tv_nsec / 1000000));
@@ -91,7 +92,7 @@ void jsdrv_os_event_free(jsdrv_os_event_t ev) {
     jsdrv_free(ev);
 }
 
-jsdrv_os_event_t jsdrv_os_event_alloc() {
+jsdrv_os_event_t jsdrv_os_event_alloc(void) {
     int pipefd[2];
     jsdrv_os_event_t ev;
     ev = jsdrv_alloc_clr(sizeof(*ev));
@@ -111,12 +112,16 @@ jsdrv_os_event_t jsdrv_os_event_alloc() {
 
 void jsdrv_os_event_signal(jsdrv_os_event_t ev) {
     uint8_t wr_buf[1] = {1};
-    write(ev->fd_signal, wr_buf, 1);
+    if (write(ev->fd_signal, wr_buf, 1) <= 0) {
+        JSDRV_LOGE("jsdrv_os_event_signal failed %d", errno);
+    }
 }
 
 void jsdrv_os_event_reset(jsdrv_os_event_t ev) {
     uint8_t rd_buf[1024];
-    read(ev->fd_poll, rd_buf, sizeof(rd_buf));
+    if (read(ev->fd_poll, rd_buf, sizeof(rd_buf)) < 0) {
+        ; // reset even on error.
+    }
 }
 
 int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg) {
