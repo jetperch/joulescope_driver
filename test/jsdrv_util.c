@@ -21,6 +21,7 @@
  */
 
 #include "jsdrv_util/jsdrv_util_prv.h"
+#include "jsdrv/error_code.h"
 #include "jsdrv/log.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/time.h"
@@ -63,8 +64,13 @@ void on_log_recv(void * user_data, struct jsdrv_log_header_s const * header,
 int app_initialize(struct app_s * self) {
     memset(self, 0, sizeof(*self));
     jsdrv_topic_clear(&self->topic);
-    ROE(jsdrv_initialize(&self->context, NULL, 1000));
-    return 0;
+    int32_t rc = jsdrv_initialize(&self->context, NULL, 1000);
+    if (rc) {
+        printf("jsdrv_initialize failed: %d %s %s\n", rc,
+               jsdrv_error_code_name(rc),
+               jsdrv_error_code_description(rc));
+    }
+    return rc;
 }
 
 static void app_finalize(struct app_s * self) {

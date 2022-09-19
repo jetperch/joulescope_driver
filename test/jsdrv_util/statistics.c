@@ -91,7 +91,7 @@ static int32_t publish(struct app_s * self, const char * device, const char * to
 
 static int32_t device_initialize(const char * device, void * user_data) {
     struct app_s * self = (struct app_s *) user_data;
-    char t[JSDRV_TOPIC_LENGTH_MAX];
+    char t[2 * JSDRV_TOPIC_LENGTH_MAX];
     printf("device_open %s\n", device);
 
     if (jsdrv_cstr_starts_with(device, "u/js220")) {
