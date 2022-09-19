@@ -42,7 +42,7 @@ struct msg_queue_s;
 // forward declaration for "jsdrv/frontend.h"
 struct jsdrvp_msg_s;
 
-struct msg_queue_s * msg_queue_init();
+struct msg_queue_s * msg_queue_init(void);
 
 void msg_queue_finalize(struct msg_queue_s * queue);
 

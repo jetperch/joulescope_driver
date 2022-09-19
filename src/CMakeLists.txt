@@ -27,6 +27,8 @@ if (WIN32)
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LibUSB REQUIRED libusb-1.0)
+    message(STATUS "LibUSB_INCLUDE_DIRS = ${LibUSB_INCLUDE_DIRS}")
+    string(REPLACE "/libusb-1.0" "" LibUSB_INCLUDE_DIRS "${LibUSB_INCLUDE_DIRS}")
     include_directories(${LibUSB_INCLUDE_DIRS})
     message(STATUS "LibUSB_INCLUDE_DIRS = ${LibUSB_INCLUDE_DIRS}")
     set(PLATFORM_SUPPORT_SOURCES
@@ -80,7 +82,8 @@ endforeach()
 
 add_library(jsdrv_support_objlib OBJECT ${SUPPORT_SOURCES})
 add_dependencies(jsdrv_support_objlib tinyprintf)
-target_link_libraries(jsdrv_support_objlib tinyprintf)
+target_link_libraries(jsdrv_support_objlib tinyprintf ${PLATFORM_LIBS})
+target_link_directories(jsdrv_support_objlib PUBLIC ${PLATFORM_TARGET_LINK_DIRS})
 
 add_library(jsdrv STATIC ${SOURCES})
 add_dependencies(jsdrv jsdrv_support_objlib tinyprintf)

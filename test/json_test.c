@@ -24,7 +24,7 @@
 #include "jsdrv/error_code.h"
 
 // include null terminator in size!
-#define cstr_sz(_value, _size) ((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=0, .flags=JSDRV_UNION_FLAG_CONST, .app=0, .value={.str=(_value)}, .size=(_size)})
+#define cstr_sz(_value, _size) ((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=0, .flags=JSDRV_UNION_FLAG_CONST, .app=0, .value={.str=(_value)}, .size=(uint32_t) (_size)})
 #define cstr(_value) cstr_sz((_value), strlen(_value) + 1)
 
 #define check_expected_ptr_value(parameter) \
@@ -80,7 +80,7 @@ static int32_t on_token(void * user_data, const struct jsdrv_union_s * token) {
 #define expect_object_end() expect_delim(JSDRV_JSON_OBJ_END)
 #define expect_array_start() expect_delim(JSDRV_JSON_ARRAY_START)
 #define expect_array_end() expect_delim(JSDRV_JSON_ARRAY_END)
-#define expect_key(value__) expect_tk(&((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=JSDRV_JSON_KEY, .flags=0, .app=0, .value={.str=value__}, .size=strlen(value__)}))
+#define expect_key(value__) expect_tk(&((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=JSDRV_JSON_KEY, .flags=0, .app=0, .value={.str=value__}, .size=(uint32_t) strlen(value__)}))
 
 static void test_empty(void **state) {
     assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_json_parse(NULL, on_token, *state));

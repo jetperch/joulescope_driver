@@ -36,7 +36,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <pthread.h>
-#include <libusb.h>
+#include <libusb-1.0/libusb.h>
 
 
 #define DEVICES_MAX   (256U)
@@ -79,6 +79,7 @@ struct backend_s {
 
 
 static int on_hotplug(libusb_context *ctx, libusb_device *device, libusb_hotplug_event event, void *user_data) {
+    (void) ctx;
     JSDRV_LOGI("hotplug %p: inserted=%d, remove=%d",
                device,
                (event & LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) ? 1 : 0,
@@ -280,6 +281,10 @@ void * backend_thread(void * arg) {
             s,                              // callback argument
             &s->hotplug_callback_handle     // allocated callback handle
     );
+    if (LIBUSB_SUCCESS != rc) {
+        JSDRV_LOGE("libusb_hotplug_register_callback returned %d", rc);
+        goto exit;
+    }
 
     handle_hotplug(s);  // perform an initial scan
     backend_init_done(s, 0);
@@ -315,7 +320,6 @@ void * backend_thread(void * arg) {
 
 exit:
     libusb_hotplug_deregister_callback(s->ctx, s->hotplug_callback_handle);
-    // todo deinitialize
     libusb_exit(s->ctx);
     JSDRV_LOGI("jsdrv_usb_backend_thread exit");
     return NULL;
@@ -338,7 +342,7 @@ static void finalize(struct jsdrvbk_s * backend) {
         msg_queue_finalize(s->backend.cmd_q);
         s->backend.cmd_q = NULL;
     }
-    for (int i = 0; i < DEVICES_MAX; ++i) {
+    for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
         struct dev_s * d = &s->devices[i];
         if (d->ll_device.cmd_q) {
             msg_queue_finalize(d->ll_device.cmd_q);
@@ -363,10 +367,10 @@ int32_t jsdrv_usb_backend_factory(struct jsdrv_context_s * context, struct jsdrv
     s->context = context;
     s->backend.prefix = 'u';
     s->backend.finalize = finalize;
-    s->backend.cmd_q = msg_queue_init(context);
+    s->backend.cmd_q = msg_queue_init();
     jsdrv_list_initialize(&s->devices_active);
     jsdrv_list_initialize(&s->devices_free);
-    for (int i = 0; i < DEVICES_MAX; ++i) {
+    for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
         struct dev_s * d = &s->devices[i];
         d->context = context;
         d->ll_device.cmd_q = msg_queue_init();

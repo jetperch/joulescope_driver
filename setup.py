@@ -91,6 +91,12 @@ else:
     extra_compile_args = []
 
 
+if platform.system() == 'Darwin':
+    brew_inc = '/opt/homebrew/include'
+    if os.path.isdir(brew_inc):
+        C_INCS.append(brew_inc)
+
+
 ext = '.pyx' if USE_CYTHON else '.c'
 extensions = [
     setuptools.Extension('pyjoulescope_driver.binding',

@@ -47,18 +47,3 @@ cdef extern from "stdarg.h":
 
 cdef extern from "stdio.h":
     int vsnprintf (char * s, size_t n, const char * format, va_list arg ) nogil
-
-# https://cython.readthedocs.io/en/latest/src/userguide/external_C_code.html#acquiring-and-releasing-the-gil
-cdef void _log_print(const char * s) with gil:
-    msg = s.decode('utf-8')
-    lvl = LOG_LEVEL_MAP[msg[0]]
-    msg = msg[2:]
-    if log.isEnabledFor(lvl):
-        src_file, src_line, msg = msg.split(':', 2)
-        msg = msg.strip()
-        if src_file.startswith('src/'):
-            src_file = src_file[4:]
-        record = log.makeRecord(src_file, lvl, src_file, int(src_line), msg, [], None, None, None, None)
-        log.handle(record)
-
-

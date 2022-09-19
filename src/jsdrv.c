@@ -410,7 +410,7 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
     jsdrv_cstr_copy(d->prefix, msg->payload.device.prefix, sizeof(d->prefix));
     jsdrv_list_add_tail(&c->devices, &d->item);
 
-    int rv;
+    int rv = 1;
     if (0 == strcmp("js220", model)) {
         rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
     } else if (0 == strcmp("js110", model)) {
@@ -423,7 +423,7 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
 #endif
     }
     if (rv) {
-        JSDRV_LOGE("device_add failed with %d", rv);
+        JSDRV_LOGE("device_add(%s) failed with %d", model, rv);
         jsdrvp_msg_free(c, msg);
         jsdrv_free(d);
         // todo indicate device failure?

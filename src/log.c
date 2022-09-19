@@ -36,6 +36,7 @@
 #include <poll.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 #endif
 
 #define LOG_DPRINTF 0

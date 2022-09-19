@@ -955,7 +955,7 @@ int32_t jsdrv_usb_backend_factory(struct jsdrv_context_s * context, struct jsdrv
     s->context = context;
     s->backend.prefix = 'u';
     s->backend.finalize = finalize;
-    s->backend.cmd_q = msg_queue_init(context);
+    s->backend.cmd_q = msg_queue_init();
 
     jsdrv_list_initialize(&s->devices_free);
     jsdrv_list_initialize(&s->devices_active);

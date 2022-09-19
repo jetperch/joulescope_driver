@@ -46,7 +46,7 @@ struct msg_queue_s {
     pthread_mutex_t mutex;
 };
 
-struct msg_queue_s * msg_queue_init() {
+struct msg_queue_s * msg_queue_init(void) {
     struct msg_queue_s * q = jsdrv_alloc_clr(sizeof(struct msg_queue_s));
     if (pthread_mutex_init(&q->mutex, NULL)) {
         jsdrv_free(q);
@@ -71,6 +71,7 @@ void msg_queue_finalize(struct msg_queue_s * queue) {
             struct jsdrv_list_s * item = jsdrv_list_remove_tail(&queue->items);
             if (item) {
                 msg = JSDRV_CONTAINER_OF(item, struct jsdrvp_msg_s, item);
+                jsdrv_free(msg);  // presumes heap allocated
             } else {
                 break;
             }

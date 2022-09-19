@@ -32,7 +32,7 @@ static void on_pub_cmd(void * user_data, const char * topic, const struct jsdrv_
             printf("JSDRV_PAYLOAD_TYPE_STREAM but topic is %s\n", topic);
         }
         struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) value->value.bin;
-        printf("on_pub_data(%s) sample_id=%llu, count=%u\n", topic, s->sample_id, s->element_count);
+        printf("on_pub_data(%s) sample_id=%" PRIu64 ", count=%u\n", topic, s->sample_id, s->element_count);
     } else if (value->app == JSDRV_PAYLOAD_TYPE_UNION) {
         jsdrv_union_value_to_str(value, buffer, sizeof(buffer), 1);
         JSDRV_LOGI("pub %s => %s", topic, buffer);
