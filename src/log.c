@@ -308,7 +308,9 @@ static void * log_thread(void * arg) {
 
 static void thread_notify(struct log_s * self) {
     uint8_t wr_buf[] = {1};
-    (void) write(self->fd_write, wr_buf, 1);  //
+    if (write(self->fd_write, wr_buf, 1) <= 0) {
+        printf("ERROR: thread_notify write failed, errno=%d\n", errno);
+    }
 }
 
 static int32_t thread_start(struct log_s * self) {
@@ -330,7 +332,9 @@ static int32_t thread_start(struct log_s * self) {
 static void thread_stop(struct log_s * self) {
     uint8_t wr_buf[] = {1};
     self->quit = 1;
-    (void) write(self->fd_write, wr_buf, 1);
+    if (write(self->fd_write, wr_buf, 1) <= 0) {
+        printf("ERROR: thread_stop write failed, errno=%d\n", errno);
+    }
     int rc = pthread_join(self->thread_id, NULL);
     if (rc) {
         printf("ERROR: log thread_stop not closed cleanly: %d\n", rc);
