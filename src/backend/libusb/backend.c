@@ -320,6 +320,15 @@ void * backend_thread(void * arg) {
 
 exit:
     libusb_hotplug_deregister_callback(s->ctx, s->hotplug_callback_handle);
+
+    for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
+        struct dev_s *d = &s->devices[i];
+        if (d->handle) {
+            libusb_close(d->handle);
+            d->handle = NULL;
+            libusb_unref_device(d->usb_device);
+        }
+    }
     libusb_exit(s->ctx);
     JSDRV_LOGI("jsdrv_usb_backend_thread exit");
     return NULL;
@@ -351,11 +360,6 @@ static void finalize(struct jsdrvbk_s * backend) {
         if (d->ll_device.rsp_q) {
             msg_queue_finalize(d->ll_device.rsp_q);
             d->ll_device.rsp_q = NULL;
-        }
-        if (d->handle) {
-            libusb_close(d->handle);
-            d->handle = NULL;
-            libusb_unref_device(d->usb_device);
         }
     }
     jsdrv_free(s);
