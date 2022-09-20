@@ -267,7 +267,7 @@ static struct jsdrvp_msg_s * ll_await(struct dev_s * d, msg_filter_fn filter_fn,
             .events = POLLIN,
             .revents = 0,
         };
-        poll(&fds, 1, timeout_ms);
+        poll(&fds, 1, 2);
 #endif
         struct jsdrvp_msg_s * m = msg_queue_pop_immediate(d->ll.rsp_q);
         if (m) {
@@ -1236,7 +1236,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
 #if _WIN32
         WaitForMultipleObjects(handle_count, handles, false, 5000);
 #else
-        poll(fds, 2, 5000);
+        poll(fds, 2, 2);
 #endif
         JSDRV_LOGD2("ul thread tick");
         while (handle_cmd(d, msg_queue_pop_immediate(d->ul.cmd_q))) {
