@@ -6,10 +6,11 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 0.2.3
 
-2022 Sep 18 [in progress]
+2022 Sep 20 [in progress]
 
 * Fixed support for multiple (not just first found) of same device type.
 * Improved JS110 support.
+* Added macOS and Linux support using libusb library.
 
 
 ## 0.2.2

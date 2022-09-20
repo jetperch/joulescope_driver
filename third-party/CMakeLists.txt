@@ -16,4 +16,9 @@ endif()
 
 
 add_subdirectory(tinyprintf)
-add_subdirectory(libusb)
+if (WIN32)
+    # use joulescope_driver support, not libusb
+else()
+    # use libusb on macOS (Darwin) and Linux
+    add_subdirectory(libusb)
+endif()
