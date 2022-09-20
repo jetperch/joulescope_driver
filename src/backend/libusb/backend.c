@@ -47,7 +47,7 @@
 #define BULK_IN_FRAME_LENGTH            (512U)
 #define BULK_IN_TRANSFER_SIZE           (64U * BULK_IN_FRAME_LENGTH)
 #define BULK_IN_TRANSFER_OUTSTANDING    (4U)
-#define ENDPOINT_MAX                    (255U)
+#define ENDPOINT_COUNT                  (256U)
 
 
 enum device_mark_e {
@@ -91,7 +91,7 @@ struct dev_s {
     char serial_number[JSDRV_TOPIC_LENGTH_MAX];
     uint8_t mode;  // device_mode_e
     uint8_t mark;
-    uint8_t endpoint_mode[ENDPOINT_MAX];
+    uint8_t endpoint_mode[ENDPOINT_COUNT];
 
     struct jsdrv_list_s transfers_pending;
     struct jsdrv_list_s transfers_free;
@@ -186,7 +186,7 @@ static void device_close(struct dev_s * d) {
     struct transfer_s * t;
     if (d->handle && (d->mode == DEVICE_MODE_OPEN)) {
         JSDRV_LOGI("device_close(%s)", d->ll_device.prefix);
-        for (uint32_t endpoint = 0; endpoint <= ENDPOINT_MAX; ++endpoint) {
+        for (uint32_t endpoint = 0; endpoint < ENDPOINT_COUNT; ++endpoint) {
             d->endpoint_mode[endpoint] = EP_MODE_OFF;
         }
         jsdrv_list_foreach_reverse(&d->transfers_pending, item) {
