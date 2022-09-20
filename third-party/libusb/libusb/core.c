@@ -1167,7 +1167,8 @@ libusb_device * LIBUSB_CALL libusb_ref_device(libusb_device *dev)
 	long refcnt;
 
 	refcnt = usbi_atomic_inc(&dev->refcnt);
-	assert(refcnt >= 2);
+	assert(refcnt >= 1);
+    (void) refcnt;  // avoid warning when assert is not compiled.
 
 	return dev;
 }
