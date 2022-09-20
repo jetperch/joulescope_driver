@@ -40,10 +40,11 @@ elseif (APPLE)
     )
     set(LIBUSB_INCLUDE ${LIBUSB_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/include/macos)
     set(PLATFORM_LIBS "objc -Wl,-framework,IOKit -Wl,-framework,CoreFoundation -Wl,-framework,Security")
-elseif (LINUX)
+elseif (UNIX)
     message(STATUS "LIBUSB LINUX")
     set(PLATFORM_SRC
             libusb/os/linux_udev.c
+            libusb/os/linux_usbfs.c
             libusb/os/events_posix.c
             libusb/os/threads_posix.c
             )

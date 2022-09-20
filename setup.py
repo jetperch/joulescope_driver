@@ -114,10 +114,15 @@ if platform.system() == 'Darwin':
                   '-framework', 'CoreFoundation',
                   '-framework', 'Security']
 elif platform.system() == 'Linux':
+    sources += [
+        'third-party/libusb/libusb/os/linux_udev.c',
+        'third-party/libusb/libusb/os/linux_usbfs.c',
+    ]
     C_INCS.extend([
         os.path.join(MYPATH, 'third-party/libusb/libusb'),
         os.path.join(MYPATH, 'third-party/libusb/include/linux'),
     ])
+    libraries += ['udev']
 
 ext = '.pyx' if USE_CYTHON else '.c'
 extensions = [

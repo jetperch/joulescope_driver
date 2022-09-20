@@ -61,6 +61,7 @@ enum device_mode_e {
     DEVICE_MODE_UNASSIGNED,  // not present or remove
     DEVICE_MODE_CLOSED,      // present but not in use
     DEVICE_MODE_OPEN,        // present and in use
+    DEVICE_MODE_CLOSING,
 };
 
 enum endpoint_mode_e {
@@ -195,11 +196,9 @@ static void device_close(struct dev_s * d) {
             }
         }
         if (jsdrv_list_is_empty(&d->transfers_pending)) {
-            libusb_close(d->handle);
-            d->handle = NULL;
-        }
-        if (d->mode != DEVICE_MODE_UNASSIGNED) {
-            d->mode = DEVICE_MODE_CLOSED;
+            // cannot call libusb_close from event callbacks
+            // post to guarantee handling outside of libusb_handle_events*
+            d->mode = DEVICE_MODE_CLOSING;
         }
     }
 }
@@ -275,24 +274,9 @@ static void device_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     }
 }
 
-static void device_transfer_done(struct dev_s * d) {
-    if ((NULL != d->handle)
-            && jsdrv_list_is_empty(&d->transfers_pending)
-            && (d->mode != DEVICE_MODE_OPEN)) {
-        JSDRV_LOGI("libusb_close(%s) in device_transfer_done", d->ll_device.prefix);
-        libusb_close(d->handle);
-        d->handle = NULL;
-        if (d->mode != DEVICE_MODE_UNASSIGNED) {
-            d->mode = DEVICE_MODE_CLOSED;
-        }
-    }
-}
-
 static void device_rsp_transfer(struct transfer_s * t) {
-    struct dev_s * d = t->device;
     device_rsp(t->device, t->msg);
     transfer_free(t);
-    device_transfer_done(d);
 }
 
 static void on_bulk_out_done(struct libusb_transfer * transfer) {
@@ -422,7 +406,6 @@ static void on_bulk_in_done(struct libusb_transfer * transfer) {
             transfer_free(t);
             break;
     }
-    device_transfer_done(d);
 }
 
 static void bulk_in_start(struct dev_s * d, uint8_t pipe_id) {
@@ -548,6 +531,11 @@ static int32_t device_add(struct backend_s * s, libusb_device * usb_device, stru
             if (rc < 0) {
                 JSDRV_LOGW("Could not get serial number string");
                 tfp_snprintf(d->serial_number, sizeof(d->serial_number), "unknown");
+            } else {
+                unsigned long slen = strlen(d->serial_number);
+                while (slen && (d->serial_number[slen - 1] == '\n')) {
+                    d->serial_number[--slen] = 0;
+                }
             }
             tfp_snprintf(d->ll_device.prefix, sizeof(d->ll_device.prefix), "%c/%s/%s",
                          s->backend.prefix, d->device_type->model, d->serial_number);
@@ -640,8 +628,23 @@ static bool are_all_devices_idle(struct backend_s * s) {
     return true;
 }
 
+static void handle_device_close(struct backend_s * s) {
+    struct jsdrv_list_s * item;
+    struct dev_s * d;
+    jsdrv_list_foreach(&s->devices_active, item) {
+        d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
+        if ((d->mode == DEVICE_MODE_CLOSING) && (jsdrv_list_is_empty(&d->transfers_pending))) {
+            if (d->handle) {
+                libusb_close(d->handle);
+                d->handle = NULL;
+            }
+            d->mode = DEVICE_MODE_CLOSED;
+        }
+    }
+}
+
 static void device_close_all(struct backend_s * s) {
-    struct timeval libusb_timeout_tv = {.tv_sec=0, .tv_usec=1000};
+    struct timeval libusb_timeout_tv = {.tv_sec=1, .tv_usec=20000};
     for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
         struct dev_s *d = &s->devices[i];
         if (d->handle) {
@@ -650,6 +653,7 @@ static void device_close_all(struct backend_s * s) {
     }
     while (!are_all_devices_idle(s)) {
         libusb_handle_events_timeout_completed(s->ctx, &libusb_timeout_tv, NULL);
+        handle_device_close(s);
         // todo timeout?
     }
     for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
@@ -723,6 +727,7 @@ void * backend_thread(void * arg) {
         if (fds[1].revents) {
             handle_hotplug(s);
         }
+        handle_device_close(s);
     }
 
 exit:
