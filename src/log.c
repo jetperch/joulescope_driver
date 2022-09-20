@@ -304,6 +304,7 @@ static void * log_thread(void * arg) {
         }
         process(self);
     }
+    process(self);
     return 0;
 }
 

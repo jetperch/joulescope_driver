@@ -1219,7 +1219,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
     struct pollfd fds[2];
     fds[0].fd = msg_queue_handle_get(d->ul.cmd_q);
     fds[0].events = POLLIN;
-    fds[1].fd = msg_queue_handle_get(d->ul.cmd_q);
+    fds[1].fd = msg_queue_handle_get(d->ll.rsp_q);
     fds[1].events = POLLIN;
 #endif
 

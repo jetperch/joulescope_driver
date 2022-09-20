@@ -22,15 +22,10 @@ if (WIN32)
             backend/winusb/backend.c
             backend/winusb/device_change_notifier.c
     )
+    set(PLATFORM_DEPENDENCIES "")
     set(PLATFORM_LIBS Setupapi Winusb)
     set(PLATFORM_TARGET_LINK_DIRS "")
 else()
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(LibUSB REQUIRED libusb-1.0)
-    message(STATUS "LibUSB_INCLUDE_DIRS = ${LibUSB_INCLUDE_DIRS}")
-    string(REPLACE "/libusb-1.0" "" LibUSB_INCLUDE_DIRS "${LibUSB_INCLUDE_DIRS}")
-    include_directories(${LibUSB_INCLUDE_DIRS})
-    message(STATUS "LibUSB_INCLUDE_DIRS = ${LibUSB_INCLUDE_DIRS}")
     set(PLATFORM_SUPPORT_SOURCES
             backend/posix.c
             backend/libusb/msg_queue.c
@@ -39,9 +34,8 @@ else()
     set(PLATFORM_SRC
             backend/libusb/backend.c
     )
-    set(PLATFORM_LIBS pthread m ${LibUSB_LIBRARIES})
-    message(STATUS "LibUSB_LIBRARIES = ${LibUSB_LIBRARIES}")
-    message(STATUS "LibUSB_LIBDIR = ${LibUSB_LIBDIR}")
+    set(PLATFORM_DEPENDENCIES libusb)
+    set(PLATFORM_LIBS pthread m libusb)
     set(PLATFORM_TARGET_LINK_DIRS ${LibUSB_LIBDIR})
 endif()
 
@@ -81,11 +75,11 @@ foreach(f IN LISTS SOURCES)
 endforeach()
 
 add_library(jsdrv_support_objlib OBJECT ${SUPPORT_SOURCES})
-add_dependencies(jsdrv_support_objlib tinyprintf)
+add_dependencies(jsdrv_support_objlib tinyprintf ${PLATFORM_DEPENDENCIES})
 target_link_libraries(jsdrv_support_objlib tinyprintf ${PLATFORM_LIBS})
 target_link_directories(jsdrv_support_objlib PUBLIC ${PLATFORM_TARGET_LINK_DIRS})
 
 add_library(jsdrv STATIC ${SOURCES})
-add_dependencies(jsdrv jsdrv_support_objlib tinyprintf)
+add_dependencies(jsdrv jsdrv_support_objlib tinyprintf ${PLATFORM_DEPENDENCIES})
 target_link_libraries(jsdrv jsdrv_support_objlib tinyprintf ${PLATFORM_LIBS})
 target_link_directories(jsdrv PUBLIC ${PLATFORM_TARGET_LINK_DIRS})

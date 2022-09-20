@@ -60,11 +60,20 @@ about = {}
 with open(VERSION_PATH, 'r', encoding='utf-8') as f:
     exec(f.read(), about)
 
-
+extra_compile_args = []
+extra_link_args = []
 posix_sources = [
     'src/backend/posix.c',
     'src/backend/libusb/backend.c',
     'src/backend/libusb/msg_queue.c',
+    'third-party/libusb/libusb/core.c',
+    'third-party/libusb/libusb/descriptor.c',
+    'third-party/libusb/libusb/hotplug.c',
+    'third-party/libusb/libusb/io.c',
+    'third-party/libusb/libusb/strerror.c',
+    'third-party/libusb/libusb/sync.c',
+    'third-party/libusb/libusb/os/events_posix.c',
+    'third-party/libusb/libusb/os/threads_posix.c',
 ]
 
 
@@ -92,12 +101,23 @@ else:
 
 
 if platform.system() == 'Darwin':
+    sources += [
+        'third-party/libusb/libusb/os/darwin_usb.c'
+    ]
     C_INCS.extend([
-        '/opt/homebrew/include',
-        '/usr/include',
-        '/usr/local/include',
+        os.path.join(MYPATH, 'third-party/libusb/libusb'),
+        os.path.join(MYPATH, 'third-party/libusb/include/macos'),
     ])
-
+    libraries += ['objc']
+    extra_link_args = [
+                  '-framework', 'IOKit',
+                  '-framework', 'CoreFoundation',
+                  '-framework', 'Security']
+elif platform.system() == 'Linux':
+    C_INCS.extend([
+        os.path.join(MYPATH, 'third-party/libusb/libusb'),
+        os.path.join(MYPATH, 'third-party/libusb/include/linux'),
+    ])
 
 ext = '.pyx' if USE_CYTHON else '.c'
 extensions = [
@@ -128,6 +148,7 @@ extensions = [
                          include_dirs=C_INCS,
                          libraries=libraries,
                          extra_compile_args=[] + extra_compile_args,
+                         extra_link_args=extra_link_args,
                          ),
 ]
 

@@ -16,3 +16,4 @@ endif()
 
 
 add_subdirectory(tinyprintf)
+add_subdirectory(libusb)
