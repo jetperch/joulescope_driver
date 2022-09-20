@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Install libusb
-        run: sudo apt-get install -y libusb-1.0-0-dev
+        run: sudo apt-get install -y libusb-1.0-0-dev libudev-dev
 
       - name: Configure build using CMake
         run: cmake -S . -B cmake_build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
