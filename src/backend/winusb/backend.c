@@ -215,7 +215,7 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
             if ((ec == ERROR_IO_INCOMPLETE) || (ec == ERROR_IO_PENDING)) {
                 break;  // ok, not done yet
             } else if (ec == ERROR_SEM_TIMEOUT) {
-                JSDRV_LOGI("bulk_in_process timeout");
+                JSDRV_LOGD1("bulk_in_process timeout");
                 bulk_in_transfer_free(t);  // timeout ok
             } else {
                 WINDOWS_LOGE("%s", "bulk_in_process WinUsb_GetOverlappedResult error");
@@ -380,7 +380,7 @@ static void bulk_out_send(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     uint8_t ep = msg->extra.bkusb_stream.endpoint;
     struct bulk_out_s * b;
     if (!d->endpoints[ep]) {
-        JSDRV_LOGI("bulk_out_send initializing %d", (int) ep);
+        JSDRV_LOGD1("bulk_out_send initializing %d", (int) ep);
         b = bulk_out_initialize(d, ep);
         d->endpoints[ep] = &b->ep;
         jsdrv_list_add_tail(&d->endpoints_active, &b->ep.item);
@@ -654,7 +654,7 @@ struct backend_s {
 
 static void on_device_change(void* cookie) {
     struct backend_s * s = (struct backend_s *) cookie;
-    JSDRV_LOGI("on_device_change");
+    JSDRV_LOGD1("on_device_change");
     if (s->discovery) {
         SetEvent(s->discovery);
     }
@@ -770,7 +770,7 @@ static bool device_update(struct backend_s * s, const struct device_type_s * dev
     jsdrv_list_foreach(&s->devices_active, item) {
         device = JSDRV_CONTAINER_OF(item, struct dev_s, item);
         if (0 == strcmp(device->device_path, device_path)) {
-            JSDRV_LOGI("device match %s", device_path);
+            JSDRV_LOGD1("device match %s", device_path);
             device->mark = DEVICE_MARK_FOUND;
             return false; // already exists, no change
         }
@@ -810,7 +810,7 @@ static void device_scan(struct backend_s * s) {
     SP_DEVICE_INTERFACE_DETAIL_DATA_W * dev_interface_detail;
     const struct device_type_s * dt = device_types;
 
-    JSDRV_LOGI("device_scan");
+    JSDRV_LOGD1("device_scan");
     for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
         s->devices[i].mark = DEVICE_MARK_NONE;
     }

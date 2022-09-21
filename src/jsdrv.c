@@ -158,7 +158,7 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_value(struct jsdrv_context_s * context, c
             /* intentional fall-through */
         case JSDRV_UNION_BIN:
             if (value->size > sizeof(m->payload.bin)) {
-                JSDRV_LOGI("publish %s size %d using heap", topic, (int) value->size);
+                JSDRV_LOGD2("publish %s size %d using heap", topic, (int) value->size);
                 uint8_t * ptr = jsdrv_alloc(value->size);
                 memcpy(ptr, value->value.bin, value->size);
                 m->value.value.bin = ptr;
@@ -245,7 +245,7 @@ static void timeout_process(struct jsdrv_context_s * c) {
 static int32_t timeout_complete(struct jsdrv_context_s * c, const char * topic, int32_t rc) {
     struct jsdrv_list_s * item;
     struct jsdrvp_api_timeout_s * t;
-    JSDRV_LOGI("timeout_complete %s %d", topic, rc);
+    JSDRV_LOGD2("timeout_complete %s %d", topic, rc);
 
     jsdrv_list_foreach(&c->cmd_timeouts, item) {
         t = JSDRV_CONTAINER_OF(item, struct jsdrvp_api_timeout_s, item);
@@ -256,7 +256,7 @@ static int32_t timeout_complete(struct jsdrv_context_s * c, const char * topic, 
             return 0;
         }
     }
-    JSDRV_LOGI("timeout_complete not found: %s", topic);
+    JSDRV_LOGD1("timeout_complete not found: %s", topic);
     return JSDRV_ERROR_NOT_FOUND;
 }
 
@@ -264,7 +264,7 @@ static uint8_t on_return_code(void * user_data, struct jsdrvp_msg_s * msg) {
     struct jsdrv_context_s * c = (struct jsdrv_context_s *) user_data;
     char value_str[128];
     jsdrv_union_value_to_str(&msg->value, value_str, sizeof(value_str), 1);
-    JSDRV_LOGI("on_return_code(%s) %s", msg->topic, value_str);
+    JSDRV_LOGD1("on_return_code(%s) %s", msg->topic, value_str);
     if (msg->value.type != JSDRV_UNION_I32) {
         JSDRV_LOGW("on_return_code %s unsupported type %d", msg->topic, msg->value.type);
         return 0;
@@ -311,7 +311,7 @@ static bool handle_cmd_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
     if (!msg) {
         return false;
     }
-    JSDRV_LOGI("handle_cmd_msg %s", msg->topic);
+    JSDRV_LOGD1("handle_cmd_msg %s", msg->topic);
     if (msg->timeout) {
         timeout_add(c, msg->timeout);
         msg->timeout = NULL;
