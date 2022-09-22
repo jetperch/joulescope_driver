@@ -412,7 +412,7 @@ static int32_t query(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg) {
         query_value_copy(t->value, msg);
         char buf[32];
         jsdrv_union_value_to_str(msg->payload.query.value, buf, sizeof(buf), 1);
-        JSDRV_LOGI("query %s => %s", topic, buf);
+        JSDRV_LOGD1("query %s => %s", topic, buf);
     }
     return msg->value.value.i32;
 }
@@ -570,7 +570,7 @@ static void publish_normal(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * m
             }
         }
         if (t->value && jsdrv_union_eq(&t->value->value, &msg->value)) {
-            JSDRV_LOGI("pubsub dedup %s", msg->topic);
+            JSDRV_LOGD1("pubsub dedup %s", msg->topic);
             local_return_code(self, msg->topic, 0);
             jsdrvp_msg_free(self->context, msg);
             return;
@@ -612,7 +612,7 @@ static void process_msg(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg)
             rc = JSDRV_ERROR_NOT_SUPPORTED;
         }
         if (msg->source) {
-            JSDRV_LOGI("publish_return_code_i32(\"%s\", %ld)", msg->topic, rc);
+            JSDRV_LOGD1("publish_return_code_i32(\"%s\", %ld)", msg->topic, rc);
             publish_return_code_i32(self, msg->topic, rc);
         }
         jsdrvp_msg_free(self->context, msg);
@@ -643,7 +643,7 @@ void jsdrv_pubsub_process(struct jsdrv_pubsub_s * self) {
         } else {
             char buf[32];
             jsdrv_union_value_to_str(&msg->value, buf, sizeof(buf), 1);
-            JSDRV_LOGI("jsdrv_pubsub_process %s => %s", msg->topic, buf);
+            JSDRV_LOGD1("jsdrv_pubsub_process %s => %s", msg->topic, buf);
         }
         process_msg(self, msg);
     }

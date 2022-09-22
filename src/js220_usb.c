@@ -382,7 +382,7 @@ static int32_t bulk_out_publish(struct dev_s * d, const char * topic, const stru
     struct js220_publish_s * p = (struct js220_publish_s *) &m->payload.bin[4];
     char buf[32];
     jsdrv_union_value_to_str(value, buf, (uint32_t) sizeof(buf), 1);
-    JSDRV_LOGI("publish to dev %s %s", topic, buf);
+    JSDRV_LOGD1("publish to dev %s %s", topic, buf);
     memset(p, 0, sizeof(*p) + sizeof(union jsdrv_union_inner_u));
     jsdrv_cstr_copy(p->topic, topic, sizeof(p->topic));
     p->type = value->type;
@@ -471,7 +471,7 @@ static int32_t ll_await_pubsub_topic(struct dev_s * d, const char * topic, uint3
 }
 
 static int32_t ping_wait(struct dev_s * d, uint32_t value) {
-    JSDRV_LOGI("ping_wait(%" PRIu32 ")", value);
+    JSDRV_LOGD1("ping_wait(%" PRIu32 ")", value);
     bulk_out_publish(d, JS220_TOPIC_PING, &jsdrv_union_u32(value));
 
     if (!ll_await_pubsub_topic(d, JS220_TOPIC_PONG, 1000)) {
@@ -479,7 +479,7 @@ static int32_t ping_wait(struct dev_s * d, uint32_t value) {
             JSDRV_LOGW("ping_wait value mismatch: send=%" PRIu32 ", recv=%" PRIu32,
                      value, d->ll_await_break_value.value.u32);
         } else {
-            JSDRV_LOGI("ping_wait(%" PRIu32 ") done", value);
+            JSDRV_LOGD1("ping_wait(%" PRIu32 ") done", value);
         }
         return 0;
     } else {
@@ -611,7 +611,7 @@ static int32_t mem_complete(struct dev_s * d, int32_t status) {
         jsdrv_topic_set(&topic, d->mem_topic.topic);
         jsdrv_topic_remove(&topic);
         jsdrv_topic_append(&topic, "!rdata");
-        JSDRV_LOGI("%s with %d bytes", topic.topic, d->mem_hdr.length);
+        JSDRV_LOGD1("%s with %d bytes", topic.topic, d->mem_hdr.length);
         struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, topic.topic, &jsdrv_union_bin(d->mem_data, d->mem_hdr.length));
         jsdrvp_backend_send(d->context, m);
     }
@@ -711,7 +711,7 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         return send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
     }
     d->mem_hdr = m->hdr;
-    JSDRV_LOGI("mem cmd: region=%s, op=%s, length=%d", region_str, mem_cmd_str, (int) d->mem_hdr.length);
+    JSDRV_LOGD1("mem cmd: region=%s, op=%s, length=%d", region_str, mem_cmd_str, (int) d->mem_hdr.length);
     msg_queue_push(d->ll.cmd_q, msg_bk);
 
     return 0;
@@ -771,7 +771,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
         }
     } else if ((topic[0] == 'h') && (topic[1] == '/')) {
-        JSDRV_LOGI("handle_cmd local %s", topic);
+        JSDRV_LOGD1("handle_cmd local %s", topic);
         // handle any host-side parameters here.
         if (jsdrv_cstr_starts_with(topic, "h/mem/")) {
             handle_cmd_mem(d, msg);
@@ -984,7 +984,7 @@ static void handle_stream_in_pubsub(struct dev_s * d, uint32_t * p_u32, uint16_t
     }
     char buf[32];
     jsdrv_union_value_to_str(&m->value, buf, (uint32_t) sizeof(buf), 1);
-    JSDRV_LOGI("publish from dev: %s %s", p->topic, buf);
+    JSDRV_LOGD1("publish from dev: %s %s", p->topic, buf);
 
     if ((d->ll_await_break_on == BREAK_PUBSUB_TOPIC) && (0 == strcmp(d->ll_await_break_topic, p->topic))) {
         d->ll_await_break_on = BREAK_NONE;
@@ -1031,7 +1031,7 @@ static void mem_write_next(struct dev_s * d) {
         m->hdr.offset = d->mem_offset_sent;
         m->hdr.length = (remaining > JS220_PORT3_DATA_SIZE_MAX) ? JS220_PORT3_DATA_SIZE_MAX : remaining;
         memcpy(m->data, d->mem_data + m->hdr.offset, m->hdr.length);
-        JSDRV_LOGI("mem_write_data offset=%d, length=%d", (int) d->mem_offset_sent, (int) m->hdr.length);
+        JSDRV_LOGD1("mem_write_data offset=%d, length=%d", (int) d->mem_offset_sent, (int) m->hdr.length);
         d->mem_offset_sent += m->hdr.length;
         msg_queue_push(d->ll.cmd_q, msg_bk);
     }
@@ -1060,7 +1060,7 @@ static void mem_handle_read_data(struct dev_s * d, struct js220_port3_msg_s * ms
         JSDRV_LOGW("read_data length to long: %d", (int) msg->hdr.length);
         mem_status(d, JSDRV_ERROR_PARAMETER_INVALID);
     } else {
-        JSDRV_LOGI("mem_read_data offset=%d, sz=%d", (int) d->mem_offset_valid, (int) msg->hdr.length);
+        JSDRV_LOGD1("mem_read_data offset=%d, sz=%d", (int) d->mem_offset_valid, (int) msg->hdr.length);
         uint32_t sz_remaining = d->mem_hdr.length - d->mem_offset_valid;
         uint32_t sz = msg->hdr.length;
         if (sz > sz_remaining) {
@@ -1085,8 +1085,8 @@ static void handle_stream_in_mem(struct dev_s * d, uint32_t * p_u32, uint16_t si
     struct js220_port3_msg_s * msg = (struct js220_port3_msg_s *) p_u32;
 
     if ((msg->hdr.op == JS220_PORT3_OP_ACK) && (d->mem_hdr.op == msg->hdr.arg)) {
-        JSDRV_LOGI("in_mem ack=%d, op=%d, status=%d",
-                   (int) msg->hdr.op, (int) msg->hdr.arg, (int) msg->hdr.status);
+        JSDRV_LOGD1("in_mem ack=%d, op=%d, status=%d",
+                    (int) msg->hdr.op, (int) msg->hdr.arg, (int) msg->hdr.status);
         uint8_t status = d->mem_hdr.status;
         if (0 == status) {
             status = msg->hdr.status;
@@ -1112,7 +1112,7 @@ static void handle_stream_in_mem(struct dev_s * d, uint32_t * p_u32, uint16_t si
                     JSDRV_LOGW("ack write data not yet sent: %d %d", (int) msg->hdr.offset, (int) d->mem_offset_sent);
                     mem_complete(d, JSDRV_ERROR_SEQUENCE);
                 } else {
-                    JSDRV_LOGI("ack write data %lu of %lu", msg->hdr.offset, d->mem_hdr.length);
+                    JSDRV_LOGD1("ack write data %lu of %lu", msg->hdr.offset, d->mem_hdr.length);
                     d->mem_offset_valid = msg->hdr.offset;
                     if (d->mem_offset_valid == d->mem_hdr.length) {
                         mem_write_finalize(d);
