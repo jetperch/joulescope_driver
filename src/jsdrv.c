@@ -365,6 +365,38 @@ static struct frontend_dev_s * device_lookup(struct jsdrv_context_s * c, const c
     return NULL;
 }
 
+static uint8_t device_removed_responder_fn(void * user_data, struct jsdrvp_msg_s * msg) {
+    int32_t rc;
+    struct jsdrv_context_s * c = (struct jsdrv_context_s *) user_data;
+    if (jsdrv_cstr_ends_with(msg->topic, JSDRV_MSG_CLOSE)) {
+    	JSDRV_LOGI("%s but device already removed", msg->topic);
+        rc = 0;                      // closing an already removed device is ok.
+    } else {
+    	JSDRV_LOGW("%s but device already removed", msg->topic);
+        rc = JSDRV_ERROR_NOT_FOUND;  // but all other operations are an error
+    }
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_i32(c, "", rc);
+    jsdrv_cstr_join(m->topic, msg->topic, "#", sizeof(m->topic));
+    jsdrv_pubsub_publish(c->pubsub, m);
+    return 0;
+}
+
+static void device_removed_responder(struct jsdrv_context_s * c, const char * prefix, const char * op) {
+    // When a device is removed, it is unsubscribed.
+    // This function inserts a responder in case the application attempts to call the device again.
+    struct jsdrvp_msg_s * sub_msg = jsdrvp_msg_alloc(c);
+    jsdrv_cstr_copy(sub_msg->topic, op, sizeof(sub_msg->topic));
+    sub_msg->value.type = JSDRV_UNION_BIN;
+    sub_msg->value.app = JSDRV_PAYLOAD_TYPE_SUB;
+    sub_msg->value.value.bin = (uint8_t *) &sub_msg->payload.sub;
+    jsdrv_cstr_copy(sub_msg->payload.sub.topic, prefix, sizeof(sub_msg->payload.sub.topic));
+    sub_msg->payload.sub.subscriber.is_internal = 1;
+    sub_msg->payload.sub.subscriber.internal_fn = device_removed_responder_fn;
+    sub_msg->payload.sub.subscriber.user_data = c;
+    sub_msg->payload.sub.subscriber.flags = JSDRV_SFLAG_PUB;
+    jsdrv_pubsub_publish(c->pubsub, sub_msg);
+}
+
 static uint8_t device_subscriber(void * user_data, struct jsdrvp_msg_s * msg) {
     struct frontend_dev_s * d = (struct frontend_dev_s *) user_data;
     struct jsdrvp_msg_s * m = jsdrvp_msg_clone(d->context, msg);
@@ -432,6 +464,7 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
 
     msg->value.flags = 0;
     jsdrv_pubsub_publish(c->pubsub, msg);  // transfers msg ownership
+    device_removed_responder(c, d->prefix, JSDRV_PUBSUB_UNSUBSCRIBE);
     device_sub(d, JSDRV_PUBSUB_SUBSCRIBE);
 }
 
@@ -442,10 +475,9 @@ static void device_remove(struct jsdrv_context_s * c, struct frontend_dev_s * d)
     }
     JSDRV_LOGI("device remove sn=%s", d->prefix);
     d->device->join(d->device);
+    device_removed_responder(c, d->prefix, JSDRV_PUBSUB_SUBSCRIBE);
     device_sub(d, JSDRV_PUBSUB_UNSUBSCRIBE);
-
     // todo update state
-
     jsdrv_list_remove(&d->item);
     jsdrv_free(d);
 }
