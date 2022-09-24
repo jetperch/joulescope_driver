@@ -42,6 +42,7 @@
 #define BACKEND_COUNT_MAX   (127U)  // Allow prefixes 0-9, a-z, A-Z
 #define DEVICE_LOOKUP_MAX   (BACKEND_COUNT_MAX * DEVICE_COUNT_MAX)
 #define API_TIMEOUT_MS      (3000)
+#define FRONTEND_THREAD_POLL_MS  (1000)
 
 #ifndef UNITTEST
 #define UNITTEST 0
@@ -202,12 +203,15 @@ static int32_t timeout_next_ms(struct jsdrv_context_s * c) {
     int64_t t = jsdrv_time_utc();
     item = jsdrv_list_peek_head(&c->cmd_timeouts);
     if (!item) {
-        return 1000;  // maximum polling delay
+        return FRONTEND_THREAD_POLL_MS;  // maximum polling delay
     }
     timeout = JSDRV_CONTAINER_OF(item, struct jsdrvp_api_timeout_s, item);
     int64_t t_delta = timeout->timeout - t;
     if (t_delta <= 0) {
         return 0;
+    }
+    if (t_delta > (FRONTEND_THREAD_POLL_MS * JSDRV_TIME_MILLISECOND)) {
+        t_delta = FRONTEND_THREAD_POLL_MS * JSDRV_TIME_MILLISECOND;
     }
     return (int32_t) JSDRV_TIME_TO_COUNTER(t_delta, 1000LL);
 }
@@ -473,7 +477,6 @@ static void device_remove(struct jsdrv_context_s * c, struct frontend_dev_s * d)
     if (!d) {
         return;
     }
-    JSDRV_LOGI("device remove sn=%s", d->prefix);
     d->device->join(d->device);
     device_removed_responder(c, d->prefix, JSDRV_PUBSUB_SUBSCRIBE);
     device_sub(d, JSDRV_PUBSUB_UNSUBSCRIBE);
@@ -734,13 +737,18 @@ static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m
     struct jsdrvp_api_timeout_s timeout;
     volatile int32_t rc = 0;
     if (timeout_ms) {
-        jsdrv_list_initialize(&timeout.item);
-        jsdrv_cstr_join(timeout.topic, m->topic, "#", sizeof(timeout.topic));
-        timeout.timeout = jsdrv_time_utc() + timeout_ms * JSDRV_TIME_MILLISECOND;
-        timeout.ev = jsdrv_os_event_alloc();
-        timeout.return_code = 0;
-        m->timeout = &timeout;
-        m->source = 1;
+        if (jsdrv_thread_is_current(&context->thread)) {
+            JSDRV_LOGW("API command %s invoked on jsdrv thread with timeout.  Forcing timeout=0.", m->topic);
+            timeout_ms = 0;
+        } else {
+            jsdrv_list_initialize(&timeout.item);
+            jsdrv_cstr_join(timeout.topic, m->topic, "#", sizeof(timeout.topic));
+            timeout.timeout = jsdrv_time_utc() + timeout_ms * JSDRV_TIME_MILLISECOND;
+            timeout.ev = jsdrv_os_event_alloc();
+            timeout.return_code = 0;
+            m->timeout = &timeout;
+            m->source = 1;
+        }
     }
     JSDRV_LOGD1("api_cmd(%s) start", m->topic);
     msg_queue_push(context->msg_cmd, m);

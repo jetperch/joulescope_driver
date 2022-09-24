@@ -421,8 +421,10 @@ static int32_t subscribe(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg
     JSDRV_ASSERT(msg->value.value.bin == msg->payload.bin);
     struct topic_s * t = topic_find(self, msg->payload.sub.topic, true);
     if (!t) {
-        JSDRV_LOGE("could not find/create subscribe topic");
+        JSDRV_LOGE("could not find/create subscribe topic %s", msg->payload.sub.topic);
         return JSDRV_ERROR_NOT_FOUND;
+    } else {
+        JSDRV_LOGD2("subscribe %s", msg->payload.sub.topic);
     }
 
     struct subscriber_s * sub = subscriber_alloc(self);
@@ -451,6 +453,8 @@ static int32_t unsubscribe(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * m
     if (!t) {
         JSDRV_LOGE("could not find/create unsubscribe topic");
         return JSDRV_ERROR_PARAMETER_INVALID;
+    } else {
+        JSDRV_LOGD2("unsubscribe %s", msg->payload.sub.topic);
     }
     jsdrv_list_foreach(&t->subscribers, item) {
         s = JSDRV_CONTAINER_OF(item, struct subscriber_s, item);

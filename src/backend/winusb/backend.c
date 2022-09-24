@@ -193,6 +193,7 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
     JSDRV_LOGD2("bulk_in_process");
     struct bulk_in_s * b = (struct bulk_in_s *) ep;
     ResetEvent(b->ep.event);
+    int32_t rc = 0;
 
     // Handle completed read operations
     while (1) {
@@ -220,12 +221,16 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
             } else {
                 WINDOWS_LOGE("%s", "bulk_in_process WinUsb_GetOverlappedResult error");
                 bulk_in_transfer_free(t);
-                return 1;   // stream error!
+                rc = 1;
             }
         }
     }
 
-    return bulk_in_pend(b);
+    if (rc) {
+        return rc;
+    } else {
+        return bulk_in_pend(b);
+    }
 }
 
 static struct bulk_in_s * bulk_in_initialize(struct dev_s * dev, uint8_t pipe_id) {

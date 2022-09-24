@@ -143,6 +143,10 @@ int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
     return 0;
 }
 
+bool jsdrv_thread_is_current(jsdrv_thread_t * thread) {
+    return (*thread == pthread_self());
+}
+
 void jsdrv_thread_sleep_ms(uint32_t duration_ms) {
     struct timespec ts;
     ts.tv_sec = duration_ms / 1000;

@@ -16,12 +16,28 @@
 
 #include "jsdrv_util_prv.h"
 #include "jsdrv/cstr.h"
+#include "jsdrv/time.h"
 #include "jsdrv/topic.h"
 #include "jsdrv_prv/log.h"
+#include "jsdrv_prv/platform.h"
 #include "jsdrv_prv/thread.h"
 #include <stdio.h>
 #include <inttypes.h>
 
+
+static volatile bool _removed = false;
+
+
+static void on_device_remove(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    struct app_s * self = (struct app_s *) user_data;
+    (void) topic;
+    if (value->type == JSDRV_UNION_STR) {
+        if (0 == strcmp(self->device.topic, value->value.str)) {
+            printf("device removed\n");
+            _removed = true;
+        }
+    }
+}
 
 static void on_pub_cmd(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     struct app_s * self = (struct app_s *) user_data;
@@ -53,32 +69,63 @@ static int32_t publish(struct app_s * self, const char * device, const char * to
     return rc;
 }
 
+static int usage(void) {
+    printf("usage: jsdrv_util demo [--duration duration_ms]\n");
+    return 1;
+}
+
+static bool wait_for_duration_ms(uint32_t duration_ms) {
+    int64_t t_end = jsdrv_time_utc() + JSDRV_TIME_MILLISECOND * (int64_t) duration_ms;
+    while (!_removed && (jsdrv_time_utc() < t_end)) {
+        jsdrv_thread_sleep_ms(10);
+    }
+    return !_removed;
+}
+
 int on_demo(struct app_s * self, int argc, char * argv[]) {
-    (void) argc;
-    (void) argv;
+    uint32_t duration_ms = 5000;
+    while (argc) {
+        if (argv[0][0] != '-') {
+            return usage();
+        } else if (0 == strcmp(argv[0], "--duration")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &duration_ms));
+            ARG_CONSUME();
+        } else {
+            return usage();
+        }
+    }
+
     ROE(app_match(self, NULL));
     char * device = self->device.topic;
+    ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_REMOVE, JSDRV_SFLAG_PUB, on_device_remove, self, JSDRV_TIMEOUT_MS_DEFAULT));
     ROE(publish(self, device, JSDRV_MSG_OPEN, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
-    jsdrv_subscribe(self->context, device, JSDRV_SFLAG_PUB, on_pub_cmd, self, JSDRV_TIMEOUT_MS_DEFAULT);
+    ROE(jsdrv_subscribe(self->context, device, JSDRV_SFLAG_PUB, on_pub_cmd, self, JSDRV_TIMEOUT_MS_DEFAULT));
 
     if (jsdrv_cstr_starts_with(device, "u/js220")) {
         ROE(publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("10 A"), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("manual"), JSDRV_TIMEOUT_MS_DEFAULT));
         //ROE(publish(self, device, "s/adc/0/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
-        jsdrv_thread_sleep_ms(1000);
-        ROE(publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+        if (wait_for_duration_ms(duration_ms)) {
+            ROE(publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+        } else {
+            publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+        }
     } else if (jsdrv_cstr_starts_with(device, "u/js110")) {
         ROE(publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
         //ROE(publish(self, device, "s/v/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
-        jsdrv_thread_sleep_ms(10000);
-        ROE(publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
-        //ROE(publish(self, device, "s/v/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+        if (wait_for_duration_ms(duration_ms)) {
+            ROE(publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+            //ROE(publish(self, device, "s/v/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+        }
     } else {
         printf("Unsupported device: %s\n", device);
     }
 
     ROE(publish(self, device, JSDRV_MSG_CLOSE, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
+    ROE(jsdrv_unsubscribe(self->context, device, on_pub_cmd, self, JSDRV_TIMEOUT_MS_DEFAULT));
     return 0;
 }

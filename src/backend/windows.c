@@ -175,6 +175,10 @@ int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
     return rv;
 }
 
+bool jsdrv_thread_is_current(jsdrv_thread_t * thread) {
+    return (thread->thread_id == GetCurrentThreadId());
+}
+
 void jsdrv_thread_sleep_ms(uint32_t duration_ms) {
     Sleep(duration_ms);
 }
