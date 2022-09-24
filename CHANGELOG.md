@@ -5,9 +5,11 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 0.2.4
 
-2022 Sep 22 [in progress]
+2022 Sep 24 [in progress]
 
 * Added responder for removed devices.
+* Fixed JSDRV_MSG_DEVICE_ADD retained subscribe.
+  Was sending each device then full comma-separated list.
 
 
 ## 0.2.3

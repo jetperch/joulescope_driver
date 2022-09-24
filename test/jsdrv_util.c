@@ -115,6 +115,7 @@ int32_t app_match(struct app_s * self, const char * filter) {
 const struct command_s COMMANDS[] = {
         {"demo", on_demo, "Demonstrate streaming"},
         {"dev",  on_dev,  "Developer tools"},
+        {"hotplug", on_hotplug, "Monitor device insertion and removal"},
         {"info", on_info, "List connected devices and display device details"},
         {"mem_erase", on_mem_erase, "Erase memory region"},
         {"mem_read", on_mem_read, "Read memory region"},
@@ -128,7 +129,7 @@ const struct command_s COMMANDS[] = {
         {NULL, NULL, NULL}
 };
 
-static int usage() {
+static int usage(void) {
     const struct command_s * cmd = COMMANDS;
     printf("usage: jsdrv_util [--log-level <LEVEL>] <COMMAND> [...args]\n");
     printf("\n--log_level: Configure the log level to stdout\n"

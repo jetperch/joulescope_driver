@@ -63,6 +63,7 @@ add_executable(jsdrv_util
         jsdrv_util.c
         jsdrv_util/demo.c
         jsdrv_util/dev.c
+        jsdrv_util/hotplug.c
         jsdrv_util/info.c
         jsdrv_util/mem_erase.c
         jsdrv_util/mem_read.c

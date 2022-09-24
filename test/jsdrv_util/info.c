@@ -84,7 +84,7 @@ static int device_info(struct app_s * self, const char * device) {
     return jsdrv_close(self->context, device);
 }
 
-static int usage() {
+static int usage(void) {
     printf("usage: jsdrv_util info [--verbose] device_path\n");
     return 1;
 }

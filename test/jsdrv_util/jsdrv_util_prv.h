@@ -75,6 +75,7 @@ typedef int (*command_fn)(struct app_s * self, int argc, char * argv[]);
 int on_help(struct app_s * self, int argc, char * argv[]);
 int on_demo(struct app_s * self, int argc, char * argv[]);
 int on_dev(struct app_s * self, int argc, char * argv[]);
+int on_hotplug(struct app_s * self, int argc, char * argv[]);
 int on_info(struct app_s * self, int argc, char * argv[]);
 int on_mem_erase(struct app_s * self, int argc, char * argv[]);
 int on_mem_read(struct app_s * self, int argc, char * argv[]);

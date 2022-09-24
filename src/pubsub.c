@@ -328,7 +328,6 @@ static void devices_on_sub(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * m
                 *dst++ = *src++;
             }
         }
-        subscriber_call(&msg->payload.sub.subscriber, t_dev_list->value);
     }
 }
 
