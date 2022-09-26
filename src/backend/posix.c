@@ -30,6 +30,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 int64_t jsdrv_time_utc(void) {
     struct timespec ts;
@@ -152,4 +154,15 @@ void jsdrv_thread_sleep_ms(uint32_t duration_ms) {
     ts.tv_sec = duration_ms / 1000;
     ts.tv_nsec = (duration_ms - (ts.tv_sec * 1000)) * 1000000;
     nanosleep(&ts, NULL);
+}
+
+int32_t jsdrv_platform_initialize(void) {
+    struct rlimit limit = {
+        .rlim_cur = 0,
+        .rlim_max = 0,
+    };
+    getrlimit(RLIMIT_NOFILE, &limit);
+    limit.rlim_cur = limit.rlim_max;
+    setrlimit(RLIMIT_NOFILE, &limit);
+    return 0;
 }

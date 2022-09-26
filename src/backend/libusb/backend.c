@@ -170,10 +170,10 @@ static struct dev_s * device_lookup_by_usb_device(struct backend_s * s, libusb_d
     return NULL;
 }
 
-static void device_announce(struct backend_s * s, struct dev_s * d, const char * topic) {
-    JSDRV_LOGI("device_announce %s %s", d->ll_device.prefix, topic);
+static void device_add_announce(struct backend_s * s, struct dev_s * d) {
+    JSDRV_LOGI("device_add_announce %s %s", d->ll_device.prefix);
     struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(s->context);
-    jsdrv_cstr_copy(msg->topic, topic, sizeof(msg->topic));
+    jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_ADD, sizeof(msg->topic));
     msg->value.type = JSDRV_UNION_BIN;
     msg->value.app = JSDRV_PAYLOAD_TYPE_DEVICE;
     msg->value.value.bin = (const uint8_t *) &msg->payload.device;
@@ -373,8 +373,8 @@ static void on_bulk_in_done(struct libusb_transfer * transfer) {
     struct dev_s * d = t->device;
     uint8_t pipe_id = transfer->endpoint;
     struct jsdrvp_msg_s * m;
-    JSDRV_LOGI("bulk_in_done(%s) status=%d, length=%d",
-               d->ll_device.prefix, transfer->status, t->transfer->actual_length);
+    JSDRV_LOGD3("bulk_in_done(%s) status=%d, length=%d",
+                d->ll_device.prefix, transfer->status, t->transfer->actual_length);
     switch (transfer->status) {
         case LIBUSB_TRANSFER_COMPLETED:
             bulk_in_start(t->device, pipe_id);
@@ -541,13 +541,22 @@ static int32_t device_add(struct backend_s * s, libusb_device * usb_device, stru
                          s->backend.prefix, d->device_type->model, d->serial_number);
             jsdrv_list_add_tail(&s->devices_active, &d->item);
             d->mode = DEVICE_MODE_CLOSED;
-            device_announce(s, d, JSDRV_MSG_DEVICE_ADD);
+            device_add_announce(s, d);
             return 0;
         }
         ++dt;
     }
     jsdrv_list_add_tail(&s->devices_free, &d->item);
     return 1;
+}
+
+static void device_remove_announce(struct backend_s * s, struct dev_s * d) {
+    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(s->context);
+    jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_REMOVE, sizeof(msg->topic));
+    msg->value.type = JSDRV_UNION_STR;
+    msg->value.value.str = msg->payload.str;
+    jsdrv_cstr_copy(msg->payload.str, d->ll_device.prefix, sizeof(msg->payload.str));
+    jsdrvp_backend_send(s->context, msg);
 }
 
 static void device_remove(struct backend_s * s, struct dev_s * d) {
@@ -559,7 +568,7 @@ static void device_remove(struct backend_s * s, struct dev_s * d) {
         d->usb_device = NULL;
     }
     d->mode = DEVICE_MODE_UNASSIGNED;
-    device_announce(s, d, JSDRV_MSG_DEVICE_REMOVE);
+    device_remove_announce(s, d);
     jsdrv_list_add_tail(&s->devices_free, &d->item);
 }
 
@@ -568,6 +577,7 @@ static void handle_hotplug(struct backend_s * s) {
     libusb_device ** device_list;
     struct dev_s * d;
     struct jsdrv_list_s * item;
+    jsdrv_os_event_reset(s->hotplug_event);
     jsdrv_list_foreach(&s->devices_active, item) {
         d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
         d->mark = DEVICE_MARK_NONE;
@@ -705,9 +715,11 @@ void * backend_thread(void * arg) {
     while (!s->do_exit) {
         nfds = 0;
         fds[nfds].fd = msg_queue_handle_get(s->backend.cmd_q);
-        fds[nfds++].events = POLLIN;
+        fds[nfds].events = POLLIN;
+        fds[nfds++].revents = 0;
         fds[nfds].fd = s->hotplug_event->fd_poll;
-        fds[nfds++].events = s->hotplug_event->events;
+        fds[nfds].events = s->hotplug_event->events;
+        fds[nfds++].revents = 0;
 
         const struct libusb_pollfd ** libusb_fds = libusb_get_pollfds(s->ctx);
         for (int i = 0; libusb_fds[i]; ++i) {

@@ -166,6 +166,13 @@ int64_t jsdrv_time_utc(void);
 uint32_t jsdrv_time_ms_u32(void);
 
 /**
+ * @brief Initialize any platform-specific features.
+ *
+ * @return 0 or error code.
+ */
+int32_t jsdrv_platform_initialize(void);
+
+/**
  * Additional functions to define:
  *
  * mutex.h

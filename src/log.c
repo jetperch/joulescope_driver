@@ -247,6 +247,8 @@ static DWORD WINAPI log_thread(LPVOID lpParam) {
         ResetEvent(self->event);
         process(self);
     }
+    process(self);
+    printf("log_thread exit\n");
     return 0;
 }
 
@@ -299,8 +301,10 @@ static void * log_thread(void * arg) {
     while (!self->quit) {
         fds.revents = 0;
         poll(&fds, 1, 100);
-        if (read(self->fd_read, rd_buf, sizeof(rd_buf)) <= 0) {
-            break;  // EOF or error
+        ssize_t rv = read(self->fd_read, rd_buf, sizeof(rd_buf));
+        if ((rv <= 0) && (errno != EAGAIN)) {
+            printf("log_thread READ error %d, %d\n", (int) rv, errno);
+            break;
         }
         process(self);
     }

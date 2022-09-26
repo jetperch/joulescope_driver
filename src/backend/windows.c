@@ -182,3 +182,7 @@ bool jsdrv_thread_is_current(jsdrv_thread_t * thread) {
 void jsdrv_thread_sleep_ms(uint32_t duration_ms) {
     Sleep(duration_ms);
 }
+
+int32_t jsdrv_platform_initialize(void) {
+    return 0;
+}

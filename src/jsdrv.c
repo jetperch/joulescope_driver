@@ -857,6 +857,7 @@ int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
 
 int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_arg_s * args, uint32_t timeout_ms) {
     JSDRV_LOGI("jsdrv_initialize: start");
+    JSDRV_RETURN_ON_ERROR(jsdrv_platform_initialize());
     struct jsdrv_context_s * c = jsdrv_alloc_clr(sizeof(struct jsdrv_context_s));
     c->args = args;
     c->state = ST_INIT_AWAITING_FRONTEND;

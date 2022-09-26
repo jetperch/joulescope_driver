@@ -3,6 +3,15 @@
 
 This file contains the list of changes made to the Joulescope driver.
 
+## 0.2.5
+
+2022 Sep 26
+
+* Fixed process hang due to logging on macOS & Linux
+* Fixed device disconnect for macOS & Linux.
+* Increased file handle limit on macOS & Linux.
+
+
 ## 0.2.4
 
 2022 Sep 24
