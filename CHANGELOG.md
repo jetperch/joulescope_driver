@@ -3,11 +3,19 @@
 
 This file contains the list of changes made to the Joulescope driver.
 
+
+## 0.2.6
+
+2022 Sep 29
+
+* Reduced POSIX file descriptor limit request to 4096 max.
+
+
 ## 0.2.5
 
 2022 Sep 26
 
-* Fixed process hang due to logging on macOS & Linux
+* Fixed process hang due to logging on macOS & Linux.
 * Fixed device disconnect for macOS & Linux.
 * Increased file handle limit on macOS & Linux.
 

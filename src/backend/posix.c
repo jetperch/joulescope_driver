@@ -162,7 +162,11 @@ int32_t jsdrv_platform_initialize(void) {
         .rlim_max = 0,
     };
     getrlimit(RLIMIT_NOFILE, &limit);
-    limit.rlim_cur = limit.rlim_max;
+    if (limit.rlim_max < 4096) {
+        JSDRV_LOGE("file descriptor limit too small: %llu", limit.rlim_max);
+        return JSDRV_ERROR_NOT_SUPPORTED;
+    }
+    limit.rlim_cur = 4096;
     setrlimit(RLIMIT_NOFILE, &limit);
     return 0;
 }
