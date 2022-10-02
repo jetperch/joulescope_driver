@@ -71,7 +71,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 v = {
                     'sample_id': stream[0].sample_id,
                     'field_id': stream[0].field_id,
-                    'index': stream[0].index
+                    'index': stream[0].index,
                 }
                 if el == (c_jsdrv.JSDRV_DATA_TYPE_FLOAT, 32):  # float32
                     shape[0] = <np.npy_intp> stream[0].element_count

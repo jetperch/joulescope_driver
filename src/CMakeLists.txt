@@ -50,6 +50,7 @@ set(SUPPORT_SOURCES
         log.c
         pubsub.c
         meta.c
+        sample_buffer_f32.c
         topic.c
         union.c
         version.c

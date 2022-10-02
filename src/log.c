@@ -248,7 +248,7 @@ static DWORD WINAPI log_thread(LPVOID lpParam) {
         process(self);
     }
     process(self);
-    printf("log_thread exit\n");
+    dprintf("log_thread exit\n");
     return 0;
 }
 

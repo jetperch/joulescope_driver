@@ -35,6 +35,7 @@ ADD_CMOCKA_TEST(js110_sp_test)
 ADD_CMOCKA_TEST(js220_stats_test)
 ADD_CMOCKA_TEST(json_test)
 ADD_CMOCKA_TEST(meta_test)
+ADD_CMOCKA_TEST(sample_buffer_f32_test)
 
 add_executable(topic_test topic_test.c ../src/topic.c)
 add_dependencies(topic_test cmocka)

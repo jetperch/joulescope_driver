@@ -145,6 +145,7 @@ extensions = [
                                      'src/log.c',
                                      'src/pubsub.c',
                                      'src/meta.c',
+                                     'src/sample_buffer_f32.c',
                                      'src/topic.c',
                                      'src/union.c',
                                      'src/version.c',

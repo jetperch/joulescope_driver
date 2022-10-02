@@ -27,6 +27,7 @@
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/dbc.h"
+#include "jsdrv_prv/sample_buffer_f32.h"
 #include "jsdrv/topic.h"
 #include "jsdrv_prv/platform.h"
 #include "jsdrv/version.h"
@@ -140,12 +141,12 @@ struct field_def_s {
 }
 
 struct field_def_s PORT_MAP[] = {
-        //   (ctrl field,       data field, jsdrv_field_e,  index, type, bit_size_pow2)
-        FIELD("s/adc/0/ctrl",   "s/adc/0/!data",   RAW,         0, INT,   16, 1),  // 0
+        //   (ctrl field,       data field, jsdrv_field_e,  index, type, el_size_bits, downsample)
+        FIELD("s/adc/0/ctrl",   "s/adc/0/!data",   RAW,         0, INT,   16, 1),  // 0 + 16
         FIELD("s/adc/1/ctrl",   "s/adc/1/!data",   RAW,         1, INT,   16, 1),  // 1
         FIELD("s/adc/2/ctrl",   "s/adc/2/!data",   RAW,         2, INT,   16, 1),  // 2
         FIELD("s/adc/3/ctrl",   "s/adc/3/!data",   RAW,         3, INT,   16, 1),  // 3
-        FIELD("s/i/range/ctrl", "s/i/range/!data", RANGE,       0, UINT,  4, 1),  // 4
+        FIELD("s/i/range/ctrl", "s/i/range/!data", RANGE,       0, UINT,  4, 1),   // 4
         FIELD("s/i/ctrl",       "s/i/!data",       CURRENT,     0, FLOAT, 32, 2),  // 5
         FIELD("s/v/ctrl",       "s/v/!data",       VOLTAGE,     0, FLOAT, 32, 2),  // 6
         FIELD("s/p/ctrl",       "s/p/!data",       POWER,       0, FLOAT, 32, 2),  // 7
@@ -158,6 +159,10 @@ struct field_def_s PORT_MAP[] = {
         FIELD("s/stats/ctrl",   "s/stats/value",   UNDEFINED,   0, UNDEFINED,   0, 0),  // 14 js220_statistics_raw_s
         FIELD(NULL, NULL, UNDEFINED,   0, UINT,   8, 0),  // 15 reserved and unavailable
 };
+#define PORT_ID_CURRENT (5 + 16)
+#define PORT_ID_VOLTAGE (6 + 16)
+#define PORT_ID_POWER   (7 + 16)
+#define COMPUTE_POWER_MASK ((1 << PORT_ID_CURRENT) | (1 << PORT_ID_VOLTAGE) | (1 << PORT_ID_POWER))
 
 enum break_e {
     BREAK_NONE = 0,
@@ -187,6 +192,10 @@ struct dev_s {
     volatile bool do_exit;
     jsdrv_thread_t thread;
     uint8_t state;  // state_e
+
+    struct sbuf_f32_s i_buf;
+    struct sbuf_f32_s v_buf;
+    struct sbuf_f32_s p_buf;
 
     // memory operations
     struct js220_port3_header_s mem_hdr;
@@ -566,7 +575,7 @@ static int32_t d_close(struct dev_s * d) {
     return rv;
 }
 
-static void stream_in_port_enable(struct dev_s * d, const char * topic, bool enable) {
+static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool enable) {
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
         if (PORT_MAP[i].ctrl_topic && (0 == strcmp(PORT_MAP[i].ctrl_topic, topic))) {
             uint32_t mask = (0x00010000 << i);
@@ -576,16 +585,33 @@ static void stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
             } else {
                 d->stream_in_port_enable &= ~mask;
             }
-            break;
+            if (PORT_MAP[i].field_id == JSDRV_FIELD_CURRENT) {
+                sbuf_f32_clear(&d->i_buf);
+            } else if (PORT_MAP[i].field_id == JSDRV_FIELD_VOLTAGE) {
+                sbuf_f32_clear(&d->v_buf);
+            }
+            return (PORT_MAP[i].field_id != JSDRV_FIELD_POWER);  // todo when add decimate, always true when decimated
         }
     }
+    JSDRV_LOGW("stream_in_port_enable port not found %s", topic);
+    return false;
 }
 
-static void handle_cmd_ctrl(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
+static bool handle_cmd_ctrl(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
     bool v = false;
     if (jsdrv_cstr_ends_with(topic, "/ctrl")) {
         jsdrv_union_to_bool(value, &v);
-        stream_in_port_enable(d, topic, value);
+        if (stream_in_port_enable(d, topic, value)) {
+            bulk_out_publish(d, topic, value);
+        } else {
+            struct jsdrv_topic_s t;
+            jsdrv_topic_set(&t, topic);
+            jsdrv_topic_suffix_add(&t, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
+            send_to_frontend(d, t.topic, &jsdrv_union_i32(0));
+        }
+        return true;
+    } else {
+        return false;
     }
 }
 
@@ -784,8 +810,9 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         }
     } else {
         JSDRV_LOGD1("handle_cmd to device %s", topic);
-        handle_cmd_ctrl(d, topic, &msg->value);
-        bulk_out_publish(d, topic, &msg->value);
+        if (!handle_cmd_ctrl(d, topic, &msg->value)) {
+            bulk_out_publish(d, topic, &msg->value);
+        }
     }
     return rv;
 }
@@ -808,8 +835,18 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         port->sample_id_next = sample_id_u32;  // todo correctly initialize u64
     }
 
-    uint32_t sample_id_u32_expect = (uint32_t) (port->sample_id_next & 0xffffffff); // truncate 64->32
+    switch (port_id) {
+        case PORT_ID_CURRENT:
+            sbuf_f32_add(&d->i_buf, port->sample_id_next, (float *) p_u32, size / sizeof(float));
+            break;
+        case PORT_ID_VOLTAGE:
+            sbuf_f32_add(&d->v_buf, port->sample_id_next, (float *) p_u32, size / sizeof(float));
+            break;
+        default:
+            break;
+    }
 
+    uint32_t sample_id_u32_expect = (uint32_t) (port->sample_id_next & 0xffffffff); // truncate 64->32
     if (sample_id_u32 != sample_id_u32_expect) {
         if (m) {
             JSDRV_LOGI("stream_in_port %d sample_id mismatch: received=%" PRIu32 " expected=%" PRIu32,
@@ -852,6 +889,16 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         JSDRV_LOGD1("stream_in_port: port_id=%d, sample_id_delta=%d, size=%d", (int) port_id, (int) sample_id_delta, (int) m->value.size);
         port->msg_in = NULL;
         jsdrvp_backend_send(d->context, m);
+    }
+}
+
+static void compute_power(struct dev_s * d) {
+    // for full-rate data, must compute power on the host
+    // insufficient sensor-controller and USB bandwidth to stream everything.
+    uint32_t sz = sbuf_f32_length(&d->p_buf);
+    sbuf_f32_mult(&d->p_buf, &d->i_buf, &d->v_buf);
+    if (sz) {
+        handle_stream_in_port(d, 16 + PORT_ID_POWER, &d->p_buf.msg_sample_id, (1 + sz) * 4);
     }
 }
 
@@ -1154,6 +1201,10 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
             handle_statistics_in(d, p_u32 + 1, hdr.h.length);
         } else {
             handle_stream_in_port(d, hdr.h.port_id, p_u32 + 1, hdr.h.length);
+            if ((hdr.h.port_id == PORT_ID_VOLTAGE) &&
+                       ((d->stream_in_port_enable & COMPUTE_POWER_MASK) == COMPUTE_POWER_MASK)) {
+                compute_power(d);
+            }
         }
     } else {
         JSDRV_LOGD1("stream in: port=%d, length=%d", hdr.h.port_id, hdr.h.length);

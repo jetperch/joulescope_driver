@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 0.2.7
+
+2022 Oct 3 [in progress]
+
+* Added host-side power computation to JS220.
+
+
 ## 0.2.6
 
 2022 Sep 29
