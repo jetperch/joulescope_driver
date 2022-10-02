@@ -114,7 +114,7 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
     ++self->sample_count;
 
     // interpret sample_u32 and apply calibration
-    uint8_t i_range = (sample_u32 & 3) | ((sample_u32 >> (16 - 2)) & 4);
+    uint8_t i_range = (sample_u32 & 3) | (((sample_u32 >> 16) & 1) << 2);
     if ((i_range > 7) || (sample_u32 == 0xffffffffLU)) {
         ++self->sample_missing_count;
         self->contiguous_count = 0;

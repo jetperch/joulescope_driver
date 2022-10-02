@@ -58,16 +58,20 @@ static void on_gpo0_value(struct js110_dev_s * d, const struct jsdrv_union_s * v
 static void on_gpo1_value(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_current_lsb_source(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_voltage_lsb_source(struct js110_dev_s * d, const struct jsdrv_union_s * value);
-static void on_current_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
-static void on_voltage_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
-static void on_power_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
-static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 
 static void on_i_range_mode(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_i_range_pre(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_i_range_win(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_i_range_win_sz(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_i_range_post(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+
+static void on_current_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_voltage_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_power_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_current_range_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_gpi_0_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_gpi_1_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 
 
 enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
@@ -78,15 +82,19 @@ enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
     PARAM_GPO1_VALUE,
     PARAM_I_LSB_SOURCE,
     PARAM_V_LSB_SOURCE,
-    PARAM_I_CTRL,
-    PARAM_V_CTRL,
-    PARAM_P_CTRL,
-    PARAM_STATS_CTRL,
     PARAMS_I_RANGE_MODE,
     PARAMS_I_RANGE_PRE,
     PARAMS_I_RANGE_WIN,
     PARAMS_I_RANGE_WIN_SZ,
     PARAMS_I_RANGE_POST,
+    PARAM_I_CTRL,
+    PARAM_V_CTRL,
+    PARAM_P_CTRL,
+    PARAM_I_RANGE_CTRL,
+    PARAM_GPI_0_CTRL,
+    PARAM_GPI_1_CTRL,
+    PARAM_STATS_CTRL,
+    PARAM__COUNT,  // must be last
 };
 
 
@@ -173,7 +181,7 @@ static const struct param_s PARAMS[] = {
     {
         "s/i/lsb_src",
         "{"
-            "\"dtype\": \"bool\","
+            "\"dtype\": \"u8\","
             "\"brief\": \"The current signal least-significant bit mapping.\","
             "\"default\": 0,"
             "\"options\": ["
@@ -187,7 +195,7 @@ static const struct param_s PARAMS[] = {
     {
         "s/v/lsb_src",
         "{"
-            "\"dtype\": \"bool\","
+            "\"dtype\": \"u8\","
             "\"brief\": \"The voltage signal least-significant bit mapping.\","
             "\"default\": 0,"
             "\"options\": ["
@@ -197,42 +205,6 @@ static const struct param_s PARAMS[] = {
             "]"
         "}",
         on_voltage_lsb_source
-    },
-    {
-        "s/i/ctrl",
-        "{"
-            "\"dtype\": \"bool\","
-            "\"brief\": \"Enable data stream for float32 current.\","
-            "\"default\": 0"
-        "}",
-        on_current_ctrl,
-    },
-    {
-        "s/v/ctrl",
-        "{"
-            "\"dtype\": \"bool\","
-            "\"brief\": \"Enable data stream for float32 voltage.\","
-            "\"default\": 0"
-        "}",
-        on_voltage_ctrl,
-    },
-    {
-        "s/p/ctrl",
-        "{"
-            "\"dtype\": \"bool\","
-            "\"brief\": \"Enable data stream for float32 power.\","
-            "\"default\": 0"
-        "}",
-        on_power_ctrl,
-    },
-    {
-        "s/stats/ctrl",
-        "{"
-            "\"dtype\": \"bool\","
-            "\"brief\": \"Enable stats input data stream (u8).\","
-            "\"default\": 0"
-        "}",
-        on_stats_ctrl,
     },
     {
         "s/i/range/mode",
@@ -293,13 +265,78 @@ static const struct param_s PARAMS[] = {
         "}",
         on_i_range_post,
     },
-    // todo current_range, current_ranging_type, current_ranging_samples_pre, current_ranging_samples_window, current_ranging_samples_post
     // buffer_duration
     // reduction_frequency
-    // sampling_frequency
+    // sampling_frequency (downsampling)
     // on-instrument statistics
+    {
+        "s/i/ctrl",
+        "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable data stream for float32 current.\","
+            "\"default\": 0"
+        "}",
+        on_current_ctrl,
+    },
+    {
+        "s/v/ctrl",
+        "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable data stream for float32 voltage.\","
+            "\"default\": 0"
+        "}",
+        on_voltage_ctrl,
+    },
+    {
+        "s/p/ctrl",
+        "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable data stream for float32 power.\","
+            "\"default\": 0"
+        "}",
+        on_power_ctrl,
+    },
+    {
+        "s/i/range/ctrl",
+        "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable current range input data stream (u4).\","
+            "\"default\": 0"
+        "}",
+        on_current_range_ctrl,
+    },
+    {
+        "s/gpi/0/ctrl",
+        "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable general purpose input 0 data stream (u1).\","
+            "\"default\": 0"
+        "}",
+        on_gpi_0_ctrl,
+    },
+    {
+        "s/gpi/1/ctrl",
+        "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable general purpose input 1 data stream (u1).\","
+            "\"default\": 0"
+        "}",
+        on_gpi_1_ctrl,
+    },
+    {
+        "s/stats/ctrl",
+        "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable stats input data stream (u8).\","
+            "\"default\": 0"
+        "}",
+        on_stats_ctrl,
+    },
     {NULL, NULL, NULL},  // MUST BE LAST
 };
+
+
+JSDRV_STATIC_ASSERT((PARAM__COUNT + 1) == JSDRV_ARRAY_SIZE(PARAMS), param_length_mismatch);
 
 
 struct field_def_s {
@@ -327,10 +364,9 @@ struct field_def_s FIELDS[] = {
         FIELD("s/i/!data",       CURRENT,     0, FLOAT, 32, 1, PARAM_I_CTRL),
         FIELD("s/v/!data",       VOLTAGE,     0, FLOAT, 32, 1, PARAM_V_CTRL),
         FIELD("s/p/!data",       POWER,       0, FLOAT, 32, 1, PARAM_P_CTRL),
-        // todo support remaining fields
-        //FIELD("s/i/range/!data", RANGE,       0, UINT,  2, 1, 4),
-        //FIELD("s/gpi/0/!data",   GPI,         0, UINT,  0, 1, 8),
-        //FIELD("s/gpi/1/!data",   GPI,         1, UINT,  0, 1, 9),
+        FIELD("s/i/range/!data", RANGE,       0, UINT,   4, 1, PARAM_I_RANGE_CTRL),
+        FIELD("s/gpi/0/!data",   GPI,         0, UINT,   1, 1, PARAM_GPI_0_CTRL),
+        FIELD("s/gpi/1/!data",   GPI,         1, UINT,   1, 1, PARAM_GPI_1_CTRL),
 };
 
 struct port_s {
@@ -525,7 +561,10 @@ static bool is_streaming(struct js110_dev_s * d) {
     uint8_t stream_en =
             d->param_values[PARAM_I_CTRL].value.u8
             | d->param_values[PARAM_V_CTRL].value.u8
-            | d->param_values[PARAM_P_CTRL].value.u8;
+            | d->param_values[PARAM_P_CTRL].value.u8
+            | d->param_values[PARAM_I_RANGE_CTRL].value.u8
+            | d->param_values[PARAM_GPI_0_CTRL].value.u8
+            | d->param_values[PARAM_GPI_1_CTRL].value.u8;
     return (0 != stream_en) ? true : false;
 }
 
@@ -672,30 +711,6 @@ static void on_voltage_lsb_source(struct js110_dev_s * d, const struct jsdrv_uni
     extio_settings_send(d);
 }
 
-static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value, int32_t param) {
-    bool s1 = is_streaming(d);
-    d->param_values[param] = *value;
-    if (s1 != is_streaming(d)) {
-        stream_settings_send(d);
-    }
-}
-
-static void on_current_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
-    on_update_ctrl(d, value, PARAM_I_CTRL);
-}
-
-static void on_voltage_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
-    on_update_ctrl(d, value, PARAM_V_CTRL);
-}
-
-static void on_power_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
-    on_update_ctrl(d, value, PARAM_P_CTRL);
-}
-
-static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
-    on_update_ctrl(d, value, PARAM_STATS_CTRL);
-}
-
 static void on_i_range_mode(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
     d->sample_processor._suppress_mode = value->value.u8;
 }
@@ -714,6 +729,46 @@ static void on_i_range_win_sz(struct js110_dev_s * d, const struct jsdrv_union_s
 
 static void on_i_range_post(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
     d->sample_processor._suppress_samples_post = value->value.u8;
+}
+
+static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value, int32_t param) {
+    bool s1 = is_streaming(d);
+    d->param_values[param] = *value;
+    if (s1 != is_streaming(d)) {
+        JSDRV_LOGI("on_update_ctrl %d (stream change)", param);
+        stream_settings_send(d);
+        JSDRV_LOGI("on_update_ctrl %d (stream change complete)", param);
+    } else {
+        JSDRV_LOGI("on_update_ctrl %d (no stream change)", param);
+    }
+}
+
+static void on_current_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    on_update_ctrl(d, value, PARAM_I_CTRL);
+}
+
+static void on_voltage_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    on_update_ctrl(d, value, PARAM_V_CTRL);
+}
+
+static void on_power_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    on_update_ctrl(d, value, PARAM_P_CTRL);
+}
+
+static void on_current_range_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    on_update_ctrl(d, value, PARAM_I_RANGE_CTRL);
+}
+
+static void on_gpi_0_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    on_update_ctrl(d, value, PARAM_GPI_0_CTRL);
+}
+
+static void on_gpi_1_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    on_update_ctrl(d, value, PARAM_GPI_1_CTRL);
+}
+
+static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    on_update_ctrl(d, value, PARAM_STATS_CTRL);
 }
 
 static int32_t d_open(struct js110_dev_s * d) {
@@ -846,11 +901,11 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
-static void add_f32_field(struct js110_dev_s * d, uint8_t idx, float value) {
+static struct jsdrvp_msg_s * field_message_get(struct js110_dev_s * d, uint8_t field_idx) {
     struct jsdrv_stream_signal_s * s;
-    struct field_def_s * field_def = &FIELDS[idx];
+    struct field_def_s * field_def = &FIELDS[field_idx];
     struct jsdrvp_msg_s * m;
-    struct port_s * p = &d->ports[idx];
+    struct port_s * p = &d->ports[field_idx];
 
     if (0 == d->param_values[field_def->param].value.u8) {
         if (p->msg) {
@@ -858,7 +913,7 @@ static void add_f32_field(struct js110_dev_s * d, uint8_t idx, float value) {
             jsdrvp_msg_free(d->context, p->msg);
             p->msg = NULL;
         }
-        return;
+        return NULL;
     }
 
     if (NULL == p->msg) {
@@ -877,16 +932,66 @@ static void add_f32_field(struct js110_dev_s * d, uint8_t idx, float value) {
         p->msg = m;
     }
 
-    m = p->msg;
-    s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
-    float *data = (float *) s->data;
-    data[s->element_count++] = value;
-    ++p->sample_id_next;
+    return p->msg;
+}
 
-    if ((s->element_count * s->element_size_bits / 8) >= JSDRV_STREAM_DATA_SIZE) {
+static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
+    struct port_s * p = &d->ports[idx];
+    struct jsdrvp_msg_s * m = p->msg;
+    struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+    ++s->element_count;
+    ++p->sample_id_next;
+    if ((s->element_size_bits < 8) && (((s->element_count * s->element_size_bits) & 0x7) != 0)) {
+        return;
+    }
+    if ((((s->element_count * s->element_size_bits) / 8) >= JSDRV_STREAM_DATA_SIZE)
+            || (s->element_count >= (2000000 / 20))) {  // todo support downsampling
         jsdrvp_backend_send(d->context, p->msg);
         p->msg = NULL;
     }
+}
+
+static void add_f32_field(struct js110_dev_s * d, uint8_t field_idx, float value) {
+    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
+    if (NULL == m) {
+        return;
+    }
+    struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+    float *data = (float *) s->data;
+    data[s->element_count] = value;
+    field_message_process_end(d, field_idx);
+}
+
+static void add_u4_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t value) {
+    struct jsdrv_stream_signal_s * s;
+    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
+    if (NULL == m) {
+        return;
+    }
+    s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+    value = value & 0x0f;
+    if (0 == (s->element_count & 1)) {
+        s->data[s->element_count >> 1] = value;
+    } else {
+        s->data[s->element_count >> 1] |= (value << 4);
+    }
+    field_message_process_end(d, field_idx);
+}
+
+static void add_u1_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t value) {
+    struct jsdrv_stream_signal_s * s;
+    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
+    if (NULL == m) {
+        return;
+    }
+    s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+    value = value & 1;
+    if (0 == (s->element_count & 7)) {
+        s->data[s->element_count >> 3] = value;
+    } else {
+        s->data[s->element_count >> 3] |= value << (s->element_count & 7);
+    }
+    field_message_process_end(d, field_idx);
 }
 
 static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_range) {
@@ -894,6 +999,9 @@ static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_ran
     add_f32_field(d, 0, z.i);
     add_f32_field(d, 1, z.v);
     add_f32_field(d, 2, z.p);
+    add_u4_field(d, 3, z.current_range);
+    add_u1_field(d, 4, z.gpi0);
+    add_u1_field(d, 5, z.gpi1);
 }
 
 static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
