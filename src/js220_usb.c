@@ -898,7 +898,7 @@ static void compute_power(struct dev_s * d) {
     uint32_t sz = sbuf_f32_length(&d->p_buf);
     sbuf_f32_mult(&d->p_buf, &d->i_buf, &d->v_buf);
     if (sz) {
-        handle_stream_in_port(d, 16 + PORT_ID_POWER, &d->p_buf.msg_sample_id, (1 + sz) * 4);
+        handle_stream_in_port(d, PORT_ID_POWER, &d->p_buf.msg_sample_id, (1 + sz) * 4);
     }
 }
 
