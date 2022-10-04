@@ -359,7 +359,7 @@ struct field_def_s {
     .param=(param_),                                                                    \
 }
 
-struct field_def_s FIELDS[] = {
+const struct field_def_s FIELDS[] = {
         //   (ctrl field,       data field, index, el_type, el_size_bits, downsample, param)
         FIELD("s/i/!data",       CURRENT,     0, FLOAT, 32, 1, PARAM_I_CTRL),
         FIELD("s/v/!data",       VOLTAGE,     0, FLOAT, 32, 1, PARAM_V_CTRL),
@@ -736,6 +736,20 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
     d->param_values[param] = *value;
     if (s1 != is_streaming(d)) {
         JSDRV_LOGI("on_update_ctrl %d (stream change)", param);
+        if (!s1) {  // enabling streaming
+            js110_sp_reset(&d->sample_processor);
+            d->packet_index = 0;
+        } else {    // disabling streaming
+            for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(FIELDS); ++idx) {
+                struct port_s * p = &d->ports[idx];
+                struct jsdrvp_msg_s *m = p->msg;
+                p->msg = NULL;
+                p->sample_id_next = 0;
+                if (NULL != m) {
+                    jsdrvp_msg_free(d->context, m);
+                }
+            }
+        }
         stream_settings_send(d);
         JSDRV_LOGI("on_update_ctrl %d (stream change complete)", param);
     } else {
@@ -903,7 +917,7 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
 
 static struct jsdrvp_msg_s * field_message_get(struct js110_dev_s * d, uint8_t field_idx) {
     struct jsdrv_stream_signal_s * s;
-    struct field_def_s * field_def = &FIELDS[field_idx];
+    const struct field_def_s * field_def = &FIELDS[field_idx];
     struct jsdrvp_msg_s * m;
     struct port_s * p = &d->ports[field_idx];
 
@@ -1023,20 +1037,21 @@ static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
         JSDRV_LOGW("handle_stream_in_frame invalid length = %d", (int) pkt_length);
         return;
     }
-    if (0 == d->packet_index) {
-        d->packet_index = pkt_index;
-    }
-    while ((d->packet_index & 0xffff) != pkt_index) {
+    if ((d->packet_index & 0xffff) != pkt_index) {
         JSDRV_LOGW("pkt_index skip: expected %d, received %d", d->packet_index, pkt_index);
-        for (uint32_t i = 2; i < (FRAME_SIZE_BYTES / 4); ++i) {
-            handle_sample(d, 0xffffffffLU, voltage_range);
-        }
-        ++d->packet_index;
+        //while ((d->packet_index & 0xffff) != pkt_index) {
+        //    for (uint32_t i = 2; i < (FRAME_SIZE_BYTES / 4); ++i) {
+        //        handle_sample(d, 0xffffffffLU, voltage_range);
+        //    }
+        //    d->packet_index = (d->packet_index + 1) & 0xffff;
+        //}
+        // todo handle skips better.
+        d->packet_index = pkt_index;
     }
     for (uint32_t i = 2; i < (FRAME_SIZE_BYTES / 4); ++i) {
         handle_sample(d, p_u32[i], voltage_range);
     }
-    ++d->packet_index;
+    d->packet_index = (d->packet_index + 1) & 0xffff;
 }
 
 static void handle_stream_in(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
