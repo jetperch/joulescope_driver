@@ -847,9 +847,15 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     }
 
     uint32_t sample_id_u32_expect = (uint32_t) (port->sample_id_next & 0xffffffff); // truncate 64->32
-    if (sample_id_u32 != sample_id_u32_expect) {
+    uint32_t sample_count = (size << 3) / field_def->element_size_bits;
+    if (sample_id_u32 == sample_id_u32_expect) {
+        // normal behavior
+    } else if ((sample_id_u32 + sample_count) <= sample_id_u32_expect) {
+        JSDRV_LOGI("stream_in_port %d sample_id dup: received=%" PRIu32 " expected=%" PRIu32,
+                   port_id, sample_id_u32, sample_id_u32_expect);
+    } else {
         if (m) {
-            JSDRV_LOGI("stream_in_port %d sample_id mismatch: received=%" PRIu32 " expected=%" PRIu32,
+            JSDRV_LOGI("stream_in_port %d sample_id skip: received=%" PRIu32 " expected=%" PRIu32,
                        port_id, sample_id_u32, sample_id_u32_expect);
             jsdrvp_backend_send(d->context, m);
             m = NULL;
@@ -879,7 +885,6 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     uint8_t * p = (uint8_t *) &m->value.value.bin[m->value.size];
     memcpy(p, p_u32, size);
     m->value.size += size;
-    uint32_t sample_count = (size << 3) / s->element_size_bits;
     s->element_count += sample_count;
     port->sample_id_next += sample_count * port->downsample;
 

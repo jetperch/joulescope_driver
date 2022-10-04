@@ -6,10 +6,12 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 0.2.7
 
-2022 Oct 3 [in progress]
+2022 Oct 4
 
 * Added host-side power computation to JS220.
 * Improved JS110 driver to provide current_range, gpi0, gpi1.
+* Fixed power, charge and energy computation.
+  Power fixes require FPGA 0.2.6 upgrade.
 
 
 ## 0.2.6

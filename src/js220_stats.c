@@ -60,6 +60,25 @@ static js220_i128 udiv(js220_i128 dividend, uint64_t divisor, uint64_t * remaind
     return result;
 }
 
+#if 0
+static js220_i128 lshift(js220_i128 x, int32_t shift) {
+    if (shift > 0) {
+        x.u64[1] = (x.u64[1] << shift) | (x.u64[0] >> (64 - shift));
+        x.u64[0] = x.u64[0] << shift;
+    } else if (0 == shift) {
+        // no operation
+    } else {  // right shift signed
+        x.u64[0] = (x.u64[0] >> shift) | (x.u64[1] << (64 - shift));
+        x.i64[1] = x.i64[1] >> shift;
+    }
+    return x;
+}
+
+static js220_i128 rshift(js220_i128 x, int32_t shift) {
+    return lshift(x, -shift);
+}
+#endif
+
 double js220_stats_i128_to_f64(js220_i128 x, uint32_t q) {
     double f;
     int32_t exponent = 128 - q - 64;
@@ -102,6 +121,12 @@ static double compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q) {
 #endif
     d = udiv(m, n, NULL);
 
+    if ((x2.u64[1] < d.u64[1]) ||
+            ((x2.u64[1] == d.u64[1]) && (x2.u64[0] < d.u64[0]))) {
+        // numerical precision error, return 0.
+        return 0.0;
+    }
+
     if (d.u64[0] > x2.u64[0]) {
         x2.u64[1] -= 1;
     }
@@ -142,6 +167,7 @@ int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct js
     dst->rsv3_u8 = 0;
     dst->block_sample_id = src->block_sample_id;
     dst->accum_sample_id = src->accum_sample_id;
+    uint32_t sample_freq = dst->sample_freq / dst->decimate_factor;
 
     double mm_scale = pow(2, -31);
     double avg_scale = 1.0 / (((uint64_t) dst->block_sample_count) << 31);
@@ -150,6 +176,7 @@ int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct js
     dst->i_std = compute_std(src->i_x1, src->i_x2, dst->block_sample_count, 31);
     dst->i_min = src->i_min * mm_scale;
     dst->i_max = src->i_max * mm_scale;
+
     dst->v_avg = src->v_x1 * avg_scale;
     dst->v_std = compute_std(src->v_x1, src->v_x2, dst->block_sample_count, 31);
     dst->v_min = src->v_min * mm_scale;
@@ -162,17 +189,17 @@ int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct js
     dst->p_min = src->p_min * mm_scale;
     dst->p_max = src->p_max * mm_scale;
 
-    dst->charge_f64 = js220_stats_i128_to_f64(src->i_int, 31) / dst->sample_freq;
-    dst->energy_f64 = js220_stats_i128_to_f64(src->p_int, 27) / dst->sample_freq;
+    dst->charge_f64 = js220_stats_i128_to_f64(src->i_int, 31) / sample_freq;
+    dst->energy_f64 = js220_stats_i128_to_f64(src->p_int, 31) / sample_freq;
 
-    js220_i128 charge = compute_integral(src->i_int, dst->sample_freq);
-    js220_i128 energy = compute_integral(src->p_int, dst->sample_freq);
+    js220_i128 charge = compute_integral(src->i_int, sample_freq);
+    js220_i128 energy = compute_integral(src->p_int, sample_freq);
 
     dst->charge_i128[0] = charge.u64[0];
     dst->charge_i128[1] = charge.u64[1];
     dst->energy_i128[0] = energy.u64[0];
     dst->energy_i128[1] = energy.u64[1];
 
-    JSDRV_LOGI("i_avg=%.3g, v_avg=%.3g, p_avg=%.3g", dst->i_avg, dst->v_avg, dst->p_avg);
+    //JSDRV_LOGI(i_avg=%.3g, v_avg=%.3g, p_avg=%.3g", dst->i_avg, dst->v_avg, dst->p_avg);
     return 0;
 }
