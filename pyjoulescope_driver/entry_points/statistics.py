@@ -17,7 +17,7 @@ import time
 
 
 def parser_config(p):
-    """Joulescope info."""
+    """Display Joulescope measurement statistics."""
     p.add_argument('--verbose', '-v',
                    action='store_true',
                    help='Display verbose information.')
