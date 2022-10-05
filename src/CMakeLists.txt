@@ -44,7 +44,9 @@ set(SUPPORT_SOURCES
         cstr.c
         devices.c
         js110_cal.c
+        js220_i128.c
         js110_sample_processor.c
+        js110_stats.c
         js220_stats.c
         json.c
         log.c

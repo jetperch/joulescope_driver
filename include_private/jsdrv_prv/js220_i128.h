@@ -17,44 +17,38 @@
 /**
  * @file
  *
- * @brief JS220 statistics conversion.
+ * @brief JS220 i128 math.
  */
 
 #include "jsdrv/cmacro_inc.h"
 #include "js220_api.h"
 #include <stdint.h>
 
-#ifndef JSDRV_JS220_STATS_H__
-#define JSDRV_JS220_STATS_H__
+#ifndef JSDRV_JS220_I128_MATH_H__
+#define JSDRV_JS220_I128_MATH_H__
 
 /**
  * @ingroup jsdrv_prv
- * @defgroup jsdrv_prv_js220_stats JS220 stats
+ * @defgroup jsdrv_prv_js220_i128stats i128
  *
- * @brief Validate and convert the JS220 statistics message.
+ * @brief Perform i128 math.
  *
  * @{
  */
 
 
 JSDRV_CPP_GUARD_START
-// forward declaration from js220_api.h
-struct js220_statistics_raw_s;
-// forward declaration from jsdrv.h
-struct jsdrv_statistics_s;
 
-/**
- * @brief Validate and convert the JS220 statistics data structure.
- *
- * @param src[in] The JS220 statistics data structure
- * @param dst[out] The JSDRV statistics data structure.
- * @return 0 or error code.
- */
-int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct jsdrv_statistics_s * dst);
+//js220_i128 js220_i128_add(js220_i128 a, js220_i128 b);
+//js220_i128 js220_i128_sub(js220_i128 a, js220_i128 b);
+js220_i128 js220_i128_neg(js220_i128 x);
+js220_i128 js220_i128_udiv(js220_i128 dividend, uint64_t divisor, uint64_t * remainder);
+js220_i128 js220_i128_lshift(js220_i128 x, int32_t shift);
+js220_i128 js220_i128_rshift(js220_i128 x, int32_t shift);
+double js220_i128_to_f64(js220_i128 x, uint32_t q);
+double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q);
 
 
 JSDRV_CPP_GUARD_END
 
-/** @} */
-
-#endif  /* JSDRV_JS220_STATS_H__ */
+#endif // JSDRV_JS220_I128_MATH_H__

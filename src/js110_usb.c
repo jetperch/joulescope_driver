@@ -22,6 +22,7 @@
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/js110_cal.h"
 #include "jsdrv_prv/js110_sample_processor.h"
+#include "jsdrv_prv/js110_stats.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/usb_spec.h"
 #include "jsdrv_prv/thread.h"
@@ -71,6 +72,7 @@ static void on_power_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * v
 static void on_current_range_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_gpi_0_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_gpi_1_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_stats_scnt(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 
 
@@ -93,6 +95,7 @@ enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
     PARAM_I_RANGE_CTRL,
     PARAM_GPI_0_CTRL,
     PARAM_GPI_1_CTRL,
+    PARAM_STATS_SCNT,
     PARAM_STATS_CTRL,
     PARAM__COUNT,  // must be last
 };
@@ -324,6 +327,16 @@ static const struct param_s PARAMS[] = {
         on_gpi_1_ctrl,
     },
     {
+        "s/stats/scnt",
+        "{"
+            "\"dtype\": \"u32\","
+            "\"brief\": \"Number of 2 Msps samples per block.\","
+            "\"default\": 1000000,"
+            "\"range\": [0, 2000000]"
+        "}",
+        on_stats_scnt,
+    },
+    {
         "s/stats/ctrl",
         "{"
             "\"dtype\": \"bool\","
@@ -382,6 +395,7 @@ struct js110_dev_s {
     struct jsdrv_union_s param_values[JSDRV_ARRAY_SIZE(PARAMS)];
     uint64_t packet_index;
     struct js110_sp_s sample_processor;
+    struct js110_stats_s stats;
 
     struct port_s ports[JSDRV_ARRAY_SIZE(FIELDS)];
 
@@ -738,6 +752,7 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
         JSDRV_LOGI("on_update_ctrl %d (stream change)", param);
         if (!s1) {  // enabling streaming
             js110_sp_reset(&d->sample_processor);
+            js110_stats_clear(&d->stats);
             d->packet_index = 0;
         } else {    // disabling streaming
             for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(FIELDS); ++idx) {
@@ -779,6 +794,12 @@ static void on_gpi_0_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * v
 
 static void on_gpi_1_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
     on_update_ctrl(d, value, PARAM_GPI_1_CTRL);
+}
+
+static void on_stats_scnt(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    struct jsdrv_union_s v = *value;
+    jsdrv_union_as_type(&v, JSDRV_UNION_U32);
+    js110_stats_sample_count_set(&d->stats, v.value.u32);
 }
 
 static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
@@ -1016,6 +1037,17 @@ static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_ran
     add_u4_field(d, 3, z.current_range);
     add_u1_field(d, 4, z.gpi0);
     add_u1_field(d, 5, z.gpi1);
+
+    struct jsdrv_statistics_s * s = js110_stats_compute(&d->stats, z.i, z.v, z.p);
+    if (NULL != s) {
+        struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
+        tfp_snprintf(m->topic, sizeof(m->topic), "%s/s/stats/value", d->ll.prefix);
+        struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
+        *dst = *s;
+        m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
+        m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
+        jsdrvp_backend_send(d->context, m);
+    }
 }
 
 static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
