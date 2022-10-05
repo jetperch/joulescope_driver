@@ -14,6 +14,14 @@
 
 cmake_minimum_required (VERSION 3.1)
 set(PARENT_PROJECT_DIR ${PROJECT_SOURCE_DIR})
+
+if ("${CMAKE_C_COMPILER}" MATCHES "MSVC")
+    message(STATUS "Using Microsoft Visual Studio compiler")
+    set(JOULESCOPE_DRIVER_COMPILER "MSVC")
+else()
+    set(JOULESCOPE_DRIVER_COMPILER "")
+endif()
+
 project(JOULESCOPE_DRIVER
         VERSION 0.2.7
         LANGUAGES C)

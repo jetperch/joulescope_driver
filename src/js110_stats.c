@@ -15,34 +15,23 @@
 */
 
 #include "jsdrv_prv/js110_stats.h"
+#include "jsdrv_prv/js220_i128.h"
 #include "jsdrv_prv/platform.h"
 #include <float.h>
 #include <math.h>
 
 
-struct stats_block_s {
-    double avg;                ///< The average current over the block.
-    double std;                ///< The standard deviation of current over the block.
-    double min;                ///< The minimum current value in the block.
-    double max;                ///< The maximum current value in the block.
-};
-
 static void clear(struct js110_stats_s * self) {
-    struct jsdrv_statistics_s * s = &self->statistics;
-    s->i_avg = 0.0;
-    s->i_std = 0.0;
-    s->i_min = FLT_MAX;
-    s->i_max = FLT_MIN;
-
-    s->v_avg = 0.0;
-    s->v_std = 0.0;
-    s->v_min = FLT_MAX;
-    s->v_max = FLT_MIN;
-
-    s->p_avg = 0.0;
-    s->p_std = 0.0;
-    s->p_min = FLT_MAX;
-    s->p_max = FLT_MIN;
+    for (int i = 0; i < 3; ++i) {
+        struct js110_stats_field_s * f = &self->fields[i];
+        f->avg = 0.0;
+        f->std = 0.0;
+        f->min = FLT_MAX;
+        f->max = FLT_MIN;
+        f->x1 = 0;
+        f->x2.u64[0] = 0;
+        f->x2.u64[1] = 0;
+    }
 }
 
 
@@ -64,20 +53,30 @@ void js110_stats_sample_count_set(struct js110_stats_s * self, uint32_t sample_c
     s->block_sample_count = sample_count;
 }
 
-static void update(struct stats_block_s * b, float x) {
-    b->avg += x;
-    if (x < b->min) {
-        b->min = x;
+static void update(struct js110_stats_field_s * f, float x) {
+    f->avg += x;
+    if (x < f->min) {
+        f->min = x;
     }
-    if (x > b->max) {
-        b->max = x;
+    if (x > f->max) {
+        f->max = x;
     }
-    // todo compute standard deviation
+    int64_t x_i64 = (int64_t) (x * (1 << 31));
+    f->x1 += x_i64;
+    js220_i128 r = js220_i128_square_i64(x_i64);
+    f->x2 = js220_i128_add(f->x2, r);
 }
 
-static void finalize(struct stats_block_s * b, uint32_t sample_count) {
-    b->avg /= sample_count;
+static void finalize(struct js110_stats_field_s * f, uint32_t sample_count) {
+    f->avg /= sample_count;
+    f->std = js220_i128_compute_std(f->x1, f->x2, sample_count, 31);
 }
+
+#define FIELD_COPY(_idx, _field) \
+    s->_field##_avg = self->fields[_idx].avg; \
+    s->_field##_std = self->fields[_idx].std; \
+    s->_field##_min = self->fields[_idx].min; \
+    s->_field##_max = self->fields[_idx].max
 
 struct jsdrv_statistics_s * js110_stats_compute(struct js110_stats_s * self, float i, float v, float p) {
     struct jsdrv_statistics_s * s = &self->statistics;
@@ -87,19 +86,40 @@ struct jsdrv_statistics_s * js110_stats_compute(struct js110_stats_s * self, flo
     ++self->sample_count;
     if (!isnan(i) && !isnan(v) && !isnan(p)) {
         ++self->valid_count;
-        update((struct stats_block_s *) &s->i_avg, i);
-        update((struct stats_block_s *) &s->v_avg, v);
-        update((struct stats_block_s *) &s->p_avg, p);
+        update(&self->fields[0], i);
+        update(&self->fields[1], v);
+        update(&self->fields[2], p);
     }
 
     if (self->sample_count == s->block_sample_count) {
-        finalize((struct stats_block_s *) &s->i_avg, self->valid_count);
-        finalize((struct stats_block_s *) &s->v_avg, self->valid_count);
-        finalize((struct stats_block_s *) &s->p_avg, self->valid_count);
+        js220_i128 a;
+        a.u64[0] = self->fields[0].x1;
+        a.i64[1] = (self->fields[0].x1 < 0) ? -1 : 0;
+        self->charge = js220_i128_add(self->charge, a);
+
+        a.u64[0] = self->fields[2].x1;
+        a.i64[1] = (self->fields[2].x1 < 0) ? -1 : 0;
+        self->energy = js220_i128_add(self->energy, a);
+
+        finalize(&self->fields[0], self->valid_count);
+        finalize(&self->fields[1], self->valid_count);
+        finalize(&self->fields[2], self->valid_count);
         self->sample_count = 0;
         self->valid_count = 0;
 
-        // todo update charge & energy
+        uint32_t sampling_freq = s->sample_freq / s->decimate_factor;
+        a = js220_i128_compute_integral(self->charge, sampling_freq);
+        s->charge_i128[0] = a.u64[0];
+        s->charge_i128[1] = a.u64[1];
+        s->charge_f64 = js220_i128_to_f64(a, 31);
+        a = js220_i128_compute_integral(self->energy, sampling_freq);
+        s->energy_i128[0] = a.u64[0];
+        s->energy_i128[1] = a.u64[1];
+        s->energy_f64 = js220_i128_to_f64(a, 31);
+
+        FIELD_COPY(0, i);
+        FIELD_COPY(1, v);
+        FIELD_COPY(2, p);
 
         return s;
     } else {

@@ -22,40 +22,56 @@
 #include <math.h>
 #include <stdbool.h>
 
+// https://learn.microsoft.com/en-us/cpp/intrinsics/x64-amd64-intrinsics-list
 // See https://docs.microsoft.com/en-us/cpp/intrinsics/udiv128
 // See https://docs.microsoft.com/en-us/cpp/intrinsics/mul128
 
 
 static const uint64_t U64_SIGN_BIT = 0x8000000000000000LLU;
 
-#if 0
+#if defined(__clang__) || defined(__GNUC__)
+js220_i128 js220_i128_add(js220_i128 a, js220_i128 b) {
+    a.i128 = a.i128 + b.i128;
+    return a;
+}
+
+js220_i128 js220_i128_sub(js220_i128 a, js220_i128 b) {
+    a.i128 = a.i128 - b.i128;
+    return a;
+}
+
+js220_i128 js220_i128_square_i64(int64_t a) {
+    js220_i128 r;
+    r.i128 = a;
+    r.i128 = r.i128 * r.i128;
+    return r;
+}
+
+#else
+
 js220_i128 js220_i128_add(js220_i128 a, js220_i128 b) {
     js220_i128 r;
-#if defined(__clang__) || defined(__GNUC__)
-    r = a + b;
-#else
-    __asm {
-        add     rax, r8
-        adc     rdx, rsi
-    }
-#endif
+    uint8_t c = _addcarry_u64(0, a.u64[0], b.u64[0], &r.u64[0]);
+    _addcarry_u64(c, a.u64[1], b.u64[1], &r.u64[1]);
     return r;
 }
+
 js220_i128 js220_i128_sub(js220_i128 a, js220_i128 b) {
     js220_i128 r;
-#if defined(__clang__) || defined(__GNUC__)
-    r = a - b;
-#else
-    __asm {
-            sub     rax, r8
-            sbb     rdx, rsi
+    uint8_t c = _subborrow_u64(0, a.u64[0], b.u64[0], &r.u64[0]);
+    _subborrow_u64(c, a.u64[1], b.u64[1], &r.u64[1]);
+    return r;
+}
+
+js220_i128 js220_i128_square_i64(int64_t a) {
+    js220_i128 r;
+    if (a < 0) {
+        a = -a;
     }
-#endif
+    r.u64[0] = _umul128(a, a, &r.u64[1]);
     return r;
 }
 #endif
-
-
 
 js220_i128 js220_i128_neg(js220_i128 x) {
     if (x.i64[1] < 0) {
@@ -136,14 +152,9 @@ double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q)
     if (x1 < 0) {
         x1 = -x1;
     }
-    js220_i128 m;
+    js220_i128 m = js220_i128_square_i64(x1);
     js220_i128 d;
-#if defined(__clang__) || defined(__GNUC__)
-    __extension__ __int128 x1_i128 = x1;
-    m.i128 = x1_i128 * x1_i128;
-#else
-    m.u64[0] = _umul128(x1, x1, &m.u64[1]);
-#endif
+
     d = js220_i128_udiv(m, n, NULL);
 
     if ((x2.u64[1] < d.u64[1]) ||
@@ -164,4 +175,15 @@ double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q)
     f = js220_i128_to_f64(d, q * 2);
     f = sqrt(f);
     return f;
+}
+
+js220_i128 js220_i128_compute_integral(js220_i128 x, uint32_t n) {
+    if (x.i64[1] < 0) {
+        x = js220_i128_neg(x);
+        x = js220_i128_udiv(x, n, NULL);
+        x = js220_i128_neg(x);
+    } else {
+        x = js220_i128_udiv(x, n, NULL);
+    };
+    return x;
 }

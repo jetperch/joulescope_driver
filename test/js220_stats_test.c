@@ -26,19 +26,6 @@
 #include "jsdrv.h"
 
 
-static void test_to_f64(void ** state) {
-    (void) state;
-    assert_float_equal(0.0, js220_i128_to_f64((js220_i128) {.u64 = {0, 0}}, 0), 0.0);
-    assert_float_equal(0.0, js220_i128_to_f64((js220_i128) {.u64 = {0, 0}}, 31), 0.0);
-    assert_float_equal(1.0, js220_i128_to_f64((js220_i128) {.u64 = {0, 0x4000000000000000LLU}}, 126), 0.0);
-    assert_float_equal(2.0, js220_i128_to_f64((js220_i128) {.u64 = {0, 0x4000000000000000LLU}}, 125), 0.0);
-    assert_float_equal(-1.0, js220_i128_to_f64((js220_i128) {.u64 = {0, 0xC000000000000000LLU}}, 126), 0.0);
-    assert_float_equal(1.0, js220_i128_to_f64((js220_i128) {.u64 = {1, 0}}, 0), 0.0);
-    assert_float_equal(1.0, js220_i128_to_f64((js220_i128) {.u64 = {2, 0}}, 1), 0.0);
-    assert_float_equal(2.0, js220_i128_to_f64((js220_i128) {.u64 = {8, 0}}, 2), 0.0);
-    assert_float_equal(1.0, js220_i128_to_f64((js220_i128) {.u64 = {1LLU << 31, 0}}, 31), 0.0);
-}
-
 static void test_basic(void ** state) {
     (void) state;
     int64_t n = 64LL;
@@ -95,7 +82,6 @@ static void test_basic(void ** state) {
 
 int main(void) {
     const struct CMUnitTest tests[] = {
-            cmocka_unit_test(test_to_f64),
             cmocka_unit_test(test_basic),
     };
 

@@ -41,10 +41,23 @@
 JSDRV_CPP_GUARD_START
 
 
+struct js110_stats_field_s {
+    double avg;                ///< The average current over the block.
+    double std;                ///< The standard deviation of current over the block.
+    double min;                ///< The minimum current value in the block.
+    double max;                ///< The maximum current value in the block.
+    int64_t x1;                ///< Sum of value, Q31
+    js220_i128 x2;             ///< Sum of value * value, Q62
+};
+
+
 struct js110_stats_s {
     struct jsdrv_statistics_s statistics;
     uint32_t sample_count;
     uint32_t valid_count;
+    struct js110_stats_field_s fields[3];
+    js220_i128 charge;  // * samples
+    js220_i128 energy;  // * samples
 };
 
 

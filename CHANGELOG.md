@@ -13,7 +13,7 @@ This file contains the list of changes made to the Joulescope driver.
 * Fixed power, charge and energy computation.
   Power fixes require FPGA 0.2.6 upgrade.
 * Fixed JS110 stop/start streaming.
-* Added JS110 statistics, except standard deviation, charge, energy.
+* Added JS110 statistics.
 
 
 ## 0.2.6

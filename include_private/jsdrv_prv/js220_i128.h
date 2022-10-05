@@ -39,15 +39,16 @@
 
 JSDRV_CPP_GUARD_START
 
-//js220_i128 js220_i128_add(js220_i128 a, js220_i128 b);
-//js220_i128 js220_i128_sub(js220_i128 a, js220_i128 b);
+js220_i128 js220_i128_add(js220_i128 a, js220_i128 b);
+js220_i128 js220_i128_sub(js220_i128 a, js220_i128 b);
+js220_i128 js220_i128_square_i64(int64_t a);
 js220_i128 js220_i128_neg(js220_i128 x);
 js220_i128 js220_i128_udiv(js220_i128 dividend, uint64_t divisor, uint64_t * remainder);
 js220_i128 js220_i128_lshift(js220_i128 x, int32_t shift);
 js220_i128 js220_i128_rshift(js220_i128 x, int32_t shift);
 double js220_i128_to_f64(js220_i128 x, uint32_t q);
 double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q);
-
+js220_i128 js220_i128_compute_integral(js220_i128 x, uint32_t n);
 
 JSDRV_CPP_GUARD_END
 

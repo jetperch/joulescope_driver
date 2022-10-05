@@ -21,17 +21,6 @@
 #include "jsdrv_prv/js220_i128.h"
 #include <math.h>
 
-static js220_i128 compute_integral(js220_i128 x, uint32_t n) {
-    if (x.i64[1] < 0) {
-        x = js220_i128_neg(x);
-        x = js220_i128_udiv(x, n, NULL);
-        x = js220_i128_neg(x);
-    } else {
-        x = js220_i128_udiv(x, n, NULL);
-    };
-    return x;
-}
-
 int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct jsdrv_statistics_s * dst) {
     if (0x92 != (src->header >> 24)) {
         JSDRV_LOGW("statistics invalid header");
@@ -72,8 +61,8 @@ int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct js
     dst->charge_f64 = js220_i128_to_f64(src->i_int, 31) / sample_freq;
     dst->energy_f64 = js220_i128_to_f64(src->p_int, 31) / sample_freq;
 
-    js220_i128 charge = compute_integral(src->i_int, sample_freq);
-    js220_i128 energy = compute_integral(src->p_int, sample_freq);
+    js220_i128 charge = js220_i128_compute_integral(src->i_int, sample_freq);
+    js220_i128 energy = js220_i128_compute_integral(src->p_int, sample_freq);
 
     dst->charge_i128[0] = charge.u64[0];
     dst->charge_i128[1] = charge.u64[1];
