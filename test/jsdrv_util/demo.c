@@ -41,14 +41,35 @@ static void on_device_remove(void * user_data, const char * topic, const struct 
 
 static void on_pub_cmd(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     struct app_s * self = (struct app_s *) user_data;
+    static int counter = 0;
     (void) self;
     char buffer[256];
     if (value->app == JSDRV_PAYLOAD_TYPE_STREAM) {
+        ++counter;
+        char ch = '?';
         if (!jsdrv_cstr_ends_with(topic, "/!data")) {
-            printf("JSDRV_PAYLOAD_TYPE_STREAM but topic is %s\n", topic);
+            ch = 'X';
+            //printf("JSDRV_PAYLOAD_TYPE_STREAM but topic is %s\n", topic);
+        } else if (jsdrv_cstr_ends_with(topic, "i/!data")) {
+            ch = 'i';
+        } else if (jsdrv_cstr_ends_with(topic, "v/!data")) {
+            ch = 'v';
+        } else if (jsdrv_cstr_ends_with(topic, "p/!data")) {
+            ch = 'p';
+        } else if (jsdrv_cstr_ends_with(topic, "i/range/!data")) {
+            ch = 'r';
+        } else if (jsdrv_cstr_ends_with(topic, "gpi/0/!data")) {
+            ch = '0';
+        } else if (jsdrv_cstr_ends_with(topic, "gpi/1/!data")) {
+            ch = '1';
         }
-        struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) value->value.bin;
-        printf("on_pub_data(%s) sample_id=%" PRIu64 ", count=%u\n", topic, s->sample_id, s->element_count);
+        putc(ch, stdout);
+        if (counter > 32) {
+            putc('\n', stdout);
+            counter = 0;
+        }
+        // struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) value->value.bin;
+        // printf("on_pub_data(%s) sample_id=%" PRIu64 ", count=%u\n", topic, s->sample_id, s->element_count);
     } else if (value->app == JSDRV_PAYLOAD_TYPE_UNION) {
         jsdrv_union_value_to_str(value, buffer, sizeof(buffer), 1);
         JSDRV_LOGI("pub %s => %s", topic, buffer);
@@ -108,10 +129,25 @@ int on_demo(struct app_s * self, int argc, char * argv[]) {
         ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("manual"), JSDRV_TIMEOUT_MS_DEFAULT));
         //ROE(publish(self, device, "s/adc/0/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, device, "s/v/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, device, "s/p/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+        //ROE(publish(self, device, "s/i/range/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, device, "s/gpi/0/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, device, "s/gpi/1/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
         if (wait_for_duration_ms(duration_ms)) {
             ROE(publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+            ROE(publish(self, device, "s/v/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+            ROE(publish(self, device, "s/p/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+            //ROE(publish(self, device, "s/i/range/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+            ROE(publish(self, device, "s/gpi/0/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+            ROE(publish(self, device, "s/gpi/1/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
         } else {
             publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+            publish(self, device, "s/v/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+            publish(self, device, "s/p/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+            //publish(self, device, "s/i/range/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+            publish(self, device, "s/gpi/0/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+            publish(self, device, "s/gpi/1/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
         }
     } else if (jsdrv_cstr_starts_with(device, "u/js110")) {
         ROE(publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));

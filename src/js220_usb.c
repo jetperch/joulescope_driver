@@ -154,7 +154,7 @@ struct field_def_s PORT_MAP[] = {
         FIELD("s/gpi/1/ctrl",   "s/gpi/1/!data",   GPI,         1, UINT,  1, 1),  // 9
         FIELD("s/gpi/2/ctrl",   "s/gpi/2/!data",   GPI,         2, UINT,  1, 1),  // 10
         FIELD("s/gpi/3/ctrl",   "s/gpi/3/!data",   GPI,         3, UINT,  1, 1),  // 11
-        FIELD("s/gpi/255/ctrl", "s/gpi/255/!data", GPI,       255, UINT,  1, 1),  // 12 trigger
+        FIELD("s/gpi/7/ctrl",   "s/gpi/7/!data",   GPI,         7, UINT,  1, 1),  // 12 trigger
         FIELD("s/uart/0/ctrl",  "s/uart/0/!data",  UART,        0, UINT,  8, 1),  // 13 8-bit only
         FIELD("s/stats/ctrl",   "s/stats/value",   UNDEFINED,   0, UNDEFINED,   0, 0),  // 14 js220_statistics_raw_s
         FIELD(NULL, NULL, UNDEFINED,   0, UINT,   8, 0),  // 15 reserved and unavailable
@@ -585,10 +585,13 @@ static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
             } else {
                 d->stream_in_port_enable &= ~mask;
             }
+            JSDRV_LOGW("stream_in_port_enable port %s => 0x%08lx", topic, d->stream_in_port_enable);
             if (PORT_MAP[i].field_id == JSDRV_FIELD_CURRENT) {
                 sbuf_f32_clear(&d->i_buf);
             } else if (PORT_MAP[i].field_id == JSDRV_FIELD_VOLTAGE) {
                 sbuf_f32_clear(&d->v_buf);
+            } else if (PORT_MAP[i].field_id == JSDRV_FIELD_POWER) {
+                sbuf_f32_clear(&d->p_buf);
             }
             return (PORT_MAP[i].field_id != JSDRV_FIELD_POWER);  // todo when add decimate, always true when decimated
         }
@@ -622,7 +625,7 @@ static void handle_rsp_ctrl(struct dev_s * d, const char * topic, const struct j
         jsdrv_topic_set(&t, topic);
         jsdrv_topic_suffix_remove(&t);
         jsdrv_union_to_bool(value, &v);
-        stream_in_port_enable(d, t.topic, value);
+        stream_in_port_enable(d, t.topic, v);
     }
 }
 
@@ -863,6 +866,13 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         port->sample_id_next = (port->sample_id_next & 0xffffffff00000000LLU) | sample_id_u32; // todo correct u64
     }
 
+    if (m && ((m->value.size + size) >= sizeof(struct jsdrv_stream_signal_s))) {
+        JSDRV_LOGD1("stream_in_port: port_id=%d", (int) port_id);
+        port->msg_in = NULL;
+        jsdrvp_backend_send(d->context, m);
+        m = NULL;
+    }
+
     if (m) {
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
     } else {
@@ -883,8 +893,9 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     // Add decompression here as needed - compression not yet implemented on sensor
 
     uint8_t * p = (uint8_t *) &m->value.value.bin[m->value.size];
-    memcpy(p, p_u32, size);
     m->value.size += size;
+    JSDRV_ASSERT(m->value.size <= sizeof(struct jsdrv_stream_signal_s));
+    memcpy(p, p_u32, size);
     s->element_count += sample_count;
     port->sample_id_next += sample_count * port->downsample;
 
@@ -900,8 +911,8 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
 static void compute_power(struct dev_s * d) {
     // for full-rate data, must compute power on the host
     // insufficient sensor-controller and USB bandwidth to stream everything.
-    uint32_t sz = sbuf_f32_length(&d->p_buf);
     sbuf_f32_mult(&d->p_buf, &d->i_buf, &d->v_buf);
+    uint32_t sz = sbuf_f32_length(&d->p_buf);
     if (sz) {
         handle_stream_in_port(d, PORT_ID_POWER, &d->p_buf.msg_sample_id, (1 + sz) * 4);
     }

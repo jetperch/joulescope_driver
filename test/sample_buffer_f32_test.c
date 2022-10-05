@@ -86,6 +86,7 @@ static void test_mult(void **state) {
     struct sbuf_f32_s s2;
     sbuf_f32_clear(&s1);
     sbuf_f32_clear(&s2);
+    sbuf_f32_clear(&r);
     float f1[SAMPLE_BUFFER_LENGTH / 2];
     float f2[SAMPLE_BUFFER_LENGTH / 2];
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(f1); ++i) {
@@ -113,6 +114,7 @@ static void test_mult_no_overlap(void **state) {
     float f2[] = {11.0f};
     sbuf_f32_clear(&s1);
     sbuf_f32_clear(&s2);
+    sbuf_f32_clear(&r);
     sbuf_f32_add(&s1, 0, f1, 1);
     sbuf_f32_add(&s2, s2.sample_id_decimate * (SAMPLE_BUFFER_LENGTH - 1), f2, 1);
     sbuf_f32_mult(&r, &s1, &s2);
@@ -128,6 +130,7 @@ static void test_mult_some_overlap(void **state) {
     float f2[] = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
     sbuf_f32_clear(&s1);
     sbuf_f32_clear(&s2);
+    sbuf_f32_clear(&r);
     sbuf_f32_add(&s1, 10008, f1, JSDRV_ARRAY_SIZE(f1));
     sbuf_f32_add(&s2, 10000, f2, JSDRV_ARRAY_SIZE(f2));
     assert_int_equal(SAMPLE_BUFFER_LENGTH - 1, sbuf_f32_length(&s1));

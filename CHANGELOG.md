@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 0.2.8
+
+2022 Oct 5 [in progress]
+
+* Fixed JS220 power computation.
+* Fixed trigger GPI spec (7 not 255).
+
+
 ## 0.2.7
 
 2022 Oct 4

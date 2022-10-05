@@ -32,6 +32,10 @@ uint32_t sbuf_f32_length(struct sbuf_f32_s * self) {
     return (self->head - self->tail) & SAMPLE_BUFFER_MASK;
 }
 
+static uint64_t sbuf_tail_sample_id(struct sbuf_f32_s * self) {
+    return self->head_sample_id - sbuf_f32_length(self) * self->sample_id_decimate;
+}
+
 void sbuf_f32_add(struct sbuf_f32_s * self, uint64_t sample_id, float * data, uint32_t length) {
     if (self->head_sample_id > sample_id) {
         uint64_t dup = (self->head_sample_id - sample_id) / self->sample_id_decimate;
@@ -82,28 +86,35 @@ void sbuf_f32_add(struct sbuf_f32_s * self, uint64_t sample_id, float * data, ui
     self->head = head_inc & SAMPLE_BUFFER_MASK;
 }
 
+static void advance(struct sbuf_f32_s * self, uint64_t sample_id) {
+    uint64_t self_sample_id = sbuf_tail_sample_id(self);
+    if (self_sample_id < sample_id) {
+        uint32_t delta_sample_id = sample_id - self_sample_id;
+        uint32_t delta_count = delta_sample_id / self->sample_id_decimate;
+        uint32_t s1_len = sbuf_f32_length(self);
+        if (delta_count > s1_len) {
+            self->tail = self->head;
+        } else {
+            self->tail = (self->tail + delta_count) & SAMPLE_BUFFER_MASK;
+        }
+    }
+}
+
 void sbuf_f32_mult(struct sbuf_f32_s * r, struct sbuf_f32_s * s1, struct sbuf_f32_s * s2) {
-    uint64_t s1_sample_id = s1->head_sample_id - sbuf_f32_length(s1) * s1->sample_id_decimate;
-    uint64_t s2_sample_id = s2->head_sample_id - sbuf_f32_length(s2) * s2->sample_id_decimate;
+    uint64_t r_sample_id = r->head_sample_id;
     sbuf_f32_clear(r);
-
-    if (s1_sample_id > s2_sample_id) {
-        struct sbuf_f32_s * sk = s1;
-        uint64_t sk_sample_id = s1_sample_id;
-        s1 = s2;
-        s2 = sk;
-        s1_sample_id = s2_sample_id;
-        s2_sample_id = sk_sample_id;
-    }
-
-    while ((s1->tail != s1->head) && (s1_sample_id < s2_sample_id)) {
-        s1_sample_id += s1->sample_id_decimate;
-        s1->tail = (s1->tail + 1) & SAMPLE_BUFFER_MASK;
-    }
-
     r->sample_id_decimate = s1->sample_id_decimate;
-    r->head_sample_id = s1_sample_id;
-    r->msg_sample_id = (uint32_t) (s1_sample_id & 0xffffffff);
+    uint64_t s1_sample_id = sbuf_tail_sample_id(s1);
+    uint64_t s2_sample_id = sbuf_tail_sample_id(s2);
+    uint64_t max_sample_id = (s1_sample_id > s2_sample_id) ? s1_sample_id : s2_sample_id;
+    if (r_sample_id < max_sample_id) {
+        r_sample_id = max_sample_id;
+    }
+    advance(s1, r_sample_id);
+    advance(s2, r_sample_id);
+
+    r->head_sample_id = r_sample_id;
+    r->msg_sample_id = (uint32_t) (r_sample_id & 0xffffffff);
     while ((s1->tail != s1->head) && (s2->tail != s2->head)) {
         r->buffer[r->head++] = s1->buffer[s1->tail] * s2->buffer[s2->tail];
         s1->tail = (s1->tail + 1) & SAMPLE_BUFFER_MASK;
