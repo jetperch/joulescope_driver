@@ -64,8 +64,9 @@ static void on_pub_cmd(void * user_data, const char * topic, const struct jsdrv_
             ch = '1';
         }
         putc(ch, stdout);
-        if (counter > 32) {
+        if (counter > 64) {
             putc('\n', stdout);
+            fflush(stdout);
             counter = 0;
         }
         // struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) value->value.bin;
