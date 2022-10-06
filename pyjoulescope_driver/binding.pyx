@@ -465,6 +465,11 @@ cdef class Driver:
         elif isinstance(value, int) and (value >= 0) and (value < 4294967296):
             v.type = c_jsdrv.JSDRV_UNION_U32
             v.value.u32 = value
+        elif isinstance(value, bytes):
+            byte_str = value
+            v.type = c_jsdrv.JSDRV_UNION_BIN
+            v.value.bin = <const uint8_t *> byte_str
+            v.size = len(value)
         else:
             raise ValueError(f'Unsupported value type: {type(value)}')
         if '!' not in topic:
