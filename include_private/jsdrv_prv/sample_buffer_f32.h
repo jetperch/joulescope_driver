@@ -50,6 +50,22 @@ void sbuf_f32_clear(struct sbuf_f32_s * self);
 uint32_t sbuf_f32_length(struct sbuf_f32_s * self);
 
 /**
+ * @brief The sample ID of the oldest sample in the buffer.
+ *
+ * @param self The buffer instance.
+ * @return The tail sample ID.
+ */
+uint64_t sbuf_head_sample_id(struct sbuf_f32_s * self);
+
+/**
+ * @brief The sample ID of the newest sample in the buffer.
+ *
+ * @param self The buffer instance.
+ * @return The head sample ID.
+ */
+uint64_t sbuf_tail_sample_id(struct sbuf_f32_s * self);
+
+/**
  * @brief Add new data to the buffer.
  *
  * @param self The buffer instance.
@@ -58,6 +74,15 @@ uint32_t sbuf_f32_length(struct sbuf_f32_s * self);
  * @param length The number of data samples.
  */
 void sbuf_f32_add(struct sbuf_f32_s * self, uint64_t sample_id, float * data, uint32_t length);
+
+/**
+ * @brief Advance buffer tail to the given sample id.
+ *
+ * @param self The buffer instance.
+ * @param sample_id The new tail sample id, if greater than
+ *  the existing sample id.  Otherwise, ignore.
+ */
+void sbuf_f32_advance(struct sbuf_f32_s * self, uint64_t sample_id);
 
 /**
  * @brief Multiply the data in overlapping regions.

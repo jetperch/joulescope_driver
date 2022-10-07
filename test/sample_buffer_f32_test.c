@@ -27,11 +27,19 @@ static void test_add_one(void **state) {
     (void) state;
     struct sbuf_f32_s b;
     sbuf_f32_clear(&b);
+    assert_int_equal(0, sbuf_f32_length(&b));
+    assert_int_equal(0, sbuf_tail_sample_id(&b));
+    assert_int_equal(0, sbuf_head_sample_id(&b));
+
     float data[1] = {1.0f};
     sbuf_f32_add(&b, 0, data, 1);
     assert_int_equal(1, sbuf_f32_length(&b));
     assert_float_equal(1.0f, b.buffer[0], 1e-7);
     assert_int_equal(2, b.head_sample_id);
+    assert_int_equal(0, sbuf_tail_sample_id(&b));
+    assert_int_equal(2, sbuf_head_sample_id(&b));
+    sbuf_f32_clear(&b);
+    assert_int_equal(0, sbuf_f32_length(&b));
 }
 
 static void test_add_one_skip(void **state) {
@@ -43,7 +51,7 @@ static void test_add_one_skip(void **state) {
     assert_int_equal(2, sbuf_f32_length(&b));
     assert_true(isnan(b.buffer[0]));
     assert_float_equal(1.0f, b.buffer[1], 1e-7);
-    assert_int_equal(4, b.head_sample_id);
+    assert_int_equal(4, sbuf_head_sample_id(&b));
 }
 
 static void test_add_one_duplicate(void **state) {
@@ -55,7 +63,7 @@ static void test_add_one_duplicate(void **state) {
     sbuf_f32_add(&b, 0, data, 1);
     assert_int_equal(1, sbuf_f32_length(&b));
     assert_float_equal(1.0f, b.buffer[0], 1e-7);
-    assert_int_equal(2, b.head_sample_id);
+    assert_int_equal(2, sbuf_head_sample_id(&b));
 }
 
 static void test_add_wrap(void **state) {
@@ -142,6 +150,29 @@ static void test_mult_some_overlap(void **state) {
     assert_float_equal(55.0f, r.buffer[SAMPLE_BUFFER_LENGTH - 6], 1e-7);
 }
 
+static void test_advance_one(void **state) {
+    struct sbuf_f32_s b;
+    float f[] = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
+    sbuf_f32_clear(&b);
+    sbuf_f32_add(&b, 10 *  b.sample_id_decimate, f, JSDRV_ARRAY_SIZE(f));
+    assert_int_equal(10 + JSDRV_ARRAY_SIZE(f), sbuf_f32_length(&b));
+    sbuf_f32_advance(&b, 10 *  b.sample_id_decimate);
+    assert_int_equal(JSDRV_ARRAY_SIZE(f), sbuf_f32_length(&b));
+    assert_float_equal(0.0f, b.buffer[b.tail], 1e-7);
+    assert_int_equal(10 *  b.sample_id_decimate, sbuf_tail_sample_id(&b));
+
+    sbuf_f32_advance(&b, 9 *  b.sample_id_decimate);  // ignored since before tail
+    assert_int_equal(JSDRV_ARRAY_SIZE(f), sbuf_f32_length(&b));
+
+    // now consume all
+    uint64_t head_sample_id = SAMPLE_BUFFER_LENGTH * 3 * b.sample_id_decimate;
+    sbuf_f32_advance(&b, head_sample_id);
+    assert_int_equal(0, sbuf_f32_length(&b));
+    assert_int_equal(head_sample_id, sbuf_head_sample_id(&b));
+    assert_int_equal(head_sample_id, sbuf_tail_sample_id(&b));
+
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_add_one),
@@ -151,6 +182,7 @@ int main(void) {
             cmocka_unit_test(test_mult),
             cmocka_unit_test(test_mult_no_overlap),
             cmocka_unit_test(test_mult_some_overlap),
+            cmocka_unit_test(test_advance_one),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
