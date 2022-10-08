@@ -48,7 +48,11 @@ static int32_t publish(struct app_s * self, const char * device, const char * to
     return rc;
 }
 
-DWORD __stdcall thread_fn(LPVOID arg) {
+#if _WIN32
+static DWORD __stdcall thread_fn(LPVOID arg) {
+#else
+static void * thread_fn(void * arg) {
+#endif
     struct thread_args_s * t = (struct thread_args_s *) arg;
     uint32_t counter = 0;
     while (!quit_) {
