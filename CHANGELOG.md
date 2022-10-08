@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.0.1
+
+2022 Oct 9 [in progress]
+
+* Added native and python threading demonstrations.
+* Improve python binding to support u64 and i64 types.
+
+
 ## 1.0.0
 
 2022 Oct 6

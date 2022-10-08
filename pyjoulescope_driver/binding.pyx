@@ -462,9 +462,19 @@ cdef class Driver:
             byte_str = py_byte_str
             v.type = c_jsdrv.JSDRV_UNION_STR
             v.value.str = &byte_str[0]
-        elif isinstance(value, int) and (value >= 0) and (value < 4294967296):
-            v.type = c_jsdrv.JSDRV_UNION_U32
-            v.value.u32 = value
+        elif isinstance(value, int):
+            if (value >= 0) and (value < 4294967296):
+                v.type = c_jsdrv.JSDRV_UNION_U32
+                v.value.u64 = value
+            elif value >= 0:
+                v.type = c_jsdrv.JSDRV_UNION_U64
+                v.value.u64 = value
+            elif value >= -2147483648:
+                v.type = c_jsdrv.JSDRV_UNION_I32
+                v.value.i64 = value
+            else:
+                v.type = c_jsdrv.JSDRV_UNION_I64
+                v.value.i64 = value
         elif isinstance(value, bytes):
             byte_str = value
             v.type = c_jsdrv.JSDRV_UNION_BIN
