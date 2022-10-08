@@ -54,13 +54,13 @@ static DWORD __stdcall thread_fn(LPVOID arg) {
 static void * thread_fn(void * arg) {
 #endif
     struct thread_args_s * t = (struct thread_args_s *) arg;
-    uint32_t counter = 0;
+    int32_t counter = 0;
     while (!quit_) {
         uint64_t v64 = 10 | (((uint64_t) t->index) << 56) | (((uint64_t) counter) << 32);
         publish(t->app, t->app->device.topic, "h/timeout", &jsdrv_union_u64_r(v64), 1000);
         ++counter;
     }
-    printf("query thread %d %lu\n", (int) t->index, counter);
+    printf("query thread %d %d\n", (int) t->index, (int) counter);
     return 0;
 }
 
