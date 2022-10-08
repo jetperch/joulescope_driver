@@ -84,4 +84,5 @@ int on_reset(struct app_s * self, int argc, char * argv[]);
 int on_scan(struct app_s * self, int argc, char * argv[]);
 int on_statistics(struct app_s * self, int argc, char * argv[]);
 int on_set(struct app_s * self, int argc, char * argv[]);
+int on_threads(struct app_s * self, int argc, char * argv[]);
 int on_version(struct app_s * self, int argc, char * argv[]);

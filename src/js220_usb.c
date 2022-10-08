@@ -807,6 +807,9 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         } else if (0 == strcmp("h/!reset", topic)) {   // value=target
             int32_t rc = handle_reset(d, msg->value.value.i32);
             send_return_code_to_frontend(d, topic, rc);
+        } else if (0 == strcmp("h/timeout", topic)) {
+            jsdrv_thread_sleep_ms(msg->value.value.u32);
+            send_return_code_to_frontend(d, topic, 0);
         } else {
             JSDRV_LOGE("topic invalid: %s", msg->topic);
             send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);

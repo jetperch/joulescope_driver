@@ -123,6 +123,7 @@ const struct command_s COMMANDS[] = {
         {"reset", on_reset, "Reset to target"},
         {"scan", on_scan, "List connected devices"},
         {"set",  on_set,  "Set parameters"},
+        {"threads", on_threads, "Demonstrate multi-thread access"},
         {"statistics",  on_statistics,  "Display statistics from all connected devices"},
         {"version", on_version, "Display version and platform information"},
         {"help", on_help, "Display help"},
