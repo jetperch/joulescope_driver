@@ -31,6 +31,14 @@ JSDRV_CPP_GUARD_START
 
 BOOL GetErrorMessage(DWORD dwErrorCode, char * pBuffer, DWORD cchBufferLength);
 
+#define WINDOWS_LOG(logger, format, ...) do { \
+    char error_msg_[64]; \
+    DWORD error_ = GetLastError(); \
+    GetErrorMessage(error_, error_msg_, sizeof(error_msg_)); \
+    logger(format ": %d: %s", __VA_ARGS__, error_, error_msg_); \
+} while (0)
+
+
 #define WINDOWS_LOGE(format, ...) do { \
     char error_msg_[64]; \
     DWORD error_ = GetLastError(); \

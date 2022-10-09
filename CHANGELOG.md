@@ -6,10 +6,17 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.0.1
 
-2022 Oct 9 [in progress]
+2022 Oct 9
 
 * Added native and python threading demonstrations.
 * Improve python binding to support u64 and i64 types.
+* Added firmware/gateware updates. 
+  * Added build support for including most recent firmware images.
+  * Added "program" entry point.
+* Fixed access violation on publish to close device.
+* Fixed python Driver.device_paths returning [""] instead of []
+  when no devices found.
+* Reduced bulk in error on device removal to warning.
 
 
 ## 1.0.0

@@ -13,7 +13,9 @@
 # limitations under the License.
 
 from .version import *
-from .binding import Driver
+import os
+if os.environ.get('pyjoulescope_driver_setup', '0') != '1':
+    from .binding import Driver
 
 __all__ = [
     'Driver',

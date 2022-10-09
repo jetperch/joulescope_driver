@@ -1,0 +1,7 @@
+include CHANGELOG.md
+include credits.html
+include LICENSE
+include README.md
+include pyjoulescope_driver/img/alpha.img
+include pyjoulescope_driver/img/beta.img
+include pyjoulescope_driver/img/stable.img

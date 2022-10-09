@@ -13,6 +13,7 @@ dist/*
 .DS_Store
 
 pyjoulescope_driver/binding.c
+pyjoulescope_driver/img/*
 
 # Compiled Object files
 *.slo

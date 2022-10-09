@@ -24,9 +24,13 @@ https://github.com/pypa/sampleproject
 # Always prefer setuptools over distutils
 import setuptools
 import setuptools.dist
+import setuptools.command.build_py
 import distutils.cmd
 from distutils.errors import DistutilsExecError
 import os
+os.environ['pyjoulescope_driver_setup'] = '1'
+from pyjoulescope_driver.release import releases_get_from_network
+
 import platform
 import sys
 
@@ -176,6 +180,14 @@ else:
     PLATFORM_INSTALL_REQUIRES = []
 
 
+class BuildPyCommand(setuptools.command.build_py.build_py):
+    """Custom build command."""
+
+    def run(self):
+        releases_get_from_network(force_download=True, dist_save=True)
+        setuptools.command.build_py.build_py.run(self)
+
+
 class CustomBuildDocs(distutils.cmd.Command):
     """Custom command to build docs locally."""
 
@@ -257,6 +269,7 @@ setuptools.setup(
     ext_modules=extensions,
     cmdclass={
         'docs': CustomBuildDocs,
+        'build_py': BuildPyCommand,
     },
     include_dirs=[],
 

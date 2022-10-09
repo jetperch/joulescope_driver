@@ -219,7 +219,7 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
                 JSDRV_LOGD1("bulk_in_process timeout");
                 bulk_in_transfer_free(t);  // timeout ok
             } else {
-                WINDOWS_LOGE("%s", "bulk_in_process WinUsb_GetOverlappedResult error");
+                WINDOWS_LOG(JSDRV_LOGW, "%s", "bulk_in_process WinUsb_GetOverlappedResult error");
                 bulk_in_transfer_free(t);
                 rc = 1;
             }

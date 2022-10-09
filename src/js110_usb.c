@@ -44,6 +44,15 @@
 
 struct js110_dev_s;  // forward declaration, see below
 
+enum state_e {
+    ST_NOT_PRESENT = 0,  //
+    ST_CLOSED = 1,
+    ST_OPENING = 2,
+    ST_OPEN = 3,
+};
+
+static int32_t d_close(struct js110_dev_s * d);
+
 typedef void (*param_fn)(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 
 struct param_s {
@@ -74,7 +83,6 @@ static void on_gpi_0_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * v
 static void on_gpi_1_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_stats_scnt(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
-
 
 enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
     PARAM_I_RANGE_SELECT,
@@ -391,6 +399,7 @@ struct js110_dev_s {
     struct jsdrvp_ul_device_s ul;
     struct jsdrvp_ll_device_s ll;
     struct jsdrv_context_s * context;
+    uint8_t state; // state_e
 
     struct jsdrv_union_s param_values[JSDRV_ARRAY_SIZE(PARAMS)];
     uint64_t packet_index;
@@ -401,7 +410,6 @@ struct js110_dev_s {
 
     volatile bool do_exit;
     jsdrv_thread_t thread;
-
 };
 
 static bool handle_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg);
@@ -815,6 +823,7 @@ static int32_t d_open(struct js110_dev_s * d) {
         JSDRV_LOGW("ll_driver open timed out");
         return JSDRV_ERROR_TIMED_OUT;
     }
+    d->state = ST_OPENING;
     jsdrvp_msg_free(d->context, m);
 
     usb_setup_t setup = { .s = {
@@ -827,7 +836,7 @@ static int32_t d_open(struct js110_dev_s * d) {
     uint8_t buf_out[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     uint8_t buf_in[16];
     if (jsdrvb_ctrl_out(d, setup, buf_out)) {
-        JSDRV_LOGW("ctrl loopback buffer write faile");
+        JSDRV_LOGW("ctrl loopback buffer write failed");
         return JSDRV_ERROR_IO;
     }
     setup.s.bmRequestType = USB_REQUEST_TYPE(IN, VENDOR, DEVICE);
@@ -863,6 +872,7 @@ static int32_t d_open(struct js110_dev_s * d) {
     ROE(jsdrvb_bulk_in_stream_open(d, 2));
 
     JSDRV_LOGI("open complete");
+    d->state = ST_OPEN;
     return 0;
 }
 
@@ -875,6 +885,7 @@ static int32_t d_close(struct js110_dev_s * d) {
         JSDRV_LOGW("ll_driver open timed out");
         return JSDRV_ERROR_TIMED_OUT;
     }
+    d->state = ST_CLOSED;
     jsdrvp_msg_free(d->context, m);
     return 0;
 }
@@ -919,6 +930,9 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
         if (0 == strcmp(JSDRV_MSG_OPEN, topic)) {
             status = d_open(d);
             send_to_frontend(d, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(status));
+            if (status) {
+                d_close(d);
+            }
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, topic)) {
             status = d_close(d);
             send_to_frontend(d, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(status));
@@ -929,6 +943,8 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
         } else {
             JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
         }
+    } else if (d->state != ST_OPEN) {
+        send_to_frontend(d, topic, &jsdrv_union_i32(JSDRV_ERROR_CLOSED));
     } else {
         handle_cmd_publish(d, msg);
     }
@@ -1174,6 +1190,7 @@ int32_t jsdrvp_ul_js110_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     d->ll = *ll;
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
+    d->state = ST_CLOSED;
     js110_sp_initialize(&d->sample_processor);
 
     for (int i = 0; NULL != PARAMS[i].topic; ++i) {

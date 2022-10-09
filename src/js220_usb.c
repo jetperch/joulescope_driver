@@ -112,7 +112,7 @@ static const char * reset_meta = "{"
      "]"
 "}";
 
-enum state_e { // See opts_state
+enum state_e {
     ST_NOT_PRESENT = 0,  //
     ST_CLOSED = 1,
     ST_OPENING = 2,
@@ -799,6 +799,8 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         } else {
             JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
         }
+    } else if (d->state != ST_OPEN) {
+        send_return_code_to_frontend(d, topic, JSDRV_ERROR_CLOSED);
     } else if ((topic[0] == 'h') && (topic[1] == '/')) {
         JSDRV_LOGD1("handle_cmd local %s", topic);
         // handle any host-side parameters here.

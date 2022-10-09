@@ -504,6 +504,8 @@ cdef class Driver:
 
     def device_paths(self, timeout=None):
         s = self.query('@/list', timeout)
+        if not len(s):
+            return []
         return sorted(s.split(','))
 
     def subscribe(self, topic, flags, fn, timeout=None):
