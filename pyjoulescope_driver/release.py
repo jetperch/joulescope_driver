@@ -27,10 +27,7 @@ import logging
 import os
 import struct
 import sys
-try:
-    import requests
-except ImportError:
-    pass  # url_save() will throw an ImportError if used
+import requests
 
 
 _log = logging.getLogger(__name__)
@@ -74,11 +71,7 @@ def url_save(url, filename):
     :param url: The relative url from the main distribution URL.
     :param filename: The local filename.
     """
-    try:
-        r = requests.get(URL + url, timeout=URL_TIMEOUT)
-    except NameError:
-        msg = '"requests" not installed: pip3 install requests'
-        raise ImportError(msg)
+    r = requests.get(URL + url, timeout=URL_TIMEOUT)
     if r.status_code != 200:
         raise FileNotFoundError(url)
     with open(filename, 'wb') as f:

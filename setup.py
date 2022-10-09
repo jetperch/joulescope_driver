@@ -282,6 +282,7 @@ setuptools.setup(
         numpy_req,
         'Cython>=0.29.3',
         "pywin32; platform_system=='Windows'",
+        'requests',
         'wheel',
     ],
 
@@ -289,6 +290,7 @@ setuptools.setup(
     install_requires=[
                          "pywin32; platform_system=='Windows'",
                          numpy_req,
+                         'requests',
                      ] + PLATFORM_INSTALL_REQUIRES,
 
     extras_require={

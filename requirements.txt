@@ -1,4 +1,5 @@
 Cython
 numpy
 pywin32; sys_platform == 'win32'
+requests
 wheel
