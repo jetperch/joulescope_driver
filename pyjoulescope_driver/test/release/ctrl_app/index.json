@@ -1,0 +1,28 @@
+{
+  "active": {
+    "alpha": {
+      "version": [ 1, 0, 1 ],
+      "path": "js220_ctrl_app_1_0_1.img",
+      "changelog": "js220_ctrl_app_1_0_1_CHANGELOG.md"
+    },
+    "beta": {
+      "version": [ 1, 0, 1 ],
+      "path": "js220_ctrl_app_1_0_1.img",
+      "changelog": "js220_ctrl_app_1_0_1_CHANGELOG.md"
+    },
+    "stable": {
+      "version": [ 1, 0, 1 ],
+      "path": "js220_ctrl_app_1_0_1.img",
+      "changelog": "js220_ctrl_app_1_0_1_CHANGELOG.md"
+    }
+  },
+  "versions": [
+    {
+      "version": [ 1, 0, 1 ],
+      "time": "2022-10-08T14:06:42Z",
+      "maturity": "stable",
+      "path": "js220_ctrl_app_1_0_1.img",
+      "changelog": "js220_ctrl_app_1_0_1_CHANGELOG.md"
+    }
+  ]
+}

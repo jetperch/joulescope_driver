@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+<title>JS220 Controller Updater 1 Firmware</title>
+</head>
+<body>
+<h1>JS220 Controller Updater 1 Firmware</h1>
+
+<style>
+table {
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+td, th {
+  border: 1px solid black;
+  text-align: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+</style>
+
+<table id="table"></table>
+
+
+<script>
+
+function populate_table(data) {
+    var table = document.getElementById("table");
+    var tr = table.insertRow(-1);
+
+    var th = document.createElement("th");
+    th.innerHTML = "Date";
+    tr.appendChild(th);
+
+    th = document.createElement("th");
+    th.innerHTML = "Firmware";
+    tr.appendChild(th);
+
+    th = document.createElement("th");
+    th.innerHTML = "Maturity";
+    tr.appendChild(th);
+
+    for (var i = 0; i < data.versions.length; i++) {
+        // {
+        //   "version": [ 0, 1, 3 ],
+        //   "time": "2022-10-05T18:26:10Z",
+        //   "maturity": "stable",
+        //   "path": "js220_ctrl_app_0_1_3.img"
+        // }
+
+        var d = data.versions[i];
+        var version_major = d.version[0];
+        var version_minor = d.version[1];
+        var version_patch = d.version[2];
+        var ver = version_major.toString() + 
+            "." + version_minor.toString() + 
+            "." + version_patch.toString();
+
+        tr = table.insertRow(-1);
+        var cell = tr.insertCell(-1);
+        cell.innerHTML = d.time;
+        
+        cell = tr.insertCell(-1);
+        cell.innerHTML = "<a href=\"" + d.path + "\">" + ver + "</a>";
+
+        cell = tr.insertCell(-1);
+        cell.innerHTML = d.maturity;
+    }
+}
+
+
+fetch('index.json')
+  .then(res => res.json())
+  .then(res => populate_table(res));
+
+</script>
+
+</body>
+</html>

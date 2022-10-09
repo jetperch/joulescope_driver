@@ -281,10 +281,13 @@ setuptools.setup(
         # https://developercommunity.visualstudio.com/content/problem/1207405/fmod-after-an-update-to-windows-2004-is-causing-a.html
         numpy_req,
         'Cython>=0.29.3',
+        "pywin32; platform_system=='Windows'",
+        'wheel',
     ],
 
     # See https://packaging.python.org/en/latest/requirements.html
     install_requires=[
+                         "pywin32; platform_system=='Windows'",
                          numpy_req,
                      ] + PLATFORM_INSTALL_REQUIRES,
 

@@ -1,0 +1,70 @@
+{
+  "sensor_fpga": {
+    "alpha": {
+      "version": [ 1, 0, 1 ],
+      "path": "sensor_fpga/js220_fpga_1_0_1.img",
+      "changelog": "sensor_fpga/js220_fpga_1_0_1_CHANGELOG.md"
+    },
+    "beta": {
+      "version": [ 1, 0, 1 ],
+      "path": "sensor_fpga/js220_fpga_1_0_1.img",
+      "changelog": "sensor_fpga/js220_fpga_1_0_1_CHANGELOG.md"
+    },
+    "stable": {
+      "version": [ 1, 0, 1 ],
+      "path": "sensor_fpga/js220_fpga_1_0_1.img",
+      "changelog": "sensor_fpga/js220_fpga_1_0_1_CHANGELOG.md"
+    }
+  },
+  "ctrl_app": {
+    "alpha": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_app/js220_ctrl_app_1_0_1.img",
+      "changelog": "ctrl_app/js220_ctrl_app_1_0_1_CHANGELOG.md"
+    },
+    "beta": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_app/js220_ctrl_app_1_0_1.img",
+      "changelog": "ctrl_app/js220_ctrl_app_1_0_1_CHANGELOG.md"
+    },
+    "stable": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_app/js220_ctrl_app_1_0_1.img",
+      "changelog": "ctrl_app/js220_ctrl_app_1_0_1_CHANGELOG.md"
+    }
+  },
+  "ctrl_updater1": {
+    "alpha": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_updater1/js220_ctrl_updater1_1_0_1.img",
+      "changelog": "ctrl_updater1/js220_ctrl_updater1_1_0_1_CHANGELOG.md"
+    },
+    "beta": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_updater1/js220_ctrl_updater1_1_0_1.img",
+      "changelog": "ctrl_updater1/js220_ctrl_updater1_1_0_1_CHANGELOG.md"
+    },
+    "stable": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_updater1/js220_ctrl_updater1_1_0_1.img",
+      "changelog": "ctrl_updater1/js220_ctrl_updater1_1_0_1_CHANGELOG.md"
+    }
+  },
+  "ctrl_updater2": {
+    "alpha": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_updater2/js220_ctrl_updater2_1_0_1.img",
+      "changelog": "ctrl_updater2/js220_ctrl_updater2_1_0_1_CHANGELOG.md"
+    },
+    "beta": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_updater2/js220_ctrl_updater2_1_0_1.img",
+      "changelog": "ctrl_updater2/js220_ctrl_updater2_1_0_1_CHANGELOG.md"
+    },
+    "stable": {
+      "version": [ 1, 0, 1 ],
+      "path": "ctrl_updater2/js220_ctrl_updater2_1_0_1.img",
+      "changelog": "ctrl_updater2/js220_ctrl_updater2_1_0_1_CHANGELOG.md"
+    }
+  }
+}

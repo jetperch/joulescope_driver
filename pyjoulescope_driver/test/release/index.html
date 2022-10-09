@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+<title>JS220 Firmware</title>
+</head>
+<body>
+<h1>JS220 Firmware</h1>
+
+<style>
+table {
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+td, th {
+  border: 1px solid black;
+  text-align: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+</style>
+
+
+<table id="table"></table>
+
+<script>
+
+function populate_table(data) {
+    var table = document.getElementById("table");
+    var tr = table.insertRow(-1);
+
+    var th = document.createElement("th");
+    th.innerHTML = "Target";
+    tr.appendChild(th);
+
+    th = document.createElement("th");
+    th.innerHTML = "Alpha";
+    tr.appendChild(th);
+
+    th = document.createElement("th");
+    th.innerHTML = "Beta";
+    tr.appendChild(th);
+
+    th = document.createElement("th");
+    th.innerHTML = "Stable";
+    tr.appendChild(th);
+    
+    function insertElement(tr, value) {
+        var v = value.version;
+        var ver = v[0].toString() + 
+            "." + v[1].toString() + 
+            "." + v[2].toString();        
+        
+        var td = tr.insertCell(-1)
+        td.innerHTML = "<a href=\"" + value.path + "\">" + ver + "</a>";
+        tr.appendChild(td);
+    }
+    
+    for (const [key, value] of Object.entries(data)) {
+        var tr = table.insertRow(-1);
+        var td = document.createElement("td");
+        td.innerHTML = "<a href=\"" + key + "/index.html" + "\">" + key + "</a>";
+        tr.appendChild(td);
+        
+        insertElement(tr, value.alpha);
+        insertElement(tr, value.beta);
+        insertElement(tr, value.stable);
+    }
+}
+
+
+fetch('index.json')
+  .then(res => res.json())
+  .then(res => populate_table(res));
+
+</script>
+
+
+</body>
+</html>

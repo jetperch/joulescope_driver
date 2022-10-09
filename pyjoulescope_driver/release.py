@@ -110,7 +110,7 @@ def dist_path():
     :return: The distribution image path.  This path is NOT
         guaranteed to exist.
     """
-    return os.path.join(MY_PATH, 'img')
+    return MY_PATH
 
 
 def _load_file_from_network(path, force_download=None):
@@ -150,7 +150,7 @@ def releases_get_from_network(force_download=None, dist_save=None):
         path = release_path()
     result = _load_from_network(force_download=force_download)
     for m in MATURITY:
-        dst = os.path.join(path, m + '.img')
+        dst = os.path.join(path, f'img_{m}.img')
         with open(dst, 'wb') as f:
             for target_info in TARGETS.values():
                 name = target_info['name']
@@ -164,7 +164,7 @@ def releases_get_from_network(force_download=None, dist_save=None):
 
 def release_get(maturity, force_download=None):
     src = None
-    fname = maturity + '.img'
+    fname = f'img_{maturity}.img'
     if not force_download:
         path = os.path.join(dist_path(), fname)
         if os.path.isfile(path):
