@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.0.2
+
+2022 Oct 15
+
+* Fixed jsdrv_util app_match to work with multiple Joulescopes.
+
+
 ## 1.0.1
 
 2022 Oct 9

@@ -105,6 +105,7 @@ int32_t app_match(struct app_s * self, const char * filter) {
                 jsdrv_topic_set(&self->device, d);
                 return 0;
             }
+            d = &self->devices[i + 1];
         }
     }
 
