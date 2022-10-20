@@ -43,7 +43,7 @@
 #define CTRL_TIMEOUT_MS                 (1000U)
 #define DEVICES_MAX                     (256U)
 #define BULK_OUT_TIMEOUT_MS             (250U)
-#define BULK_IN_TIMEOUT_MS              (50U)
+#define BULK_IN_TIMEOUT_MS              (0U)    // no timeout
 #define BULK_IN_FRAME_LENGTH            (512U)
 #define BULK_IN_TRANSFER_SIZE           (64U * BULK_IN_FRAME_LENGTH)
 #define BULK_IN_TRANSFER_OUTSTANDING    (4U)
@@ -186,20 +186,18 @@ static void device_close(struct dev_s * d) {
     struct transfer_s * t;
     if (d->handle && (d->mode == DEVICE_MODE_OPEN)) {
         JSDRV_LOGI("device_close(%s)", d->ll_device.prefix);
-        for (uint32_t endpoint = 0; endpoint < ENDPOINT_COUNT; ++endpoint) {
-            d->endpoint_mode[endpoint] = EP_MODE_OFF;
-        }
         jsdrv_list_foreach_reverse(&d->transfers_pending, item) {
             t = JSDRV_CONTAINER_OF(item, struct transfer_s, item);
             if (d->endpoint_mode[t->transfer->endpoint] == EP_MODE_BULK_IN) {
                 libusb_cancel_transfer(t->transfer);
             }
         }
-        if (jsdrv_list_is_empty(&d->transfers_pending)) {
-            // cannot call libusb_close from event callbacks
-            // post to guarantee handling outside of libusb_handle_events*
-            d->mode = DEVICE_MODE_CLOSING;
+        for (uint32_t endpoint = 0; endpoint < ENDPOINT_COUNT; ++endpoint) {
+            d->endpoint_mode[endpoint] = EP_MODE_OFF;
         }
+        // cannot call libusb_close from event callbacks
+        // post to guarantee handling outside of libusb_handle_events*
+        d->mode = DEVICE_MODE_CLOSING;
     }
 }
 
@@ -441,7 +439,7 @@ static void bulk_in_close(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     d->endpoint_mode[ep] = EP_MODE_OFF;
     struct jsdrv_list_s * item;
     struct transfer_s * t;
-    jsdrv_list_foreach(&d->transfers_pending, item) {
+    jsdrv_list_foreach_reverse(&d->transfers_pending, item) {
         t = JSDRV_CONTAINER_OF(item, struct transfer_s, item);
         if (t->transfer->endpoint == ep) {
             libusb_cancel_transfer(t->transfer);
@@ -669,7 +667,7 @@ static void device_close_all(struct backend_s * s) {
     for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
         struct dev_s *d = &s->devices[i];
         if (NULL != d->handle) {
-            JSDRV_LOGW("device_close_all did not close device");
+            JSDRV_LOGI("closing idle device %s", d->serial_number);
             libusb_close(d->handle);
             d->handle = NULL;
         }

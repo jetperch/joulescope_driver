@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.0.3
+
+2022 Oct 21 [in progress]
+
+* Fixed linux by disabling BULK IN timeout.
+  Linux was losing data on timeout.
+  Fixed cancel, which still allows graceful shutdown.
+
+
 ## 1.0.2
 
 2022 Oct 15
