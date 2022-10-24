@@ -31,7 +31,7 @@ static void test_basic(void ** state) {
     int64_t n = 64LL;
     struct js220_statistics_raw_s src = {
             .header = 0x92000000 | (uint32_t) n,
-            .sample_freq = (uint32_t) 2 * n,
+            .sample_freq = (uint32_t) (2 * n),
             .block_sample_id = 0x100 + (uint64_t) n,
             .accum_sample_id = 0x100,
             .i_x1 = (1LL * n) << 31,

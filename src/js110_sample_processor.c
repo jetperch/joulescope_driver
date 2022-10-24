@@ -153,7 +153,6 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
             self->_suppress_samples_remaining = suppress_window + 1;
         }
     }
-    self->_i_range_last = i_range;
 
     if ((self->_suppress_mode == JS110_SUPPRESS_MODE_NAN) && (self->_suppress_samples_counter)) {
         s.i = NAN;
@@ -171,11 +170,15 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
         if (0 == self->_suppress_samples_remaining) {
             if (self->_suppress_mode == JS110_SUPPRESS_MODE_MEAN) {
                 for (int32_t j = 0; j < 3; ++j) {
+                    uint32_t sample_count = 0;
                     double accum = 0.0f;
                     uint8_t ptr = self->start;
-                    for (int32_t k = 0; k < self->_suppress_samples_pre; ++k) {
-                        ptr = ptr_decr(ptr);
-                        accum += ((float *) &self->samples[ptr])[j];
+                    if (self->_i_range_last < 7) {
+                        for (int32_t k = 0; k < self->_suppress_samples_pre; ++k) {
+                            ptr = ptr_decr(ptr);
+                            accum += ((float *) &self->samples[ptr])[j];
+                        }
+                        sample_count += self->_suppress_samples_pre;
                     }
 
                     ptr = self->head;
@@ -183,7 +186,9 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
                         ptr = ptr_decr(ptr);
                         accum += ((float *) &self->samples[ptr])[j];
                     }
-                    accum /= (self->_suppress_samples_pre + self->_suppress_samples_post);
+                    sample_count += self->_suppress_samples_post;
+
+                    accum /= sample_count;
                     float mean = (float) accum;
                     ptr = self->start;
                     for (int32_t k = 0; k < self->_suppress_samples_window; ++k) {
@@ -209,6 +214,9 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
                         post += ((float *) &self->samples[ptr])[j];
                     }
                     post /= self->_suppress_samples_post;
+                    if (self->_i_range_last >= 7) {
+                        pre = post;
+                    }
                     double step = (post - pre) / (self->_suppress_samples_window + 1);
 
                     ptr = self->start;
@@ -222,6 +230,7 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
         }
     }
 
+    self->_i_range_last = i_range;
     return self->samples[self->head];
 }
 

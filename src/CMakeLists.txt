@@ -43,6 +43,7 @@ set(SUPPORT_SOURCES
         error_code.c
         cstr.c
         devices.c
+        downsample.c
         js110_cal.c
         js220_i128.c
         js110_sample_processor.c

@@ -6,11 +6,14 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.0.3
 
-2022 Oct 21 [in progress]
+2022 Oct 24
 
 * Fixed linux by disabling BULK IN timeout.
   Linux was losing data on timeout.
   Fixed cancel, which still allows graceful shutdown.
+* Added JS110 downsampling on host. 
+* Switched from obsolete pypiwin32 to pywin32.
+* Fixed js110_sp_process when i_range was off or missing. 
 
 
 ## 1.0.2

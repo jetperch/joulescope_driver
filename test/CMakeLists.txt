@@ -29,6 +29,7 @@ add_executable(dbc_test dbc_test.c)
 add_dependencies(dbc_test cmocka)
 target_link_libraries(dbc_test cmocka)
 
+ADD_CMOCKA_TEST(downsample_test)
 ADD_CMOCKA_TEST(error_code_test)
 ADD_CMOCKA_TEST(js110_cal_test)
 ADD_CMOCKA_TEST(js220_i128_test)

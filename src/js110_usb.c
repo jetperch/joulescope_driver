@@ -17,6 +17,7 @@
 #include "jsdrv.h"
 #include "js110_api.h"
 #include "jsdrv_prv/cdef.h"
+#include "jsdrv_prv/downsample.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/frontend.h"
@@ -41,6 +42,7 @@
 #define SENSOR_COMMAND_TIMEOUT_MS  (3000U)
 #define FRAME_SIZE_BYTES           (512U)
 #define ROE JSDRV_RETURN_ON_ERROR
+#define SAMPLING_FREQUENCY (2000000U)
 
 struct js110_dev_s;  // forward declaration, see below
 
@@ -75,6 +77,8 @@ static void on_i_range_win(struct js110_dev_s * d, const struct jsdrv_union_s * 
 static void on_i_range_win_sz(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_i_range_post(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 
+static void on_sampling_frequency(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+
 static void on_current_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_voltage_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_power_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
@@ -92,11 +96,12 @@ enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
     PARAM_GPO1_VALUE,
     PARAM_I_LSB_SOURCE,
     PARAM_V_LSB_SOURCE,
-    PARAMS_I_RANGE_MODE,
-    PARAMS_I_RANGE_PRE,
-    PARAMS_I_RANGE_WIN,
-    PARAMS_I_RANGE_WIN_SZ,
-    PARAMS_I_RANGE_POST,
+    PARAM_I_RANGE_MODE,
+    PARAM_I_RANGE_PRE,
+    PARAM_I_RANGE_WIN,
+    PARAM_I_RANGE_WIN_SZ,
+    PARAM_I_RANGE_POST,
+    PARAM_SAMPLE_FREQUENCY,
     PARAM_I_CTRL,
     PARAM_V_CTRL,
     PARAM_P_CTRL,
@@ -276,9 +281,37 @@ static const struct param_s PARAMS[] = {
         "}",
         on_i_range_post,
     },
-    // buffer_duration
-    // reduction_frequency
-    // sampling_frequency (downsampling)
+    {
+        "s/fs",
+        "{"
+            "\"dtype\": \"u32\","
+            "\"brief\": \"The sampling frequency.\","
+            "\"default\": 2000000,"
+            "\"options\": ["
+                "[2000000, \"2 MHz\"],"
+                "[1000000, \"1 MHz\"],"
+                "[500000, \"500 kHz\"],"
+                "[200000, \"200 kHz\"],"
+                "[100000, \"100 kHz\"],"
+                "[50000, \"50 kHz\"],"
+                "[20000, \"20 kHz\"],"
+                "[10000, \"10 kHz\"],"
+                "[5000, \"5 kHz\"],"
+                "[2000, \"2 kHz\"],"
+                "[1000, \"1 kHz\"],"
+                "[500, \"500 Hz\"],"
+                "[200, \"200 Hz\"],"
+                "[100, \"100 Hz\"],"
+                "[50, \"50 Hz\"],"
+                "[20, \"20 Hz\"],"
+                "[10, \"10 Hz\"],"
+                "[5, \"5 Hz\"],"
+                "[2, \"2 Hz\"],"
+                "[1, \"1 Hz\"]"
+            "]"
+        "}",
+        on_sampling_frequency,
+    },
     // on-instrument statistics
     {
         "s/i/ctrl",
@@ -393,6 +426,7 @@ const struct field_def_s FIELDS[] = {
 struct port_s {
     uint64_t sample_id_next;
     struct jsdrvp_msg_s * msg;
+    struct jsdrv_downsample_s * downsample;
 };
 
 struct js110_dev_s {
@@ -753,6 +787,28 @@ static void on_i_range_post(struct js110_dev_s * d, const struct jsdrv_union_s *
     d->sample_processor._suppress_samples_post = value->value.u8;
 }
 
+static void on_sampling_frequency(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    struct jsdrv_union_s v = *value;
+    uint32_t fs;
+    if (jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+        JSDRV_LOGW("Could not process sampling frequency");
+        return;
+    }
+    fs = v.value.u32;
+    JSDRV_LOGW("on_sampling_frequency(%lu)", fs);
+    for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(FIELDS); ++idx) {
+        struct port_s *p = &d->ports[idx];
+        if (p->downsample) {
+            jsdrv_downsample_free(p->downsample);
+            p->downsample = NULL;
+        }
+        p->downsample = jsdrv_downsample_alloc(SAMPLING_FREQUENCY, fs);
+        if (NULL == p->downsample) {
+            JSDRV_LOGW("jsdrv_downsample_alloc failed");
+        }
+    }
+}
+
 static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value, int32_t param) {
     bool s1 = is_streaming(d);
     d->param_values[param] = *value;
@@ -995,8 +1051,9 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
     if ((s->element_size_bits < 8) && (((s->element_count * s->element_size_bits) & 0x7) != 0)) {
         return;
     }
+    uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * jsdrv_downsample_decimate_factor(p->downsample));
     if ((((s->element_count * s->element_size_bits) / 8) >= JSDRV_STREAM_DATA_SIZE)
-            || (s->element_count >= (2000000 / 20))) {  // todo support downsampling
+            || (s->element_count >= element_count_max)) {
         jsdrvp_backend_send(d->context, p->msg);
         p->msg = NULL;
     }
@@ -1005,6 +1062,13 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
 static void add_f32_field(struct js110_dev_s * d, uint8_t field_idx, float value) {
     struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
     if (NULL == m) {
+        return;
+    }
+    struct port_s * p = &d->ports[field_idx];
+    if (NULL == p->downsample) {
+        return;
+    }
+    if (!jsdrv_downsample_add_f32(p->downsample, d->sample_processor.sample_count - 1, value, &value)) {
         return;
     }
     struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
@@ -1017,6 +1081,13 @@ static void add_u4_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t valu
     struct jsdrv_stream_signal_s * s;
     struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
     if (NULL == m) {
+        return;
+    }
+    struct port_s * p = &d->ports[field_idx];
+    if (NULL == p->downsample) {
+        return;
+    }
+    if (!jsdrv_downsample_add_u8(p->downsample, d->sample_processor.sample_count - 1, value, &value)) {
         return;
     }
     s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
@@ -1033,6 +1104,13 @@ static void add_u1_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t valu
     struct jsdrv_stream_signal_s * s;
     struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
     if (NULL == m) {
+        return;
+    }
+    struct port_s * p = &d->ports[field_idx];
+    if (NULL == p->downsample) {
+        return;
+    }
+    if (!jsdrv_downsample_add_u8(p->downsample, d->sample_processor.sample_count - 1, value, &value)) {
         return;
     }
     s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
@@ -1191,6 +1269,7 @@ int32_t jsdrvp_ul_js110_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
     d->state = ST_CLOSED;
+    on_sampling_frequency(d, &jsdrv_union_u32(SAMPLING_FREQUENCY));
     js110_sp_initialize(&d->sample_processor);
 
     for (int i = 0; NULL != PARAMS[i].topic; ++i) {
