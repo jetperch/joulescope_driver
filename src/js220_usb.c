@@ -391,7 +391,7 @@ static int32_t bulk_out_publish(struct dev_s * d, const char * topic, const stru
     struct js220_publish_s * p = (struct js220_publish_s *) &m->payload.bin[4];
     char buf[32];
     jsdrv_union_value_to_str(value, buf, (uint32_t) sizeof(buf), 1);
-    JSDRV_LOGD1("publish to dev %s %s", topic, buf);
+    JSDRV_LOGI("publish to dev %s %s", topic, buf);
     memset(p, 0, sizeof(*p) + sizeof(union jsdrv_union_inner_u));
     jsdrv_cstr_copy(p->topic, topic, sizeof(p->topic));
     p->type = value->type;
@@ -531,6 +531,13 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         return rc;
     }
 
+    rc = d_ctrl_req(d, JS220_CTRL_OP_DISCONNECT);
+    if (rc) {
+        JSDRV_LOGI("jsdrvb_bulk_in_stream_open disconnect: %d", rc);
+        // ok, just continue on.
+    }
+
+    d->out_frame_id = 0;
     d->stream_in_port_enable = 0x000f;  // always enable ports 0, 1, 2, 3
     rc = jsdrvb_bulk_in_stream_open(d);
     if (rc) {
@@ -561,6 +568,7 @@ static int32_t d_close(struct dev_s * d) {
     JSDRV_LOGI("close");
     if ((d->state == ST_OPENING) || (d->state == ST_OPEN)) {
         d->stream_in_port_enable = 0;  // disable all ports
+        d_ctrl_req(d, JS220_CTRL_OP_DISCONNECT);  // ignore errors
         struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_CLOSE, &jsdrv_union_i32(0));
         msg_queue_push(d->ll.cmd_q, m);
         m = ll_await_topic(d, JSDRV_MSG_CLOSE, 1000);

@@ -506,7 +506,7 @@ static void ctrl_complete(struct dev_s * d) {
             // still in progress
             return;
         } else {
-            WINDOWS_LOGE("%s", "ctrl_complete failed");
+            WINDOWS_LOG(JSDRV_LOGW, "%s", "ctrl_complete failed");
             ctrl_send_done(d, JSDRV_ERROR_UNSPECIFIED); // unspecified error
             return;
         }

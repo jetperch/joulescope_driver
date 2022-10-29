@@ -96,7 +96,7 @@ $ = metadata response
 # General-purpose inputs & outputs
 {p}/c/gpio/vref       : [external], 3v3
 
-# General-purpose inputs (0-3, trigger_in=31)
+# General-purpose inputs (0-3, trigger_in=7)
 {p}/s/gpi/{N}/ctrl    : on, [off]
 {p}/s/gpi/{N}/!data
 {p}/s/gpi/+/!req      : request !value
@@ -109,7 +109,7 @@ $ = metadata response
 {p}/s/uart/{N}/!data
 {p}/s/uart/{N}/!tx    : transmit bytes
 
-# General purpose output (0, 1, trigger_out=31)
+# General purpose output (0, 1, trigger_out=7)
 {p}/s/gpo/{N}/ctrl    : manual, triggerN, uartN, patterns?
 {p}/s/gpo/+/!value    : u32 bitmap
 {p}/s/gpo/+/!set      : u32 bitmap

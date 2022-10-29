@@ -81,6 +81,16 @@ enum js220_ctrl_op_e {
      * To get the retained values, publish null to "?".
      */
     JS220_CTRL_OP_CONNECT = 1,
+
+    /**
+     * @brief Gracefully indicate host disconnect.
+     *
+     * The host software should issue this before disconnecting.
+     * The host software should also issue this command
+     * just before JS220_CTRL_OP_CONNECT to clear any queued
+     * or pending BULK IN data.
+     */
+    JS220_CTRL_OP_DISCONNECT = 2,
 };
 
 /**
