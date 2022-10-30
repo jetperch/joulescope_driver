@@ -46,7 +46,6 @@ CTRL_TYPE_UPD1 = 1
 CTRL_TYPE_UPD2 = 2
 
 
-
 def _targets_generate():
     d = {}
     keys = ['subtype', 'name', 'mem_region', 'target_id']
@@ -136,6 +135,11 @@ def _load_from_network(maturity=None, force_download=None):
 
 
 def releases_get_from_network(force_download=None, dist_save=None):
+    """Get releases from the network.
+
+    :param force_download: Force download, even if local files exist.
+    :param dist_save: Save to local dist directory.
+    """
     if dist_save:
         path = dist_path()
         os.makedirs(path, exist_ok=True)
@@ -156,7 +160,23 @@ def releases_get_from_network(force_download=None, dist_save=None):
 
 
 def release_get(maturity, force_download=None):
+    """Get the available release.
+
+    :param maturity: The desired maturity level, which is one of
+        * alpha
+        * beta
+        * stable
+    :param force_download: True to force download, even if local files
+        are already available.  None (default) or False to use local
+        files if present.
+    :return: The release image as bytes.
+    """
     src = None
+    if maturity is None:
+        maturity = 'stable'
+    maturity = maturity.lower()
+    if maturity not in MATURITY:
+        raise ValueError(f'invalid maturity level {maturity} not in {MATURITY}')
     fname = f'img_{maturity}.img'
     if not force_download:
         path = os.path.join(dist_path(), fname)
@@ -171,3 +191,48 @@ def release_get(maturity, force_download=None):
         src = os.path.join(release_path(), fname)
     with open(src, 'rb') as f:
         return f.read()
+
+
+def release_to_segments(img: bytes):
+    """Convert the binary release image into segments.
+
+    :param img: The binary release image.
+    :return: Map of segments.
+    """
+    segments = {}
+    while len(img):
+        if not img.startswith(MAGIC_HEADER):
+            raise RuntimeError('invalid image')
+        if len(img) < 1024:
+            raise RuntimeError('invalid image')
+        sz = struct.unpack('<I', img[32:36])[0]
+        ver = struct.unpack('<I', img[288:292])[0]
+        subtype = struct.unpack('<H', img[296:298])[0]
+        segments[subtype] = {
+            'subtype': subtype,
+            'name': TARGETS[subtype]['name'],
+            'version': ver,
+            'img': img[:sz]
+        }
+        img = img[sz:]
+    return segments
+
+
+def release_to_available(img: bytes) -> dict[str, int]:
+    """Convert the binary release image into metadata.
+
+    :param img: The binary release image.
+    :return: The available version for each segment as a 32-bit integer
+        with major8.minor8.patch16.
+        The segment names are:
+        * app
+        * updater1
+        * updater2
+        * fpga
+    """
+    r = {}
+    segments = release_to_segments(img)
+    for value in segments.values():
+        name = value['name'].split('_')[1]
+        r[name] = value['version']
+    return r

@@ -14,6 +14,7 @@
 
 from pyjoulescope_driver import Driver
 from pyjoulescope_driver.program import release_program
+from pyjoulescope_driver.release import release_get
 import sys
 
 
@@ -83,8 +84,8 @@ def on_cmd(args):
         else:
             device_path = device_paths[0]
         d.open(device_path)
-        rv = release_program(d, device_path, args.maturity,
-                             force_download=args.force_download,
+        image = release_get(args.maturity, force_download=args.force_download)
+        rv = release_program(d, device_path, image,
                              force_program=args.force_program,
                              progress=_on_progress)
         versions_before = dict(rv[0])

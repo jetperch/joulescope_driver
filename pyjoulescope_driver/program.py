@@ -24,12 +24,11 @@ jsdrv_util reset update1 && jsdrv_util mem_erase s/app1 && jsdrv_util mem_write 
 
 
 from pyjoulescope_driver import Driver
-from pyjoulescope_driver.release import release_get,\
+from pyjoulescope_driver.release import release_to_segments, \
     SUBTYPE_CTRL_APP, SUBTYPE_CTRL_UPDATER2, \
     SUBTYPE_CTRL_UPDATER1, SUBTYPE_SENSOR_FPGA, \
-    TARGETS, MATURITY, MAGIC_HEADER
+    TARGETS
 import logging
-import struct
 import time
 
 
@@ -74,6 +73,10 @@ class Programmer:
     @property
     def version(self):
         return self._driver.query(self._path + '/c/fw/version')
+
+    @property
+    def fpga_version(self):
+        return self._driver.query(self._path + '/s/fpga/version')
 
     @property
     def target_id(self):
@@ -157,17 +160,14 @@ class Programmer:
         return self._driver.close(self._path, timeout=timeout)
 
 
-def release_program(driver: Driver, device_path: str, maturity: str,
-                    force_download=None, force_program=None,
-                    progress=None):
+def release_program(driver: Driver, device_path: str, image: bytes,
+                    force_program=None, progress=None):
     """Program a device with an official release.
 
     :param driver: The driver instance.
     :param device_path: The device path string for the target device.
-    :param maturity: The maturity level which is one of
-        ['alpha', 'beta', 'stable'].
-    :param force_download: When true, force download from the distribution
-        server.  When false (default), use the packaged files, if they exist.
+    :param image: The binary release image to program.  See
+        :func:`pyjoulescope_driver.release.release_get`.
     :param force_program: Force device programming for all segments.
         Normally, programming for segments with matching versions are skipped.
     :param progress: An optional callable(completion: float, msg: str) callback.
@@ -177,35 +177,15 @@ def release_program(driver: Driver, device_path: str, maturity: str,
     """
     if progress is None:
         progress = lambda x, y: None
-    progress(0.0, 'Get firmware')
-    maturity = maturity.lower()
-    if maturity not in MATURITY:
-        raise ValueError(f'invalid maturity level {maturity} not in {MATURITY}')
-    img = release_get(maturity, force_download=force_download)
-    segments = {}
-    while len(img):
-        if not img.startswith(MAGIC_HEADER):
-            raise RuntimeError('invalid image')
-        if len(img) < 1024:
-            raise RuntimeError('invalid image')
-        sz = struct.unpack('<I', img[32:36])[0]
-        ver = struct.unpack('<I', img[288:292])[0]
-        subtype = struct.unpack('<H', img[296:298])[0]
-        segments[subtype] = {
-            'subtype': subtype,
-            'version': ver,
-            'img': img[:sz]
-        }
-        img = img[sz:]
-
-    progress(0.02, 'Check app version')
+    segments = release_to_segments(image)
+    progress(0.00, 'Check app version')
     programmer = Programmer(driver, device_path)
     if programmer.is_in_app:
         ctrl_app_version = programmer.version
     else:
         ctrl_app_version = None
 
-    progress(0.04, 'Check updater2 version')
+    progress(0.02, 'Check updater2 version')
     try:
         programmer.reset_to(SUBTYPE_CTRL_UPDATER2)
         update2_version = programmer.version
@@ -214,7 +194,7 @@ def release_program(driver: Driver, device_path: str, maturity: str,
         programmer.close()
         programmer.open()
 
-    progress(0.06, 'Check updater1 version')
+    progress(0.05, 'Check updater1 version')
     try:
         programmer.reset_to(SUBTYPE_CTRL_UPDATER1)
         update1_version = programmer.version
@@ -260,7 +240,8 @@ def release_program(driver: Driver, device_path: str, maturity: str,
         programmer.reset_to(SUBTYPE_CTRL_APP)
     progress(0.97, 'Finalizing')
     sensor_fpga_version = programmer.query('s/fpga/version')
-
+    programmer.close()
+    
     versions_after = [
         ['app', version_to_str(ctrl_app_version)],
         ['fpga', version_to_str(sensor_fpga_version)],
