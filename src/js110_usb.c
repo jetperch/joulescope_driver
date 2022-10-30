@@ -500,8 +500,9 @@ static void send_to_frontend(struct js110_dev_s * d, const char * subtopic, cons
 }
 
 static int32_t jsdrvb_ctrl_out(struct js110_dev_s * d, usb_setup_t setup, const void * buffer) {
+    JSDRV_LOGI("jsdrvb_ctrl_out start");
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
-    jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_CTRL_IN, sizeof(m->topic));
+    jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_CTRL_OUT, sizeof(m->topic));
     m->value.type = JSDRV_UNION_BIN;
     m->value.value.bin = m->payload.bin;
     m->value.app = JSDRV_PAYLOAD_TYPE_USB_CTRL;
@@ -515,26 +516,27 @@ static int32_t jsdrvb_ctrl_out(struct js110_dev_s * d, usb_setup_t setup, const 
     m->value.size = setup.s.wLength;
 
     msg_queue_push(d->ll.cmd_q, m);
-    m = ll_await_topic(d, JSDRV_USBBK_MSG_CTRL_IN, TIMEOUT_MS);
+    m = ll_await_topic(d, JSDRV_USBBK_MSG_CTRL_OUT, TIMEOUT_MS);
     if (!m) {
         JSDRV_LOGW("ctrl_out timed out");
         return JSDRV_ERROR_TIMED_OUT;
     }
     jsdrvp_msg_free(d->context, m);
+    JSDRV_LOGI("jsdrvb_ctrl_out done");
     return 0;
 }
 
 static int32_t jsdrvb_ctrl_in(struct js110_dev_s * d, usb_setup_t setup, void * buffer, uint32_t * size) {
     int32_t rc = 0;
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
-    jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_CTRL_OUT, sizeof(m->topic));
+    jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_CTRL_IN, sizeof(m->topic));
     m->value.type = JSDRV_UNION_BIN;
     m->value.value.bin = m->payload.bin;
     m->value.app = JSDRV_PAYLOAD_TYPE_USB_CTRL;
     m->extra.bkusb_ctrl.setup = setup;
 
     msg_queue_push(d->ll.cmd_q, m);
-    m = ll_await_topic(d, JSDRV_USBBK_MSG_CTRL_OUT, TIMEOUT_MS);
+    m = ll_await_topic(d, JSDRV_USBBK_MSG_CTRL_IN, TIMEOUT_MS);
     if (!m) {
         JSDRV_LOGW("ctrl_in timed out");
         return JSDRV_ERROR_TIMED_OUT;
@@ -813,7 +815,7 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
     bool s1 = is_streaming(d);
     d->param_values[param] = *value;
     if (s1 != is_streaming(d)) {
-        JSDRV_LOGI("on_update_ctrl %d (stream change)", param);
+        JSDRV_LOGI("on_update_ctrl %d (stream change) %s", param, s1 ? "on" : "off");
         if (!s1) {  // enabling streaming
             js110_sp_reset(&d->sample_processor);
             js110_stats_clear(&d->stats);
@@ -1226,7 +1228,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
     struct pollfd fds[2];
     fds[0].fd = msg_queue_handle_get(d->ul.cmd_q);
     fds[0].events = POLLIN;
-    fds[1].fd = msg_queue_handle_get(d->ul.cmd_q);
+    fds[1].fd = msg_queue_handle_get(d->ll.rsp_q);
     fds[1].events = POLLIN;
 #endif
 

@@ -350,12 +350,13 @@ static void on_ctrl_out_done(struct libusb_transfer * transfer) {
 static void ctrl_out_start(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     struct transfer_s * t = transfer_alloc(d);
     t->msg = msg;
-    JSDRV_LOGI("ctrl_in_start(%s) %d bytes", d->ll_device.prefix, (int) msg->value.size);
+    JSDRV_LOGI("ctrl_out_start(%s) %d bytes", d->ll_device.prefix, (int) msg->value.size);
     uint64_t * setup = (uint64_t * ) t->buffer;
     *setup = msg->extra.bkusb_ctrl.setup.u64;
     libusb_fill_control_transfer(t->transfer, d->handle, t->buffer,
                                  on_ctrl_out_done, t, CTRL_TIMEOUT_MS);
     if (msg->value.size > 4096) {
+        JSDRV_LOGW("ctrl_out_start size too big: %lu", (int) msg->value.size);
         msg->value = jsdrv_union_i32(JSDRV_ERROR_TOO_BIG);
         device_rsp(d, msg);
     } else {
@@ -452,6 +453,10 @@ static void bulk_in_close(struct dev_s * d, struct jsdrvp_msg_s * msg) {
 static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     if (NULL == msg) {
         return false;
+    }
+
+    if (0 != strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
+        JSDRV_LOGI("device_handle_msg %s", msg->topic);
     }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
         struct transfer_s * t;

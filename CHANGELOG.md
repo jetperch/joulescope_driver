@@ -6,10 +6,11 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.0.4
 
-2022 Oct 30 [in progress]
+2022 Oct 30
 
 * Added JS220_CTRL_OP_DISCONNECT for cleaner disconnect/reconnect.
   Requires js220_ctrl firmware 1.0.4, no effect on earlier versions.
+* Fixed JS110 support.
 
 
 ## 1.0.3
