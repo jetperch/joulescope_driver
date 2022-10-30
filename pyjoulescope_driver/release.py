@@ -218,11 +218,12 @@ def release_to_segments(img: bytes):
     return segments
 
 
-def release_to_available(img: bytes) -> dict[str, int]:
+def release_to_available(img: bytes):
     """Convert the binary release image into metadata.
 
     :param img: The binary release image.
-    :return: The available version for each segment as a 32-bit integer
+    :return: The available version dict[name, version]
+        for each segment as a 32-bit integer
         with major8.minor8.patch16.
         The segment names are:
         * app
