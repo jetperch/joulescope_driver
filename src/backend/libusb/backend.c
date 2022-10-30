@@ -426,7 +426,10 @@ static void bulk_in_open(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     uint8_t pipe_id = ep | 0x80;
     JSDRV_LOGI("bulk_in_open(%d, endpoint=0x%02x)", d->ll_device.prefix, (int) ep);
     d->endpoint_mode[pipe_id] = EP_MODE_BULK_IN;
-    libusb_clear_halt(d->handle, pipe_id);
+    int rv = libusb_clear_halt(d->handle, pipe_id);
+    if (rv) {
+        JSDRV_LOGW("bulk_in_open clear_halt failed with %d", rv);
+    }
     for (uint32_t i = 0; i < BULK_IN_TRANSFER_OUTSTANDING; ++i) {
         bulk_in_start(d, pipe_id);
     }
@@ -565,6 +568,10 @@ static void device_remove_announce(struct backend_s * s, struct dev_s * d) {
 static void device_remove(struct backend_s * s, struct dev_s * d) {
     JSDRV_LOGI("device_remove(%s)", d->ll_device.prefix);
     jsdrv_list_remove(&d->item);
+    if (d->handle) {
+        JSDRV_LOGI("release interface device %s", d->serial_number);
+        libusb_release_interface(d->handle, 0);
+    }
     device_close(d);
     if (d->usb_device) {
         libusb_unref_device(d->usb_device);
