@@ -59,7 +59,6 @@ void js110_stats_clear(struct js110_stats_s * self) {
 }
 
 void js110_stats_sample_count_set(struct js110_stats_s * self, uint32_t sample_count) {
-    JSDRV_LOGI("js110_stats_sample_count_set(%lu)", sample_count);
     js110_stats_clear(self);
     struct jsdrv_statistics_s * s = &self->statistics;
     s->block_sample_count = sample_count;
