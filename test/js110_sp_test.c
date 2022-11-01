@@ -120,8 +120,6 @@ static void test_nan_0_n_0(void ** state) {
 
 struct mean_s {
     float i;
-    float v;
-    float p;
 };
 
 static void expect_mean(void * user_data, size_t i, struct js110_sample_s sample) {
@@ -132,15 +130,12 @@ static void expect_mean(void * user_data, size_t i, struct js110_sample_s sample
     assert_false(isnan(sample.v));
     assert_false(isnan(sample.p));
     assert_float_equal(m->i, sample.i, 1e-6);
-    assert_float_equal(m->v, sample.v, 1e-6);
-    assert_float_equal(m->p, sample.p, 1e-6);
+    assert_float_equal(sample.p, sample.i * sample.v, 1e-6);
 }
 
 static void test_mean_1_3_1(void ** state) {
     struct mean_s m = {
             .i = 1.332500f,
-            .v = 0.329600f,
-            .p = 0.436606f,
     };
     SETUP()
     s._suppress_mode = JS110_SUPPRESS_MODE_MEAN;
@@ -153,8 +148,6 @@ static void test_mean_1_3_1(void ** state) {
 static void test_mean_2_3_1(void ** state) {
     struct mean_s m = {
             .i = 1.688333f,
-            .v = 0.328400f,
-            .p = 0.551871f,
     };
     SETUP()
     s._suppress_mode = JS110_SUPPRESS_MODE_MEAN;
@@ -167,9 +160,7 @@ static void test_mean_2_3_1(void ** state) {
 
 static void test_mean_1_3_2(void ** state) {
     struct mean_s m = {
-            .i = 0.973000f,
-            .v = 0.330000f,
-            .p = 0.319078f,
+            .i = 0.973667f,
     };
     SETUP()
     s._suppress_mode = JS110_SUPPRESS_MODE_MEAN;
@@ -182,11 +173,7 @@ static void test_mean_1_3_2(void ** state) {
 
 struct interp_s {
     float i0;
-    float v0;
-    float p0;
     float i_step;
-    float v_step;
-    float p_step;
 };
 
 static void expect_interp(void * user_data, size_t i, struct js110_sample_s sample) {
@@ -197,21 +184,14 @@ static void expect_interp(void * user_data, size_t i, struct js110_sample_s samp
     assert_false(isnan(sample.p));
     size_t k = i - 31;
     float i_expect = m->i0 + m->i_step * k;
-    float v_expect = m->v0 + m->v_step * k;
-    float p_expect = m->p0 + m->p_step * k;
     assert_float_equal(i_expect, sample.i, 1e-6);
-    assert_float_equal(v_expect, sample.v, 1e-6);
-    assert_float_equal(p_expect, sample.p, 1e-6);
+    assert_float_equal(sample.p, sample.i * sample.v, 1e-6);
 }
 
 static void test_interp_1_3_1(void ** state) {
     struct interp_s m = {
             .i0 = 2.41000009f,
-            .v0 = 0.327199996f,
-            .p0 = 0.788551986f,
             .i_step = (float) ((0.254999995 - 2.41000009) / 4),
-            .v_step = (float) ((0.331999987 - 0.327199996) / 4),
-            .p_step = (float) ((0.084660001 - 0.788551986) / 4),
     };
     SETUP()
     s._suppress_mode = JS110_SUPPRESS_MODE_INTERP;

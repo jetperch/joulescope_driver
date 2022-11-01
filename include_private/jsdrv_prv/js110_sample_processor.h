@@ -31,6 +31,7 @@
 JSDRV_CPP_GUARD_START
 
 #define JS110_SUPPRESS_SAMPLES_MAX 64U  // must be power of 2
+#define JS110_I_RANGE_OFF 7U
 #define JS110_I_RANGE_MISSING 8U
 
 enum js110_supress_mode_e {

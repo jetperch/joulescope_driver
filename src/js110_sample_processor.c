@@ -81,7 +81,7 @@ static const uint8_t SUPPRESS_MATRIX_N[9][9] = {   // [to][from]
 void js110_sp_initialize(struct js110_sp_s * self) {
     memset(self, 0, sizeof(*self));
     self->_suppress_samples_pre = 1;
-    self->_suppress_samples_window = 0;
+    self->_suppress_samples_window = 10;
     self->_suppress_samples_post = 1;
     self->_suppress_mode = JS110_SUPPRESS_MODE_INTERP;
     self->_suppress_matrix = &SUPPRESS_MATRIX_N;
@@ -98,7 +98,7 @@ void js110_sp_reset(struct js110_sp_s * self) {
 
     self->_suppress_samples_remaining = 0;
     self->_suppress_samples_counter = 0;
-    self->_i_range_last = 7;  // off
+    self->_i_range_last = JS110_I_RANGE_OFF;
 
     self->_voltage_range = 0;
     self->_idx_out = 0;
@@ -150,7 +150,7 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
             if (0 == self->_suppress_samples_remaining) {
                 self->start = self->head;
             }
-            self->_suppress_samples_remaining = suppress_window + 1;
+            self->_suppress_samples_remaining = suppress_window + self->_suppress_samples_post;
         }
     }
 
@@ -169,62 +169,61 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
         --self->_suppress_samples_remaining;
         if (0 == self->_suppress_samples_remaining) {
             if (self->_suppress_mode == JS110_SUPPRESS_MODE_MEAN) {
-                for (int32_t j = 0; j < 3; ++j) {
-                    uint32_t sample_count = 0;
-                    double accum = 0.0f;
-                    uint8_t ptr = self->start;
-                    if (self->_i_range_last < 7) {
-                        for (int32_t k = 0; k < self->_suppress_samples_pre; ++k) {
-                            ptr = ptr_decr(ptr);
-                            accum += ((float *) &self->samples[ptr])[j];
-                        }
-                        sample_count += self->_suppress_samples_pre;
-                    }
-
-                    ptr = self->head;
-                    for (int32_t k = 0; k < self->_suppress_samples_post; ++k) {
-                        ptr = ptr_decr(ptr);
-                        accum += ((float *) &self->samples[ptr])[j];
-                    }
-                    sample_count += self->_suppress_samples_post;
-
-                    accum /= sample_count;
-                    float mean = (float) accum;
-                    ptr = self->start;
-                    for (int32_t k = 0; k < self->_suppress_samples_window; ++k) {
-                        float * f = (float *) &self->samples[ptr];
-                        f[j] = mean;
-                        ptr = ptr_incr(ptr);
-                    }
-                }
-            } else if (self->_suppress_mode == JS110_SUPPRESS_MODE_INTERP) {
-                for (int32_t j = 0; j < 3; ++j) {
-                    double pre = 0.0f;
-                    double post = 0.0f;
-                    uint8_t ptr = self->start;
+                uint32_t sample_count = 0;
+                double accum = 0.0f;
+                uint8_t ptr = self->start;
+                if (self->_i_range_last < 7) {
                     for (int32_t k = 0; k < self->_suppress_samples_pre; ++k) {
                         ptr = ptr_decr(ptr);
-                        pre += ((float *) &self->samples[ptr])[j];
+                        accum += self->samples[ptr].i;
                     }
-                    pre /= self->_suppress_samples_pre;
+                    sample_count += self->_suppress_samples_pre;
+                }
 
-                    ptr = self->head;
-                    for (int32_t k = 0; k < self->_suppress_samples_post; ++k) {
-                        ptr = ptr_decr(ptr);
-                        post += ((float *) &self->samples[ptr])[j];
-                    }
-                    post /= self->_suppress_samples_post;
-                    if (self->_i_range_last >= 7) {
-                        pre = post;
-                    }
-                    double step = (post - pre) / (self->_suppress_samples_window + 1);
+                uint8_t ptr_end = self->head;
+                for (int32_t k = 0; k < self->_suppress_samples_post; ++k) {
+                    ptr_end = ptr_decr(ptr_end);
+                    accum += self->samples[ptr_end].i;
+                }
+                sample_count += self->_suppress_samples_post;
 
-                    ptr = self->start;
-                    for (int32_t k = 0; k < self->_suppress_samples_window; ++k) {
-                        float * f = (float *) &self->samples[ptr];
-                        f[j] = (float) (pre + (step * (k + 1)));
-                        ptr = ptr_incr(ptr);
-                    }
+                accum /= sample_count;
+                float mean = (float) accum;
+                ptr = self->start;
+                while (ptr != ptr_end) {
+                    self->samples[ptr].i = mean;
+                    self->samples[ptr].p = self->samples[ptr].i * self->samples[ptr].v;
+                    ptr = ptr_incr(ptr);
+                }
+            } else if (self->_suppress_mode == JS110_SUPPRESS_MODE_INTERP) {
+                double pre = 0.0f;
+                double post = 0.0f;
+                uint8_t ptr = self->start;
+                for (int32_t k = 0; k < self->_suppress_samples_pre; ++k) {
+                    ptr = ptr_decr(ptr);
+                    pre += self->samples[ptr].i;
+                }
+                pre /= self->_suppress_samples_pre;
+
+                uint8_t ptr_end = self->head;
+                for (int32_t k = 0; k < self->_suppress_samples_post; ++k) {
+                    ptr_end = ptr_decr(ptr_end);
+                    post += self->samples[ptr_end].i;
+                }
+                post /= self->_suppress_samples_post;
+                if (self->_i_range_last >= 7) {
+                    pre = post;
+                }
+                uint8_t count = ptr_end - ptr;
+                double step = (post - pre) / count;
+
+                ptr = self->start;
+                int32_t k = 0;
+                while (ptr != ptr_end) {
+                    self->samples[ptr].i = (float) (pre + (step * (k + 1)));
+                    self->samples[ptr].p = self->samples[ptr].i * self->samples[ptr].v;
+                    ptr = ptr_incr(ptr);
+                    ++k;
                 }
             }
         }

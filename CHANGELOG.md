@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.0.5
+
+2022 Nov 1
+
+* Fixed JS110 current range processing for window N and M.
+* Fixed JS110 sample alignment.
+
+
 ## 1.0.4
 
 2022 Oct 30

@@ -424,7 +424,6 @@ const struct field_def_s FIELDS[] = {
 };
 
 struct port_s {
-    uint64_t sample_id_next;
     struct jsdrvp_msg_s * msg;
     struct jsdrv_downsample_s * downsample;
 };
@@ -439,6 +438,7 @@ struct js110_dev_s {
     uint64_t packet_index;
     struct js110_sp_s sample_processor;
     struct js110_stats_s stats;
+    uint64_t sample_id;
 
     struct port_s ports[JSDRV_ARRAY_SIZE(FIELDS)];
 
@@ -774,18 +774,22 @@ static void on_i_range_mode(struct js110_dev_s * d, const struct jsdrv_union_s *
 }
 
 static void on_i_range_pre(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    JSDRV_LOGI("on_i_range_pre %d", (int) value->value.u8);
     d->sample_processor._suppress_samples_pre = value->value.u8;
 }
 
 static void on_i_range_win(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    JSDRV_LOGI("on_i_range_win %d", (int) value->value.u8);
     js110_sp_suppress_win(&d->sample_processor, value->value.u8);
 }
 
 static void on_i_range_win_sz(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    JSDRV_LOGI("on_i_range_win_sz %d", (int) value->value.u8);
     d->sample_processor._suppress_samples_window = value->value.u8;
 }
 
 static void on_i_range_post(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    JSDRV_LOGI("on_i_range_post %d", (int) value->value.u8);
     d->sample_processor._suppress_samples_post = value->value.u8;
 }
 
@@ -797,7 +801,7 @@ static void on_sampling_frequency(struct js110_dev_s * d, const struct jsdrv_uni
         return;
     }
     fs = v.value.u32;
-    JSDRV_LOGW("on_sampling_frequency(%lu)", fs);
+    JSDRV_LOGI("on_sampling_frequency(%lu)", fs);
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(FIELDS); ++idx) {
         struct port_s *p = &d->ports[idx];
         if (p->downsample) {
@@ -825,11 +829,11 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
                 struct port_s * p = &d->ports[idx];
                 struct jsdrvp_msg_s *m = p->msg;
                 p->msg = NULL;
-                p->sample_id_next = 0;
                 if (NULL != m) {
                     jsdrvp_msg_free(d->context, m);
                 }
             }
+            d->sample_id = 0;
         }
         stream_settings_send(d);
         JSDRV_LOGI("on_update_ctrl %d (stream change complete)", param);
@@ -1029,13 +1033,13 @@ static struct jsdrvp_msg_s * field_message_get(struct js110_dev_s * d, uint8_t f
         m = jsdrvp_msg_alloc_data(d->context, "");
         tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s", d->ll.prefix, field_def->data_topic);
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
-        s->sample_id = p->sample_id_next;
+        s->sample_id = d->sample_id;
         s->index = field_def->index;
         s->field_id = field_def->field_id;
         s->element_type = field_def->element_type;
         s->element_size_bits = field_def->element_size_bits;
         s->element_count = 0;
-        m->u32_a = (uint32_t) p->sample_id_next;
+        m->u32_a = (uint32_t) d->sample_id;
         m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
         m->value.size = JSDRV_STREAM_HEADER_SIZE;
         p->msg = m;
@@ -1049,7 +1053,6 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
     struct jsdrvp_msg_s * m = p->msg;
     struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
     ++s->element_count;
-    ++p->sample_id_next;
     if ((s->element_size_bits < 8) && (((s->element_count * s->element_size_bits) & 0x7) != 0)) {
         return;
     }
@@ -1133,6 +1136,7 @@ static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_ran
     add_u4_field(d, 3, z.current_range);
     add_u1_field(d, 4, z.gpi0);
     add_u1_field(d, 5, z.gpi1);
+    ++d->sample_id;
 
     struct jsdrv_statistics_s * s = js110_stats_compute(&d->stats, z.i, z.v, z.p);
     if (NULL != s) {
