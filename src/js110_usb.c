@@ -1147,6 +1147,7 @@ static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_ran
         m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
         m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
         jsdrvp_backend_send(d->context, m);
+        s->block_sample_id = d->sample_id;
     }
 }
 
@@ -1277,6 +1278,7 @@ int32_t jsdrvp_ul_js110_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     d->state = ST_CLOSED;
     on_sampling_frequency(d, &jsdrv_union_u32(SAMPLING_FREQUENCY));
     js110_sp_initialize(&d->sample_processor);
+    js110_stats_initialize(&d->stats);
 
     for (int i = 0; NULL != PARAMS[i].topic; ++i) {
         jsdrv_meta_default(PARAMS[i].meta, &d->param_values[i]);

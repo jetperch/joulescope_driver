@@ -34,20 +34,32 @@ static void clear(struct js110_stats_s * self) {
     }
 }
 
-
-void js110_stats_clear(struct js110_stats_s * self) {
+void js110_stats_initialize(struct js110_stats_s * self) {
     jsdrv_memset(self, 0, sizeof(*self));
     struct jsdrv_statistics_s * s = &self->statistics;
     s->version = 1;
     s->decimate_factor = 1;
     s->block_sample_count = 1000000;
     s->sample_freq = 2000000;
+    js110_stats_clear(self);
+}
+
+void js110_stats_clear(struct js110_stats_s * self) {
+    self->sample_count = 0;
+    self->valid_count = 0;
+    self->charge.u64[0] = 0;
+    self->charge.u64[1] = 0;
+    self->energy.u64[0] = 0;
+    self->energy.u64[1] = 0;
+    struct jsdrv_statistics_s * s = &self->statistics;
+    s->decimate_factor = 1;
     s->block_sample_id = 0;
     s->accum_sample_id = 0;
     clear(self);
 }
 
 void js110_stats_sample_count_set(struct js110_stats_s * self, uint32_t sample_count) {
+    JSDRV_LOGI("js110_stats_sample_count_set(%lu)", sample_count);
     js110_stats_clear(self);
     struct jsdrv_statistics_s * s = &self->statistics;
     s->block_sample_count = sample_count;

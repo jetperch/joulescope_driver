@@ -10,6 +10,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 * Fixed JS110 current range processing for window N and M.
 * Fixed JS110 sample alignment.
+* Fixed JS110 statistics generation time and rate.
 
 
 ## 1.0.4

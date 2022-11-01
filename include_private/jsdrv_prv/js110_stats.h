@@ -61,6 +61,18 @@ struct js110_stats_s {
 };
 
 
+/**
+ * @brief Initialize the statistics instance.
+ *
+ * @param self The stats instance.
+ */
+void js110_stats_initialize(struct js110_stats_s * self);
+
+/**
+ * @brief Clear any partial computation.
+ *
+ * @param self The stats instance.
+ */
 void js110_stats_clear(struct js110_stats_s * self);
 
 /**
