@@ -2,6 +2,10 @@ include CHANGELOG.md
 include credits.html
 include LICENSE
 include README.md
+recursive-include include *.*
+recursive-include include_private *.*
+recursive-include src *.*
+recursive-include third-party *.*
 include pyjoulescope_driver/img/alpha.img
 include pyjoulescope_driver/img/beta.img
 include pyjoulescope_driver/img/stable.img

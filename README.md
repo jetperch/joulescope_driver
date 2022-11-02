@@ -38,29 +38,30 @@ with the first-generation python driver including:
 3. Improved performance.
 
 
-## Limitations
-
-This project is currently under active development.  As of 2022 Aug 1,
-this project has the following known limitations:
-
-1. Only Windows support
-   1. Builds under macOS, but libusb_init returns error -99.
-   2. Linux support planned soon.
-2. JS110 support not yet at feature parity to existing [pyjoulescope](https://github.com/jetperch/pyjoulescope).
-    1. No current range suppression filtering yet.
-    2. No downsampling. 
-3. Limited testing - Still a work in progress.  Not yet ready for production use.
-
-
 ## Building
 
-Ensure that your computer has a develpment environment including CMake.  
+Ensure that your computer has a development environment including CMake.  
+
+
+### Windows
+
+Install cmake and your favorite build toolchain such as 
+Visual Studio, mingw64, wsl, ninja.
+
+### macOS
 
 For macOS, install homebrew, then:
 
-    brew install libusb pkgconfig python3
+    brew install pkgconfig python3
 
-Then:
+
+### Ubuntu 22.04 LTS
+
+For Ubuntu:
+
+   sudo apt install cmake build-essential ninja
+
+### Common
 
     cd {your/repos/joulescope_driver}
     mkdir build && cd build
@@ -90,3 +91,7 @@ And run the Python development tools:
     python3 -m pyjoulescope_driver --help
     python3 -m pyjoulescope_driver scan
     python3 -m pyjoulescope_driver ui
+
+You may optionally choose to use a Python virtual environment.
+
+   
