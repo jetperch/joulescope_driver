@@ -59,7 +59,7 @@ For macOS, install homebrew, then:
 
 For Ubuntu:
 
-   sudo apt install cmake build-essential ninja
+    sudo apt install cmake build-essential ninja
 
 ### Common
 
@@ -93,5 +93,3 @@ And run the Python development tools:
     python3 -m pyjoulescope_driver ui
 
 You may optionally choose to use a Python virtual environment.
-
-   

@@ -188,8 +188,8 @@
 
 /** @} */
 
-#define JSDRV_TIMEOUT_MS_DEFAULT       1000             // The recommended default timeout
-#define JSDRV_TIMEOUT_MS_INIT          5000             // The recommended default jsdrv_initialize() timeout.
+#define JSDRV_TIMEOUT_MS_DEFAULT       1000             ///< The recommended default timeout
+#define JSDRV_TIMEOUT_MS_INIT          5000             ///< The recommended default jsdrv_initialize() timeout.
 
 
 JSDRV_CPP_GUARD_START
@@ -281,14 +281,14 @@ struct jsdrv_statistics_s {
     double i_std;                ///< The standard deviation of current over the block.
     double i_min;                ///< The minimum current value in the block.
     double i_max;                ///< The maximum current value in the block.
-    double v_avg;
-    double v_std;
-    double v_min;
-    double v_max;
-    double p_avg;
-    double p_std;
-    double p_min;
-    double p_max;
+    double v_avg;                ///< The average voltage over the block.
+    double v_std;                ///< The standard deviation of voltage over the block.
+    double v_min;                ///< The minimum voltage value in the block.
+    double v_max;                ///< The maximum voltage value in the block.
+    double p_avg;                ///< The average power over the block.
+    double p_std;                ///< The standard deviation of power over the block.
+    double p_min;                ///< The minimum power value in the block.
+    double p_max;                ///< The maximum power value in the block.
     double charge_f64;           ///< The charge (integral of current) from accum_sample_id as a 64-bit float.
     double energy_f64;           ///< The energy (integral of power) from accum_sample_id as a 64-bit float.
     uint64_t charge_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.

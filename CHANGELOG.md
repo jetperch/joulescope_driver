@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.0.7
+
+2022 Nov 8 [in progress]
+
+* Improved documentation.
+
+
 ## 1.0.6
 
 2022 Nov 2
