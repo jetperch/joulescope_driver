@@ -18,7 +18,8 @@ build:
   jobs:
     pre_build:
       - python3 setup.py build_ext --inplace
-      - mkdir cmake-build && cd $_ && cmake .. && cmake --build . --target doxygen
+      - cmake -S . -B cmake-build -DJSDRV_DOCS=1
+      - cmake --build cmake-build --target doxygen
 
 # Build documentation in the doc/sphinx/ directory with Sphinx
 sphinx:
