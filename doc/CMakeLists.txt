@@ -38,7 +38,7 @@ file(GLOB_RECURSE JSDRV_PUBLIC_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/../include/*.
 add_custom_target(doxygen ALL
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
         DEPENDS jsdrv  ${JSDRV_PUBLIC_HEADERS}
-        BYPRODUCTS {DOXYGEN_INDEX_FILE}
+        BYPRODUCTS ${DOXYGEN_INDEX_FILE}
         comment "Generating C documentation with Sphinx"
         SOURCES ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
 install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html/ DESTINATION doc)
@@ -46,9 +46,8 @@ install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html/ DESTINATION doc)
 add_custom_target(sphinx ALL
         COMMAND
             ${SPHINX_EXECUTABLE} -b html
-           -Dbreathe_projects.jsdrv=${DOXYGEN_OUTPUT_DIR}/xml
+            -Dbreathe_projects.jsdrv=${DOXYGEN_OUTPUT_DIR}/xml
             ${SPHINX_SOURCE} ${SPHINX_BUILD}
         DEPENDS doxygen
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
-        MAIN_DEPENDENCY ${SPHINX_SOURCE}/conf.py
         COMMENT "Generating C and python documentation with Sphinx")

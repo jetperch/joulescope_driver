@@ -18,7 +18,7 @@ Python binding for the native Joulescope driver implementation.
 
 # See https://cython.readthedocs.io/en/latest/index.html
 
-# cython: boundscheck=True, wraparound=True, nonecheck=True, overflowcheck=True, cdivision=True
+# cython: boundscheck=True, wraparound=True, nonecheck=True, overflowcheck=True, cdivision=True, embedsignature=True
 
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t
 from libc.float cimport DBL_MAX
@@ -433,15 +433,25 @@ cdef class Driver:
 
     @property
     def log_level(self):
+        """Get the current log level."""
         return c_jsdrv.jsdrv_log_level_get()
 
     @log_level.setter
     def log_level(self, level):
+        """Set the current log level.
+
+        :param level: The log level.
+        """
         if isinstance(level, str):
             level = _log_level_str_to_int.get(level.lower(), LogLevel.OFF)
         c_jsdrv.jsdrv_log_level_set(level)
 
     def finalize(self, timeout=None):
+        """Finalize the driver.
+
+        :param timeout: The timeout in seconds.  None (default) uses
+            the default timeout.
+        """
         global _driver_count
         cdef c_jsdrv.jsdrv_context_s * context = self._context
         timeout_ms = _timeout_validate(timeout)
@@ -450,7 +460,15 @@ cdef class Driver:
             c_jsdrv.jsdrv_log_finalize()
         _driver_count -= 1
 
-    def publish(self, topic, value, timeout=None):
+    def publish(self, topic: str, value, timeout=None):
+        """Publish a value to a topic.
+
+        :param topic: The topic string.
+        :param value: The value, which must pass validation for the topic.
+        :param timeout: The timeout in seconds.  None (default) uses
+            the default timeout.
+        :raise: On error.
+        """
         cdef c_jsdrv.jsdrv_union_s v
         cdef char * byte_str
         cdef const uint8_t[:] topic_str = topic.encode('utf-8')
@@ -488,7 +506,15 @@ cdef class Driver:
             rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms)
         _handle_rc(rc, 'jsdrv_publish')
 
-    def query(self, topic, timeout=None):
+    def query(self, topic: str, timeout=None):
+        """Query the value for a topic.
+
+        :param topic: The topic name.
+        :param timeout: The timeout in seconds.  None (default) uses
+            the default timeout.
+        :return: The value for the topic.
+        :raise: On error.
+        """
         cdef c_jsdrv.jsdrv_union_s v
         cdef char byte_str[1024]
         cdef const uint8_t[:] topic_str = topic.encode('utf-8')
@@ -503,12 +529,18 @@ cdef class Driver:
         return _jsdrv_union_to_py(&v)
 
     def device_paths(self, timeout=None):
+        """List the currently connected devices.
+
+        :param timeout: The timeout in seconds.  None (default) uses
+            the default timeout.
+        :return: The list of device path strings.
+        """
         s = self.query('@/list', timeout)
         if not len(s):
             return []
         return sorted(s.split(','))
 
-    def subscribe(self, topic, flags, fn, timeout=None):
+    def subscribe(self, topic: str, flags, fn, timeout=None):
         """Subscribe to receive topic updates.
 
         :param self: The driver instance.
@@ -516,6 +548,7 @@ cdef class Driver:
         :param flags: The flags or list of flags for this subscription.
             The flags can be int32 jsdrv_subscribe_flag_e or string
             mnemonics, which are:
+
             - pub: Subscribe to normal values
             - pub_retain: Subscribe to normal values and immediately publish
               all matching retained values.  With timeout, this function does
@@ -528,6 +561,7 @@ cdef class Driver:
             - query_req: Subscribe to all query requests (not normally useful).
             - query_rsp: Subscribe to all query responses.
             - return_code: Subscribe to all return code responses.
+
         :param fn: The function to call on each publish.  Note that python
             dynamically constructs bound methods.  To unsubscribe a method,
             provide the exact  same bound method instance to unsubscribe.
@@ -554,6 +588,14 @@ cdef class Driver:
         _handle_rc(rc, 'jsdrv_subscribe')
 
     def unsubscribe(self, topic, fn, timeout=None):
+        """Unsubscribe from a topic.
+
+        :param topic: The topic name string.
+        :param fn: The function previously provided to :func:`subscribe`.
+        :param timeout: The timeout in seconds.  None (default) uses
+            the default timeout.
+        :raise: On error.
+        """
         cdef const uint8_t[:] topic_str = topic.encode('utf-8')
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef void * fn_ptr = <void *> fn
@@ -564,6 +606,13 @@ cdef class Driver:
         _handle_rc(rc, 'jsdrv_unsubscribe')
 
     def unsubscribe_all(self, fn, timeout=None):
+        """Unsubscribe a callback from all topics.
+
+        :param fn: The function previously provided to :func:`subscribe`.
+        :param timeout: The timeout in seconds.  None (default) uses
+            the default timeout.
+        :raise: On error.
+        """
         cdef int32_t timeout_ms = _timeout_validate(timeout)
 
         remove_list = [(t, f) for t, f in self._subscribers if f == fn]
@@ -607,6 +656,11 @@ cdef class Driver:
         _handle_rc(rc, 'jsdrv_open')
 
     def close(self, device_prefix, timeout=None):
+        """Close an attached device.
+
+        :param device_prefix: The prefix name for the device.
+        :param timeout: The timeout in seconds.  None uses the default timeout.
+        """
         cdef const uint8_t[:] topic_str
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef c_jsdrv.jsdrv_union_s v

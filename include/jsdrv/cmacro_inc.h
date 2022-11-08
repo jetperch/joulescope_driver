@@ -59,7 +59,7 @@
 /**
  * @def JSDRV_API
  * @brief All functions that are available from the library are marked with
- *      JSDRV_API.  This platform-specific definition allows DLLs to ber
+ *      JSDRV_API.  This platform-specific definition allows DLLs to be
  *      created properly on Windows.
  */
 #if defined(WIN32) && defined(JSDRV_EXPORT)

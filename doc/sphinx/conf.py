@@ -26,6 +26,7 @@ author = pyjoulescope_driver.__author__
 version = pyjoulescope_driver.__version__
 release = pyjoulescope_driver.__version__
 
+read_the_docs_build = os.environ.get('READTHEDOCS', None) == 'True'
 
 # -- General configuration ---------------------------------------------------
 
@@ -63,19 +64,12 @@ exclude_patterns = []
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'alabaster'
+html_theme = 'sphinx_rtd_theme'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-html_theme_options = {
-    "show_powered_by": False,
-    "github_user": "jetperch",
-    "github_repo": "pyjoulescope_driver",
-    "github_banner": True,
-    "show_related": False,
-    "note_bg": "#FFF59C",
-}
+html_theme_options = {}
 
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -89,6 +83,9 @@ html_favicon = "_static/favicon.ico"
 
 # Breathe Configuration
 breathe_default_project = "jsdrv"
+
+if read_the_docs_build:
+    breathe_projects = {"jsdrv": os.path.join(PROJ_PATH, 'cmake-build', 'doc', 'doxygen', 'xml')}
 
 
 def setup(app):
