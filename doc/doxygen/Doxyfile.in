@@ -67,7 +67,7 @@ PROJECT_LOGO           =
 # entered, it will be relative to the location where doxygen was started. If
 # left blank the current directory will be used.
 
-OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/doc
+OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/doxygen
 
 # If the CREATE_SUBDIRS tag is set to YES then doxygen will create up to 4096
 # sub-directories (in 2 levels) under the output directory of each output format
@@ -183,7 +183,7 @@ FULL_PATH_NAMES        = YES
 # will be relative from the directory where doxygen is started.
 # This tag requires that the tag FULL_PATH_NAMES is set to YES.
 
-STRIP_FROM_PATH        = @CMAKE_CURRENT_SOURCE_DIR@
+STRIP_FROM_PATH        = @CMAKE_CURRENT_SOURCE_DIR@/..
 
 # The STRIP_FROM_INC_PATH tag can be used to strip a user-defined part of the
 # path mentioned in the documentation of a class, which tells the reader which
@@ -906,11 +906,11 @@ WARN_LOGFILE           =
 # spaces. See also FILE_PATTERNS and EXTENSION_MAPPING
 # Note: If this tag is empty the current directory is searched.
 
-INPUT                  = @CMAKE_CURRENT_SOURCE_DIR@/doc \
-                         @CMAKE_CURRENT_SOURCE_DIR@/include \
-                         @CMAKE_CURRENT_SOURCE_DIR@/include/jsdrv \
-                         @CMAKE_CURRENT_SOURCE_DIR@/README.md \
-                         @CMAKE_CURRENT_SOURCE_DIR@/CHANGELOG.md
+INPUT                  = @CMAKE_CURRENT_SOURCE_DIR@ \
+                         @CMAKE_CURRENT_SOURCE_DIR@/../include \
+                         @CMAKE_CURRENT_SOURCE_DIR@/../include/jsdrv \
+                         @CMAKE_CURRENT_SOURCE_DIR@/../README.md \
+                         @CMAKE_CURRENT_SOURCE_DIR@/../CHANGELOG.md
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses
@@ -1020,7 +1020,7 @@ EXCLUDE_SYMBOLS        =
 # that contain example code fragments that are included (see the \include
 # command).
 
-EXAMPLE_PATH           = @CMAKE_CURRENT_SOURCE_DIR@
+EXAMPLE_PATH           = @CMAKE_CURRENT_SOURCE_DIR@/..
 
 # If the value of the EXAMPLE_PATH tag contains directories, you can use the
 # EXAMPLE_PATTERNS tag to specify one or more wildcard pattern (like *.cpp and
@@ -1096,7 +1096,7 @@ FILTER_SOURCE_PATTERNS =
 # (index.html). This can be useful if you have a project on for instance GitHub
 # and want to reuse the introduction page also for the doxygen output.
 
-USE_MDFILE_AS_MAINPAGE = @CMAKE_CURRENT_SOURCE_DIR@/README.md
+USE_MDFILE_AS_MAINPAGE = @CMAKE_CURRENT_SOURCE_DIR@/../README.md
 
 #---------------------------------------------------------------------------
 # Configuration options related to source browsing
@@ -1295,7 +1295,7 @@ HTML_HEADER            =
 # that doxygen normally uses.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-HTML_FOOTER            = @CMAKE_CURRENT_SOURCE_DIR@/doc/footer.html
+HTML_FOOTER            = @CMAKE_CURRENT_SOURCE_DIR@/doxygen/footer.html
 
 # The HTML_STYLESHEET tag can be used to specify a user-defined cascading style
 # sheet that is used by each HTML page. It can be used to fine-tune the look of

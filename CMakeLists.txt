@@ -29,6 +29,8 @@ SET(PROJECT_PREFIX JSDRV)
 SET(VERSION_STRING "${PROJECT_VERSION}")
 SET(VERSION_UNDERSCORE "${PROJECT_VERSION_MAJOR}_${PROJECT_VERSION_MINOR}_${PROJECT_VERSION_PATCH}")
 
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+
 if (NOT PARENT_PROJECT_DIR)
     set(JSDRV_TOPLEVEL 1)
     message(STATUS "JSDRV: IS toplevel")
@@ -81,18 +83,5 @@ if(JSDRV_UNIT_TEST AND JSDRV_TOPLEVEL AND NOT CMAKE_CROSSCOMPILING)
 endif()
 
 if(JSDRV_DOCS AND JSDRV_TOPLEVEL)
-    FIND_PACKAGE(Doxygen)
-    if (NOT DOXYGEN_FOUND)
-        message(FATAL_ERROR
-                "Doxygen is needed to build the documentation. Please install it")
-    endif()
-    #-- Configure the Template Doxyfile for our specific project
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in
-                   ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile  @ONLY IMMEDIATE)
-    #-- Add a custom target to run Doxygen when ever the project is built
-    add_custom_target(docs ALL
-                      COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-                      SOURCES ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-                      DEPENDS jsdrv)
-    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc/html/ DESTINATION doc)
+    add_subdirectory(doc)
 endif()
