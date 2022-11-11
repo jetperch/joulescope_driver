@@ -4,6 +4,21 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.1.0
+
+2022 Nov 11
+
+* Modified jsdrv_stream_signal_s (requires app recompile).
+  * Fixes pyjoulescope and pyjoulescope_ui integration. 
+  * Added sample_rate. 
+  * Added decimate_factor.
+* Added JS220 host-side downsampling.
+* Rename JS110 topic s/fs to h/fs, matches new JS220 topic. 
+* Fixed old JS220 data sent on stream enable after disable.
+* Added free for partial input stream messages on device close.
+* Fixed firmware image include and added pkgdata load check.
+
+
 ## 1.0.7
 
 2022 Nov 8

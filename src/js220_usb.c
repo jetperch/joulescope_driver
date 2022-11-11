@@ -18,6 +18,7 @@
 #include "jsdrv.h"
 #include "js220_api.h"
 #include "jsdrv_prv/js220_stats.h"
+#include "jsdrv_prv/downsample.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/frontend.h"
@@ -83,6 +84,8 @@
 #define FRAME_SIZE_BYTES           (512U)
 #define FRAME_SIZE_U32             (FRAME_SIZE_BYTES / 4)
 #define MEM_SIZE_MAX               (512U * 1024U)
+#define SAMPLING_FREQUENCY         (2000000U)
+#define STREAM_PAYLOAD_FULL        (JSDRV_STREAM_DATA_SIZE - JSDRV_STREAM_HEADER_SIZE - JS220_USB_FRAME_LENGTH)
 
 extern const struct jsdrvp_param_s js220_params[];
 
@@ -112,6 +115,34 @@ static const char * reset_meta = "{"
      "]"
 "}";
 
+static const char * sampling_frequency_meta = "{"
+    "\"dtype\": \"u32\","
+    "\"brief\": \"The sampling frequency.\","
+    "\"default\": 2000000,"
+    "\"options\": ["
+        "[2000000, \"2 MHz\"],"  // limited to 1000000 for i, v, p, all others fixed at 2000000
+        "[1000000, \"1 MHz\"],"
+        "[500000, \"500 kHz\"],"
+        "[200000, \"200 kHz\"],"
+        "[100000, \"100 kHz\"],"
+        "[50000, \"50 kHz\"],"
+        "[20000, \"20 kHz\"],"
+        "[10000, \"10 kHz\"],"
+        "[5000, \"5 kHz\"],"
+        "[2000, \"2 kHz\"],"
+        "[1000, \"1 kHz\"],"
+        "[500, \"500 Hz\"],"
+        "[200, \"200 Hz\"],"
+        "[100, \"100 Hz\"],"
+        "[50, \"50 Hz\"],"
+        "[20, \"20 Hz\"],"
+        "[10, \"10 Hz\"],"
+        "[5, \"5 Hz\"],"
+        "[2, \"2 Hz\"],"
+        "[1, \"1 Hz\"]"
+    "]"
+"}";
+
 enum state_e {
     ST_NOT_PRESENT = 0,  //
     ST_CLOSED = 1,
@@ -127,7 +158,7 @@ struct field_def_s {
     uint8_t index;
     uint8_t element_type;               // jsdrv_data_type_e
     uint8_t element_size_bits;
-    uint8_t downsample;
+    uint8_t downsample_min;
 };
 
 #define FIELD(ctrl_topic_, data_topic_, field_, index_, type_, size_, downsample_) {    \
@@ -136,12 +167,12 @@ struct field_def_s {
     .field_id=JSDRV_FIELD_##field_,                                                     \
     .index=(index_),                                                                    \
     .element_type=JSDRV_DATA_TYPE_##type_,                                              \
-    .element_size_bits=(size_),                                                     \
-    .downsample=(downsample_),                                                          \
+    .element_size_bits=(size_),                                                         \
+    .downsample_min=(downsample_),                                                      \
 }
 
 struct field_def_s PORT_MAP[] = {
-        //   (ctrl field,       data field, jsdrv_field_e,  index, type, el_size_bits, downsample)
+        //   (ctrl field,       data field, jsdrv_field_e,  index, type, el_size_bits, downsample_min)
         FIELD("s/adc/0/ctrl",   "s/adc/0/!data",   RAW,         0, INT,   16, 1),  // 0 + 16
         FIELD("s/adc/1/ctrl",   "s/adc/1/!data",   RAW,         1, INT,   16, 1),  // 1
         FIELD("s/adc/2/ctrl",   "s/adc/2/!data",   RAW,         2, INT,   16, 1),  // 2
@@ -163,6 +194,9 @@ struct field_def_s PORT_MAP[] = {
 #define PORT_ID_VOLTAGE (6 + 16)
 #define PORT_ID_POWER   (7 + 16)
 #define COMPUTE_POWER_MASK ((1 << PORT_ID_CURRENT) | (1 << PORT_ID_VOLTAGE) | (1 << PORT_ID_POWER))
+#define PORTS_LENGTH (16)  // but last one is reserved
+
+JSDRV_STATIC_ASSERT(PORTS_LENGTH == JSDRV_ARRAY_SIZE(PORT_MAP), ports_length);
 
 enum break_e {
     BREAK_NONE = 0,
@@ -171,7 +205,8 @@ enum break_e {
 };
 
 struct port_s {
-    uint32_t downsample;
+    struct jsdrv_downsample_s * downsample;
+    uint32_t decimate_factor;
     uint64_t sample_id_next;
     struct jsdrvp_msg_s * msg_in;  // one for each port
 };
@@ -184,7 +219,7 @@ struct dev_s {
     uint16_t in_frame_id;
     uint32_t stream_in_port_enable;
 
-    struct port_s ports[16]; // one for each port
+    struct port_s ports[PORTS_LENGTH]; // one for each port
     enum break_e ll_await_break_on;
     bool ll_await_break;
     char ll_await_break_topic[JSDRV_TOPIC_LENGTH_MAX];
@@ -578,6 +613,12 @@ static int32_t d_close(struct dev_s * d) {
             rv = m->value.value.i32;
             jsdrvp_msg_free(d->context, m);
         }
+        for (uint32_t idx = 0; idx <= JSDRV_ARRAY_SIZE(d->ports); ++idx) {
+            if (d->ports[idx].msg_in) {
+                jsdrvp_msg_free(d->context, d->ports[idx].msg_in);
+                d->ports[idx].msg_in = NULL;
+            }
+        }
         update_state(d, ST_CLOSED);
     }
     return rv;
@@ -587,8 +628,13 @@ static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
         if (PORT_MAP[i].ctrl_topic && (0 == strcmp(PORT_MAP[i].ctrl_topic, topic))) {
             uint32_t mask = (0x00010000 << i);
+            struct port_s * p = &d->ports[i];
+            if (p->msg_in) {
+                jsdrvp_msg_free(d->context, p->msg_in);
+                p->msg_in = NULL;
+            }
             if (enable) {
-                d->ports[i].sample_id_next = 0;
+                p->sample_id_next = 0;
                 d->stream_in_port_enable |= mask;
             } else {
                 d->stream_in_port_enable &= ~mask;
@@ -770,6 +816,43 @@ static int32_t handle_reset(struct dev_s * d, int32_t target) {
     return 0;
 }
 
+static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union_s * value) {
+    struct jsdrv_union_s v = *value;
+    uint32_t fs;
+    uint32_t fs_in;
+    if (jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+        JSDRV_LOGW("Could not process sampling frequency");
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    fs = v.value.u32;
+    JSDRV_LOGI("on_sampling_frequency(%lu)", fs);
+    for (uint32_t idx = 0; idx < (PORTS_LENGTH - 2); ++idx) {
+        struct port_s *p = &d->ports[idx];
+        if (p->downsample) {
+            jsdrv_downsample_free(p->downsample);
+            p->downsample = NULL;
+        }
+        if (p->msg_in) {
+            jsdrvp_msg_free(d->context, p->msg_in);
+            p->msg_in = NULL;
+        }
+        if (PORT_MAP[idx].element_type != JSDRV_DATA_TYPE_FLOAT) {
+            p->decimate_factor = 1;
+            continue;
+        }
+        fs_in = SAMPLING_FREQUENCY / PORT_MAP[idx].downsample_min;
+        if (fs > fs_in) {
+            fs = fs_in;
+        }
+        p->downsample = jsdrv_downsample_alloc(fs_in, fs);
+        if (NULL == p->downsample) {
+            JSDRV_LOGW("jsdrv_downsample_alloc failed");
+        }
+        p->decimate_factor = SAMPLING_FREQUENCY / fs;
+    }
+    return 0;
+}
+
 static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     bool rv = true;
     if (!msg) {
@@ -820,6 +903,9 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         } else if (0 == strcmp("h/timeout", topic)) {
             jsdrv_thread_sleep_ms(msg->value.value.u32);
             send_return_code_to_frontend(d, topic, 0);
+        } else if (0 == strcmp("h/fs", topic)) {
+            int32_t rc = on_sampling_frequency(d, &msg->value);
+            send_return_code_to_frontend(d, topic, rc);
         } else {
             JSDRV_LOGE("topic invalid: %s", msg->topic);
             send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
@@ -894,6 +980,12 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s", d->ll.prefix, field_def->data_topic);
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
         s->sample_id = port->sample_id_next;
+        s->sample_rate = SAMPLING_FREQUENCY;
+        if (field_def->element_type == JSDRV_DATA_TYPE_FLOAT) {
+            s->decimate_factor = port->decimate_factor;
+        } else {
+            s->decimate_factor = 1;
+        }
         s->index = field_def->index;
         s->field_id = field_def->field_id;
         s->element_type = field_def->element_type;
@@ -907,15 +999,35 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     // Add decompression here as needed - compression not yet implemented on sensor
 
     uint8_t * p = (uint8_t *) &m->value.value.bin[m->value.size];
-    m->value.size += size;
-    JSDRV_ASSERT(m->value.size <= sizeof(struct jsdrv_stream_signal_s));
-    memcpy(p, p_u32, size);
-    s->element_count += sample_count;
-    port->sample_id_next += sample_count * port->downsample;
+    JSDRV_ASSERT((m->value.size + size) <= sizeof(struct jsdrv_stream_signal_s));
+
+    if ((port->downsample != NULL) && (s->element_type == JSDRV_DATA_TYPE_FLOAT)) {
+        float * x = (float *) p_u32;
+        float * y = (float *) p;
+        for (uint32_t idx = 0; idx < sample_count; ++idx) {
+            if (jsdrv_downsample_add_f32(port->downsample, sample_id_u64 >> 1, x[idx], y)) {
+                ++y;
+                if (s->element_count == 0) {
+                    s->sample_id = sample_id_u64;
+                }
+                ++s->element_count;
+                m->value.size += sizeof(float);
+            }
+            sample_id_u64 += 2;
+        }
+        port->sample_id_next = sample_id_u64;
+    } else {
+        m->value.size += size;
+        memcpy(p, p_u32, size);
+        s->element_count += sample_count;
+        port->sample_id_next += sample_count;
+    }
 
     // determine if need to send
     uint64_t sample_id_delta = port->sample_id_next - s->sample_id;
-    if ((sample_id_delta > 100000LLU) || ((m->value.size + JS220_USB_FRAME_LENGTH) > (JSDRV_STREAM_HEADER_SIZE + JSDRV_STREAM_DATA_SIZE))) {
+    uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * port->decimate_factor);
+    if ((((s->element_count * s->element_size_bits) / 8) >= STREAM_PAYLOAD_FULL)
+            || (s->element_count >= element_count_max)) {
         JSDRV_LOGD1("stream_in_port: port_id=%d, sample_id_delta=%d, size=%d", (int) port_id, (int) sample_id_delta, (int) m->value.size);
         port->msg_in = NULL;
         jsdrvp_backend_send(d->context, m);
@@ -930,6 +1042,14 @@ static void compute_power(struct dev_s * d) {
     if (sz) {
         handle_stream_in_port(d, PORT_ID_POWER, &d->p_buf.msg_sample_id, (1 + sz) * 4);
     }
+}
+
+static void handle_uart_in(struct dev_s * d, uint32_t * p_u32, uint16_t size) {
+    (void) d;
+    (void) p_u32;
+    (void) size;
+    // Not yet generated by the JS220 instrument.
+    // When available, add UART message parsing support here.
 }
 
 static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t size) {
@@ -984,6 +1104,7 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
                      c->app_id, fw_ver_str, hw_ver_str, fpga_ver_str, prot_ver_str);
             send_to_frontend(d, "c/fw/version$", &jsdrv_union_cjson_r(fw_ver_meta));
             send_to_frontend(d, "c/hw/version$", &jsdrv_union_cjson_r(hw_ver_meta));
+            send_to_frontend(d, "h/fs$", &jsdrv_union_cjson_r(sampling_frequency_meta));
             send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
             send_to_frontend(d, "c/fw/version", &jsdrv_union_u32_r(c->fw_version));
             send_to_frontend(d, "c/hw/version", &jsdrv_union_u32_r(c->hw_version));
@@ -1227,7 +1348,9 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
     if ((d->stream_in_port_enable & (1U << hdr.h.port_id)) == 0U) {
         JSDRV_LOGW("stream in ignore on inactive port %d", hdr.h.port_id);
     } else if (hdr.h.port_id >= 16U) {
-        if (hdr.h.port_id == (16U + 14U)) {
+        if (hdr.h.port_id == (16U + 13U)) {
+            handle_uart_in(d, p_u32 + 1, hdr.h.length);
+        } else if (hdr.h.port_id == (16U + 14U)) {
             handle_statistics_in(d, p_u32 + 1, hdr.h.length);
         } else {
             handle_stream_in_port(d, hdr.h.port_id, p_u32 + 1, hdr.h.length);
@@ -1348,13 +1471,11 @@ int32_t jsdrvp_ul_js220_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     *device = NULL;
     struct dev_s * d = jsdrv_alloc_clr(sizeof(struct dev_s));
     JSDRV_LOGD3("jsdrvp_ul_js220_usb_factory %p", d);
+    on_sampling_frequency(d, &jsdrv_union_u32(SAMPLING_FREQUENCY));
     d->context = context;
     d->ll = *ll;
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
-    for (size_t i = 0; i < JSDRV_ARRAY_SIZE(d->ports); ++i) {
-        d->ports[i].downsample = PORT_MAP[i].downsample;
-    }
     if (jsdrv_thread_create(&d->thread, driver_thread, d)) {
         return JSDRV_ERROR_UNSPECIFIED;
     }

@@ -28,6 +28,7 @@ import os
 import struct
 import sys
 import requests
+import pkgutil
 
 
 _log = logging.getLogger(__name__)
@@ -169,7 +170,8 @@ def release_get(maturity, force_download=None):
     :param force_download: True to force download, even if local files
         are already available.  None (default) or False to use local
         files if present.
-    :return: The release image as bytes.
+    :return: The release image as bytes
+    :raise Exception: If could not load the release image.
     """
     src = None
     if maturity is None:
@@ -179,18 +181,29 @@ def release_get(maturity, force_download=None):
         raise ValueError(f'invalid maturity level {maturity} not in {MATURITY}')
     fname = f'img_{maturity}.img'
     if not force_download:
-        path = os.path.join(dist_path(), fname)
-        if os.path.isfile(path):
-            src = path
-    if not force_download:
+        try:
+            img = pkgutil.get_data('pyjoulescope_driver', fname)
+            _log.info('release_get found %s using pkgutil.get_data', fname)
+            return img
+        except FileNotFoundError:
+            pass
         path = os.path.join(release_path(), fname)
         if os.path.isfile(path):
+            _log.info('release_get found %s in release path', fname)
             src = path
     if src is None:
-        releases_get_from_network(force_download=True)
+        try:
+            releases_get_from_network(force_download=True)
+        except Exception:
+            _log.warning('releases_get_from_network failed')
+            raise
         src = os.path.join(release_path(), fname)
-    with open(src, 'rb') as f:
-        return f.read()
+    try:
+        with open(src, 'rb') as f:
+            return f.read()
+    except Exception:
+        _log.warning('release_get could not read %s', fname)
+        raise
 
 
 def release_to_segments(img: bytes):

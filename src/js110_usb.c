@@ -38,11 +38,12 @@
 #include <math.h>
 
 
-#define TIMEOUT_MS  (1000U)
-#define SENSOR_COMMAND_TIMEOUT_MS  (3000U)
-#define FRAME_SIZE_BYTES           (512U)
+#define TIMEOUT_MS                  (1000U)
+#define SENSOR_COMMAND_TIMEOUT_MS   (3000U)
+#define FRAME_SIZE_BYTES            (512U)
 #define ROE JSDRV_RETURN_ON_ERROR
-#define SAMPLING_FREQUENCY (2000000U)
+#define SAMPLING_FREQUENCY          (2000000U)
+#define STREAM_PAYLOAD_FULL         (JSDRV_STREAM_DATA_SIZE - JSDRV_STREAM_HEADER_SIZE - JS220_USB_FRAME_LENGTH)
 
 struct js110_dev_s;  // forward declaration, see below
 
@@ -282,7 +283,7 @@ static const struct param_s PARAMS[] = {
         on_i_range_post,
     },
     {
-        "s/fs",
+        "h/fs",
         "{"
             "\"dtype\": \"u32\","
             "\"brief\": \"The sampling frequency.\","
@@ -808,6 +809,10 @@ static void on_sampling_frequency(struct js110_dev_s * d, const struct jsdrv_uni
             jsdrv_downsample_free(p->downsample);
             p->downsample = NULL;
         }
+        if (p->msg) {
+            jsdrvp_msg_free(d->context, p->msg);
+            p->msg = NULL;
+        }
         p->downsample = jsdrv_downsample_alloc(SAMPLING_FREQUENCY, fs);
         if (NULL == p->downsample) {
             JSDRV_LOGW("jsdrv_downsample_alloc failed");
@@ -943,6 +948,12 @@ static int32_t d_close(struct js110_dev_s * d) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_CLOSE, &jsdrv_union_u32(0));
     msg_queue_push(d->ll.cmd_q, m);
     m = ll_await_topic(d, JSDRV_MSG_CLOSE, TIMEOUT_MS);
+    for (uint32_t idx = 0; idx <= JSDRV_ARRAY_SIZE(d->ports); ++idx) {
+        if (d->ports[idx].msg) {
+            jsdrvp_msg_free(d->context, d->ports[idx].msg);
+            d->ports[idx].msg = NULL;
+        }
+    }
     if (!m) {
         JSDRV_LOGW("ll_driver open timed out");
         return JSDRV_ERROR_TIMED_OUT;
@@ -1038,6 +1049,8 @@ static struct jsdrvp_msg_s * field_message_get(struct js110_dev_s * d, uint8_t f
         s->field_id = field_def->field_id;
         s->element_type = field_def->element_type;
         s->element_size_bits = field_def->element_size_bits;
+        s->sample_rate = SAMPLING_FREQUENCY;
+        s->decimate_factor = jsdrv_downsample_decimate_factor(p->downsample);
         s->element_count = 0;
         m->u32_a = (uint32_t) d->sample_id;
         m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
@@ -1057,7 +1070,7 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
         return;
     }
     uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * jsdrv_downsample_decimate_factor(p->downsample));
-    if ((((s->element_count * s->element_size_bits) / 8) >= JSDRV_STREAM_DATA_SIZE)
+    if ((((s->element_count * s->element_size_bits) / 8) >= STREAM_PAYLOAD_FULL)
             || (s->element_count >= element_count_max)) {
         jsdrvp_backend_send(d->context, p->msg);
         p->msg = NULL;

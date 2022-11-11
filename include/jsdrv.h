@@ -124,7 +124,7 @@
 /// The maximum size for normal PubSub messages
 #define JSDRV_PAYLOAD_LENGTH_MAX        (1024U)
 /// The header size of jsdrv_stream_signal_s before the data field.
-#define JSDRV_STREAM_HEADER_SIZE        (16U)
+#define JSDRV_STREAM_HEADER_SIZE        (24U)
 /// The size of data in jsdrv_stream_signal_s.
 #define JSDRV_STREAM_DATA_SIZE          (1024 * 64)    // 64 kB max
 
@@ -255,12 +255,14 @@ enum jsdrv_field_e {
  * @brief A contiguous, uncompressed sample block for a channel.
  */
 struct jsdrv_stream_signal_s {
-    uint64_t sample_id;                     ///< the starting sample id
+    uint64_t sample_id;                     ///< the starting sample id, which increments by decimate_factor.
     uint8_t field_id;                       ///< jsdrv_field_e
     uint8_t index;                          ///< The channel index within the field.
     uint8_t element_type;                   ///< jsdrv_element_type_e
     uint8_t element_size_bits;              ///< The element size in bits
     uint32_t element_count;                 ///< size of data in elements
+    uint32_t sample_rate;                   ///< The frequency for sample_id.
+    uint32_t decimate_factor;               ///< The decimation factor from sample_id to data samples.
     uint8_t data[JSDRV_STREAM_DATA_SIZE];   ///< The channel data.
 };
 

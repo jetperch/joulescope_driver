@@ -98,6 +98,8 @@ cdef extern from "jsdrv.h":
         uint8_t element_type
         uint8_t element_size_bits
         uint32_t element_count
+        uint32_t sample_rate
+        uint32_t decimate_factor
         uint8_t data[JSDRV_STREAM_PAYLOAD_LENGTH_MAX]
     struct jsdrv_statistics_s:
         uint8_t version
