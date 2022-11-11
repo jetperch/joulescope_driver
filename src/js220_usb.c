@@ -614,9 +614,10 @@ static int32_t d_close(struct dev_s * d) {
             jsdrvp_msg_free(d->context, m);
         }
         for (uint32_t idx = 0; idx <= JSDRV_ARRAY_SIZE(d->ports); ++idx) {
-            if (d->ports[idx].msg_in) {
-                jsdrvp_msg_free(d->context, d->ports[idx].msg_in);
-                d->ports[idx].msg_in = NULL;
+            struct port_s * p = &d->ports[idx];
+            if (NULL != p->msg_in) {
+                jsdrvp_msg_free(d->context, p->msg_in);
+                p->msg_in = NULL;
             }
         }
         update_state(d, ST_CLOSED);
@@ -629,9 +630,12 @@ static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
         if (PORT_MAP[i].ctrl_topic && (0 == strcmp(PORT_MAP[i].ctrl_topic, topic))) {
             uint32_t mask = (0x00010000 << i);
             struct port_s * p = &d->ports[i];
-            if (p->msg_in) {
+            if (NULL != p->msg_in) {
                 jsdrvp_msg_free(d->context, p->msg_in);
                 p->msg_in = NULL;
+            }
+            if (NULL != p->downsample) {
+                jsdrv_downsample_clear(p->downsample);
             }
             if (enable) {
                 p->sample_id_next = 0;
@@ -1461,6 +1465,18 @@ static void join(struct jsdrvp_ul_device_s * device) {
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, "");
     // and wait for thread to exit.
     jsdrv_thread_join(&d->thread, 1000);
+
+    for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
+        struct port_s *p = &d->ports[idx];
+        if (NULL != p->msg_in) {
+            jsdrvp_msg_free(d->context, p->msg_in);
+            p->msg_in = NULL;
+        }
+        if (NULL != p->downsample) {
+            jsdrv_downsample_free(p->downsample);
+            p->downsample = NULL;
+        }
+    }
     jsdrv_free(d);
 }
 

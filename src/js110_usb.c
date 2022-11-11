@@ -837,6 +837,9 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
                 if (NULL != m) {
                     jsdrvp_msg_free(d->context, m);
                 }
+                if (NULL != p->downsample) {
+                    jsdrv_downsample_clear(p->downsample);
+                }
             }
             d->sample_id = 0;
         }
@@ -949,9 +952,10 @@ static int32_t d_close(struct js110_dev_s * d) {
     msg_queue_push(d->ll.cmd_q, m);
     m = ll_await_topic(d, JSDRV_MSG_CLOSE, TIMEOUT_MS);
     for (uint32_t idx = 0; idx <= JSDRV_ARRAY_SIZE(d->ports); ++idx) {
-        if (d->ports[idx].msg) {
-            jsdrvp_msg_free(d->context, d->ports[idx].msg);
-            d->ports[idx].msg = NULL;
+        struct port_s * p = &d->ports[idx];
+        if (NULL != p->msg) {
+            jsdrvp_msg_free(d->context, p->msg);
+            p->msg = NULL;
         }
     }
     if (!m) {
@@ -1265,7 +1269,6 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
             ;
         }
     }
-
     JSDRV_LOGI("JS110 USB upper-level thread done %s", d->ll.prefix);
     THREAD_RETURN();
 }
@@ -1275,6 +1278,18 @@ static void join(struct jsdrvp_ul_device_s * device) {
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, "");
     // and wait for thread to exit.
     jsdrv_thread_join(&d->thread, 1000);
+
+    for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
+        struct port_s *p = &d->ports[idx];
+        if (NULL != p->msg) {
+            jsdrvp_msg_free(d->context, p->msg);
+            p->msg = NULL;
+        }
+        if (NULL != p->downsample) {
+            jsdrv_downsample_free(p->downsample);
+            p->downsample = NULL;
+        }
+    }
     jsdrv_free(d);
 }
 
