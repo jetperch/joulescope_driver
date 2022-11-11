@@ -613,7 +613,7 @@ static int32_t d_close(struct dev_s * d) {
             rv = m->value.value.i32;
             jsdrvp_msg_free(d->context, m);
         }
-        for (uint32_t idx = 0; idx <= JSDRV_ARRAY_SIZE(d->ports); ++idx) {
+        for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
             struct port_s * p = &d->ports[idx];
             if (NULL != p->msg_in) {
                 jsdrvp_msg_free(d->context, p->msg_in);

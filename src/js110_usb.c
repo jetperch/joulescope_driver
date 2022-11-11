@@ -951,7 +951,7 @@ static int32_t d_close(struct js110_dev_s * d) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_CLOSE, &jsdrv_union_u32(0));
     msg_queue_push(d->ll.cmd_q, m);
     m = ll_await_topic(d, JSDRV_MSG_CLOSE, TIMEOUT_MS);
-    for (uint32_t idx = 0; idx <= JSDRV_ARRAY_SIZE(d->ports); ++idx) {
+    for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
         struct port_s * p = &d->ports[idx];
         if (NULL != p->msg) {
             jsdrvp_msg_free(d->context, p->msg);
