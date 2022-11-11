@@ -71,6 +71,7 @@ def url_save(url, filename):
     :param url: The relative url from the main distribution URL.
     :param filename: The local filename.
     """
+    _log.info(f'url_save({url}, {filename})')
     r = requests.get(URL + url, timeout=URL_TIMEOUT)
     if r.status_code != 200:
         raise FileNotFoundError(url)
@@ -180,6 +181,7 @@ def release_get(maturity, force_download=None):
     if maturity not in MATURITY:
         raise ValueError(f'invalid maturity level {maturity} not in {MATURITY}')
     fname = f'img_{maturity}.img'
+    rpath = os.path.join(release_path(), fname)
     if not force_download:
         try:
             img = pkgutil.get_data('pyjoulescope_driver', fname)
@@ -187,17 +189,18 @@ def release_get(maturity, force_download=None):
             return img
         except FileNotFoundError:
             pass
-        path = os.path.join(release_path(), fname)
-        if os.path.isfile(path):
+        if os.path.isfile(rpath):
             _log.info('release_get found %s in release path', fname)
-            src = path
+            src = rpath
     if src is None:
         try:
             releases_get_from_network(force_download=True)
+            if os.path.isfile(rpath):
+                _log.info('release_get downloaded %s from network', fname)
         except Exception:
             _log.warning('releases_get_from_network failed')
             raise
-        src = os.path.join(release_path(), fname)
+        src = rpath
     try:
         with open(src, 'rb') as f:
             return f.read()
