@@ -35,9 +35,9 @@ import platform
 import sys
 
 if platform.system() == 'Windows':
-    numpy_req = 'numpy>=1.20'
+    numpy_req = 'numpy>=1.23'
 else:
-    numpy_req = 'numpy>=1.16'
+    numpy_req = 'numpy>=1.20'
 
 setuptools.dist.Distribution().fetch_build_eggs(['Cython>=0.29.3', numpy_req])
 
@@ -175,12 +175,6 @@ with open(os.path.join(MYPATH, 'README.md'), 'r', encoding='utf-8') as f:
     long_description = f.read()
 
 
-if sys.platform.startswith('win'):
-    PLATFORM_INSTALL_REQUIRES = ['pywin32']
-else:
-    PLATFORM_INSTALL_REQUIRES = []
-
-
 class BuildPyCommand(setuptools.command.build_py.build_py):
     """Custom build command."""
 
@@ -281,25 +275,12 @@ setuptools.setup(
     # See https://packaging.python.org/guides/distributing-packages-using-setuptools/#python-requires
     python_requires='~=3.8',
 
-    setup_requires=[
-        # https://developercommunity.visualstudio.com/content/problem/1207405/fmod-after-an-update-to-windows-2004-is-causing-a.html
-        numpy_req,
-        'Cython>=0.29.3',
-        "pywin32; platform_system=='Windows'",
-        'requests',
-        'wheel',
-    ],
-
     # See https://packaging.python.org/en/latest/requirements.html
     install_requires=[
-                         "pywin32; platform_system=='Windows'",
-                         numpy_req,
-                         'requests',
-                     ] + PLATFORM_INSTALL_REQUIRES,
-
-    extras_require={
-        'dev': ['check-manifest', 'coverage', 'Cython', 'requests', 'wheel', 'sphinx', 'myst-parser'],
-    },
+        numpy_req,
+        "pywin32; platform_system=='Windows'",
+        'requests',
+    ],
 
     entry_points={
         'console_scripts': [

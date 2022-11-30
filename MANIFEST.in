@@ -1,6 +1,6 @@
 include CHANGELOG.md
 include credits.html
-include LICENSE
+include LICENSE.txt
 include README.md
 recursive-include include *.*
 recursive-include include_private *.*

@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.1.1
+
+2022 Nov 30
+
+* Fixed build dependencies.
+* Specified python 3.10 for GitHub actions.
+
+
 ## 1.1.0
 
 2022 Nov 11
