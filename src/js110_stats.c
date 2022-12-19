@@ -72,7 +72,7 @@ static void update(struct js110_stats_field_s * f, float x) {
     if (x > f->max) {
         f->max = x;
     }
-    int64_t x_i64 = (int64_t) (x * (1 << 31));
+    int64_t x_i64 = (int64_t) (x * (1LL << 31));
     f->x1 += x_i64;
     js220_i128 r = js220_i128_square_i64(x_i64);
     f->x2 = js220_i128_add(f->x2, r);
@@ -104,13 +104,15 @@ struct jsdrv_statistics_s * js110_stats_compute(struct js110_stats_s * self, flo
 
     if (self->sample_count == s->block_sample_count) {
         js220_i128 a;
-        a.u64[0] = self->fields[0].x1;
-        a.i64[1] = (self->fields[0].x1 < 0) ? -1 : 0;
-        self->charge = js220_i128_add(self->charge, a);
+        js220_i128 i_128;
+        js220_i128 p_128;
+        i_128.u64[0] = self->fields[0].x1;
+        i_128.i64[1] = (self->fields[0].x1 < 0) ? -1LL : 0;
+        self->charge = js220_i128_add(self->charge, i_128);
 
-        a.u64[0] = self->fields[2].x1;
-        a.i64[1] = (self->fields[2].x1 < 0) ? -1 : 0;
-        self->energy = js220_i128_add(self->energy, a);
+        p_128.u64[0] = self->fields[2].x1;
+        p_128.i64[1] = (self->fields[2].x1 < 0) ? -1LL : 0;
+        self->energy = js220_i128_add(self->energy, p_128);
 
         finalize(&self->fields[0], self->valid_count);
         finalize(&self->fields[1], self->valid_count);
