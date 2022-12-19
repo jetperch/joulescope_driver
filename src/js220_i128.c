@@ -74,14 +74,13 @@ js220_i128 js220_i128_square_i64(int64_t a) {
 #endif
 
 js220_i128 js220_i128_neg(js220_i128 x) {
-    if (x.i64[1] < 0) {
-        x.u64[1] = ~x.u64[1];
-        x.u64[0] = ~x.u64[0];
-        uint64_t z = x.u64[0] + 1;
-        if ((x.u64[0] & U64_SIGN_BIT) && ~(z & U64_SIGN_BIT)) {
-            x.u64[1] += 1;
-        }
-        x.u64[0] = z;
+    x.u64[1] = ~x.u64[1];
+    x.u64[0] = ~x.u64[0];
+
+    uint64_t z1 = x.u64[0] & U64_SIGN_BIT;
+    x.u64[0] += 1LLU;
+    if ((x.u64[0] & U64_SIGN_BIT) != z1) {
+        x.u64[1] += 1LLU;
     }
     return x;
 }
@@ -110,6 +109,7 @@ js220_i128 js220_i128_lshift(js220_i128 x, int32_t shift) {
     } else if (0 == shift) {
         // no operation
     } else {  // right shift signed
+        shift = -shift;
         x.u64[0] = (x.u64[0] >> shift) | (x.u64[1] << (64 - shift));
         x.i64[1] = x.i64[1] >> shift;
     }
