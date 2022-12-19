@@ -60,7 +60,11 @@ def on_cmd(args):
             "charge,energy")
         for device in devices:
             d.open(device)
-            d.publish(device + '/s/i/range/mode', 'auto')
+            if 'js110' in device:
+                d.publish(device + '/s/i/range/select', 'auto')
+                d.publish(device + '/s/i/ctrl', 'on')
+            else:
+                d.publish(device + '/s/i/range/mode', 'auto')
             d.publish(device + '/s/stats/ctrl', 1)
             d.subscribe(device + '/s/stats/value', 'pub', _on_statistics_value)
         try:
