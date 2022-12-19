@@ -58,7 +58,7 @@ static void test_square_i64(void ** state) {
 
     assert_i128_equal(((js220_i128) {.u64 = {1LLU<<62, 0}}), js220_i128_square_i64(1LLU<<31));
     assert_i128_equal(((js220_i128) {.i64 = {0, 1}}), js220_i128_square_i64(1LLU<<32));
-    assert_i128_equal(((js220_i128) {.i64 = {0, 1}}), js220_i128_square_i64(-1LL<<32));
+    assert_i128_equal(((js220_i128) {.i64 = {0, 1}}), js220_i128_square_i64((int64_t) 0xffffffff00000000LLU));
 }
 
 static void test_neg(void ** state) {
@@ -147,7 +147,7 @@ static void test_compute_integral(void ** state) {
     assert_i128_equal(((js220_i128) {.i64 = {0, 0}}), js220_i128_compute_integral((js220_i128) {.u64 = {0, 0}}, 1));
     assert_i128_equal(((js220_i128) {.i64 = {3, 0}}), js220_i128_compute_integral((js220_i128) {.u64 = {10, 0}}, 3));
     assert_i128_equal(((js220_i128) {.i64 = {-3, -1}}), js220_i128_compute_integral((js220_i128) {.i64 = {-10, -1}}, 3));
-    assert_i128_equal(((js220_i128) {.i64 = {-1LL<<33, -1}}), js220_i128_compute_integral((js220_i128) {.i64 = {0, -1}}, 1LLU<<31));
+    assert_i128_equal(((js220_i128) {.i64 = {-(1LL<<33), -1}}), js220_i128_compute_integral((js220_i128) {.i64 = {0, -1}}, 1LLU<<31));
 }
 
 int main(void) {
