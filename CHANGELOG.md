@@ -6,9 +6,10 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.1.2
 
-2022 Dec 19 [in progress]
+2022 Dec 20
 
 * Fixed i128 math functions js220_i128_neg() and js220_i128_lshift().
+* Fixed incorrect constant for platforms with i32 constants.
 
 
 ## 1.1.1
