@@ -544,8 +544,8 @@ static int32_t wait_for_connect(struct dev_s * d) {
     return 0;
 }
 
-static int32_t d_open(struct dev_s * d, int32_t opt) {
-    JSDRV_LOGI("open");
+static int32_t d_open_ll(struct dev_s * d, int32_t opt) {
+    JSDRV_LOGI("open_ll");
     int32_t rc;
     d->ll_await_break_on = BREAK_NONE;
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(opt & 1));
@@ -562,10 +562,16 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
     rc = m->value.value.i32;
     jsdrvp_msg_free(d->context, m);
     if (rc) {
-        JSDRV_LOGE("open failed");
+        JSDRV_LOGE("open_ll failed");
+        update_state(d, ST_CLOSED);
         return rc;
     }
+    return 0;
+}
 
+static int32_t d_open(struct dev_s * d, int32_t opt) {
+    JSDRV_LOGI("open");
+    int32_t rc;
     rc = d_ctrl_req(d, JS220_CTRL_OP_DISCONNECT);
     if (rc) {
         JSDRV_LOGI("jsdrvb_bulk_in_stream_open disconnect: %d", rc);
@@ -858,6 +864,7 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
 }
 
 static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
+    int32_t rc = 0;
     bool rv = true;
     if (!msg) {
         return false;
@@ -879,13 +886,16 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             if ((msg->value.type == JSDRV_UNION_U32) || (msg->value.type == JSDRV_UNION_I32)) {
                 opt = msg->value.value.i32;
             }
-            int32_t rc = d_open(d, opt);
-            send_to_frontend(d, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(rc));
-            if (rc) {
-                d_close(d);
+            rc = d_open_ll(d, opt);
+            if (0 == rc) {
+                rc = d_open(d, opt);
+                if (rc) {
+                    d_close(d);
+                }
             }
+            send_to_frontend(d, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(rc));
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, topic)) {
-            int32_t rc = d_close(d);
+            rc = d_close(d);
             send_to_frontend(d, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(rc));
         } else if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
             // just finalize this upper-level driver (keep lower-level running)
@@ -902,13 +912,13 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         if (jsdrv_cstr_starts_with(topic, "h/mem/")) {
             handle_cmd_mem(d, msg);
         } else if (0 == strcmp("h/!reset", topic)) {   // value=target
-            int32_t rc = handle_reset(d, msg->value.value.i32);
+            rc = handle_reset(d, msg->value.value.i32);
             send_return_code_to_frontend(d, topic, rc);
         } else if (0 == strcmp("h/timeout", topic)) {
             jsdrv_thread_sleep_ms(msg->value.value.u32);
             send_return_code_to_frontend(d, topic, 0);
         } else if (0 == strcmp("h/fs", topic)) {
-            int32_t rc = on_sampling_frequency(d, &msg->value);
+            rc = on_sampling_frequency(d, &msg->value);
             send_return_code_to_frontend(d, topic, rc);
         } else {
             JSDRV_LOGE("topic invalid: %s", msg->topic);

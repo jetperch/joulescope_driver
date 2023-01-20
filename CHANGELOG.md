@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.1.3
+
+2023 Jan 20
+
+* Fixed open to correctly handle error on lower-level device open.
+
+
 ## 1.1.2
 
 2022 Dec 20

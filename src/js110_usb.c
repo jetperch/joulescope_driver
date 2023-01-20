@@ -884,8 +884,8 @@ static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * v
     on_update_ctrl(d, value, PARAM_STATS_CTRL);
 }
 
-static int32_t d_open(struct js110_dev_s * d) {
-    JSDRV_LOGI("open");
+static int32_t d_open_ll(struct js110_dev_s * d) {
+    JSDRV_LOGI("open_ll");
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(0));
     msg_queue_push(d->ll.cmd_q, m);
     m = ll_await_topic(d, JSDRV_MSG_OPEN, TIMEOUT_MS);
@@ -893,9 +893,18 @@ static int32_t d_open(struct js110_dev_s * d) {
         JSDRV_LOGW("ll_driver open timed out");
         return JSDRV_ERROR_TIMED_OUT;
     }
-    d->state = ST_OPENING;
+    int32_t rc = m->value.value.i32;
     jsdrvp_msg_free(d->context, m);
+    if (rc) {
+        JSDRV_LOGE("open_ll failed");
+        return rc;
+    }
+    d->state = ST_OPENING;
+    return 0;
+}
 
+static int32_t d_open(struct js110_dev_s * d) {
+    JSDRV_LOGI("open");
     usb_setup_t setup = { .s = {
             .bmRequestType = USB_REQUEST_TYPE(OUT, VENDOR, DEVICE),
             .bRequest = JS110_HOST_USB_REQUEST_LOOPBACK_BUFFER,
@@ -1005,11 +1014,14 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGE("handle_cmd mismatch %s, %s", msg->topic, d->ll.prefix);
     } else if (topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
         if (0 == strcmp(JSDRV_MSG_OPEN, topic)) {
-            status = d_open(d);
-            send_to_frontend(d, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(status));
-            if (status) {
-                d_close(d);
+            status = d_open_ll(d);
+            if (0 == status) {
+                status = d_open(d);
+                if (status) {
+                    d_close(d);
+                }
             }
+            send_to_frontend(d, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(status));
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, topic)) {
             status = d_close(d);
             send_to_frontend(d, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(status));

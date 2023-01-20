@@ -59,7 +59,7 @@ For macOS, install homebrew, then:
 
 For Ubuntu:
 
-    sudo apt install cmake build-essential ninja
+    sudo apt install cmake build-essential ninja-build
 
 ### Common
 
@@ -85,6 +85,10 @@ the dependencies:
 You should then be able to build the native bindings:
 
     python3 setup.py build_ext --inplace
+
+On Windows, you may be prompted to install the 
+[Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+
 
 And run the Python development tools:
 
