@@ -41,7 +41,7 @@
 
 
 #define CTRL_TIMEOUT_MS                 (1000U)
-#define DEVICES_MAX                     (256U)
+#define DEVICES_MAX                     (127U)  // Setting too large breaks "select".  See https://forum.joulescope.com/t/joulescope-breaking-pyserial-on-macos/552
 #define BULK_OUT_TIMEOUT_MS             (250U)
 #define BULK_IN_TIMEOUT_MS              (0U)    // no timeout
 #define BULK_IN_FRAME_LENGTH            (512U)

@@ -9,7 +9,8 @@ This file contains the list of changes made to the Joulescope driver.
 2023 Jan 24
 
 * Fixed open to correctly handle error on lower-level device open.
-* Improved statistics output to include time/sample_freq and time/range. 
+* Improved statistics output to include time/sample_freq and time/range.
+* Reduced DEVICES_MAX for libusb backend to prevent breaking select.
 
 
 ## 1.1.2
