@@ -105,14 +105,19 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                     v['data'] = None
             elif value[0].app == c_jsdrv.JSDRV_PAYLOAD_TYPE_STATISTICS:
                 stats = <c_jsdrv.jsdrv_statistics_s *> &(value[0].value.bin[0])
+                sample_freq = stats[0].sample_freq
                 samples_full_rate = stats[0].block_sample_count * stats[0].decimate_factor
+                sample_id_start = stats[0].block_sample_id
                 sample_id_end = stats[0].block_sample_id + samples_full_rate
-                t_delta = samples_full_rate / stats[0].sample_freq
+                t_start = sample_id_start / sample_freq
+                t_delta = samples_full_rate / sample_freq
                 charge = _i128_to_int(stats[0].charge_i128[1], stats[0].charge_i128[0])
                 energy = _i128_to_int(stats[0].energy_i128[1], stats[0].energy_i128[0])
                 v = {
                     'time': {
-                        'samples': {'value': [stats[0].block_sample_id, sample_id_end], 'units': 'samples'},
+                        'samples': {'value': [sample_id_start, sample_id_end], 'units': 'samples'},
+                        'sample_freq': {'value': sample_freq, 'units': 'Hz'},
+                        'range': {'value': [t_start, t_start + t_delta], 'units': 's'},
                         'delta': {'value': t_delta, 'units': 's'},
                         'decimate_factor': {'value': stats[0].decimate_factor, 'units': 'samples'},
                         'decimate_sample_count': {'value': stats[0].block_sample_count, 'units': 'samples'},

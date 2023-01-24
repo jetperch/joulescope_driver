@@ -423,6 +423,8 @@ static int32_t device_open(struct dev_s * d) {
     }
     if (!WinUsb_Initialize(d->file, &d->winusb)) {
         WINDOWS_LOGE("WinUsb_Initialize %s", d->device.prefix);
+        CloseHandle(d->file);
+        d->file = INVALID_HANDLE_VALUE;
         return 1;
     }
     DWORD ctrl_timeout = CONTROL_TIMEOUT_MS;
