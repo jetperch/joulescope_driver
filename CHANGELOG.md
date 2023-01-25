@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.1.4
+
+2023 Jan 25
+
+* Added JS110 GPI read request: s/gpi/+/!req -> s/gpi/+/!value.
+* Fixed incorrect topic match on {device}/@/!finalize
+
+
 ## 1.1.3
 
 2023 Jan 24

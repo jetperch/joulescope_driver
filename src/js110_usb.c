@@ -735,6 +735,25 @@ static int32_t extio_settings_send(struct js110_dev_s * d) {
     return 0;
 }
 
+static int32_t extio_gpi_recv(struct js110_dev_s * d, uint8_t * gpi) {
+    struct js110_host_packet_s pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    uint32_t sz = 0;
+    usb_setup_t setup = { .s = {
+            .bmRequestType = USB_REQUEST_TYPE(IN, VENDOR, DEVICE),
+            .bRequest = JS110_HOST_USB_REQUEST_EXTIO,
+            .wValue = 0,
+            .wIndex = 0,
+            .wLength = sizeof(pkt),
+    }};
+    if (jsdrvb_ctrl_in(d, setup, &pkt, &sz)) {
+        JSDRV_LOGW("extio_settings_recv failed");
+        return JSDRV_ERROR_IO;
+    }
+    *gpi = pkt.payload.extio.gpi_value;
+    return 0;
+}
+
 static void on_i_range_select(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
     d->param_values[PARAM_I_RANGE_SELECT] = *value;
     stream_settings_send(d);
@@ -991,8 +1010,24 @@ static void handle_cmd_publish(struct js110_dev_s * d, const struct jsdrvp_msg_s
             return;
         }
     }
-    JSDRV_LOGW("handle_cmd_publish %s not found", topic_str);
+    JSDRV_LOGW("handle_cmd_publish %s not found", msg->topic);
     send_to_frontend(d, topic.topic, &jsdrv_union_i32(JSDRV_ERROR_UNAVAILABLE));
+}
+
+static void handle_cmd_gpi_req(struct js110_dev_s * d, const struct jsdrvp_msg_s * msg) {
+    uint8_t gpi = 0;
+    int32_t rv;
+    struct jsdrv_topic_s topic;
+    const char * topic_str = prefix_match_and_strip(d->ll.prefix, msg->topic);
+    jsdrv_topic_set(&topic, topic_str);
+    jsdrv_topic_suffix_add(&topic, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
+    JSDRV_LOGI("handle_cmd_gpi_req %s", topic_str);
+
+    rv = extio_gpi_recv(d, &gpi);
+    if (0 == rv) {
+        send_to_frontend(d, "s/gpi/+/!value", &jsdrv_union_u8(gpi));
+    }
+    send_to_frontend(d, topic.topic, &jsdrv_union_i32(rv));
 }
 
 static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
@@ -1025,7 +1060,7 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, topic)) {
             status = d_close(d);
             send_to_frontend(d, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(status));
-        } else if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
+        } else if (0 == strcmp(JSDRV_MSG_FINALIZE, topic)) {
             // just finalize this upper-level driver (keep lower-level running)
             d->do_exit = true;
             rv = false;
@@ -1034,6 +1069,8 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
         }
     } else if (d->state != ST_OPEN) {
         send_to_frontend(d, topic, &jsdrv_union_i32(JSDRV_ERROR_CLOSED));
+    } else if (0 == strcmp("s/gpi/+/!req", topic)) {
+        handle_cmd_gpi_req(d, msg);
     } else {
         handle_cmd_publish(d, msg);
     }

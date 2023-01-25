@@ -897,7 +897,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, topic)) {
             rc = d_close(d);
             send_to_frontend(d, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(rc));
-        } else if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
+        } else if (0 == strcmp(JSDRV_MSG_FINALIZE, topic)) {
             // just finalize this upper-level driver (keep lower-level running)
             d->do_exit = true;
             rv = false;
