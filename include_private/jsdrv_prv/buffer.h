@@ -39,7 +39,6 @@ struct jsdrv_context_s;
 #define JSDRV_BUFFER_MSG_EVENT_SIGNAL_ADD             "e/!add"          // source signal topic
 #define JSDRV_BUFFER_MSG_EVENT_SIGNAL_REMOVE          "e/!remove"       // source signal topic or ZZZ
 #define JSDRV_BUFFER_MSG_EVENT_SIGNAL_LIST            "e/list"          // [ZZZ, ...]
-#define JSDRV_BUFFER_MSG_SIGNAL_META                  "s/ZZZ/meta"      // json-formatted data
 #define JSDRV_BUFFER_MSG_SIGNAL_DURATION              "s/ZZZ/dur"       // duration_i64
 #define JSDRV_BUFFER_MSG_SIGNAL_RANGE                 "s/ZZZ/range"     // start, stop
 #define JSDRV_BUFFER_MSG_SIGNAL_SAMPLE_REQ            "s/ZZZ/req/!spl"  // start, stop, rsp_topic, rsp_int64

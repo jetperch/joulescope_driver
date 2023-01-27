@@ -21,6 +21,7 @@
 #include "jsdrv/topic.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/list.h"
+#include "jsdrv_prv/log.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/thread.h"
 #include "jsdrv.h"
@@ -47,7 +48,7 @@ static const char * action_list_meta = "{"
     "\"brief\": \"The list of available buffers, 0 terminated.\","
 "}";
 
-
+/*
 static const char * event_signal_add_meta = "{"
     "\"dtype\": \"str\","
     "\"brief\": \"Add a signal.\","
@@ -57,6 +58,7 @@ static const char * event_signal_remove_meta = "{"
     "\"dtype\": \"str\","
     "\"brief\": \"Remove a signal.\","
 "}";
+*/
 
 struct buffer_s {
     char topic[JSDRV_TOPIC_LENGTH_MAX];
@@ -237,6 +239,7 @@ static uint8_t _buffer_add(void * user_data, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGE("buffer_id %u thread create failed", buffer_id);
         return 1;
     }
+
     _send_buffer_list(self);
     return 0;
 }
@@ -276,7 +279,6 @@ int32_t jsdrv_buffer_initialize(struct jsdrv_context_s * context) {
     struct buffer_mgr_s * self = &instance_;
     memset(self, 0, sizeof(*self));
     self->context = context;
-    uint8_t buffer_list[] = {0};
 
     send_to_frontend(self, JSDRV_BUFFER_MSG_ACTION_ADD "$", &jsdrv_union_cjson_r(action_add_meta));
     send_to_frontend(self, JSDRV_BUFFER_MSG_ACTION_REMOVE "$", &jsdrv_union_cjson_r(action_remove_meta));
