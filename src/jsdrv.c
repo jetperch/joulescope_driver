@@ -121,24 +121,32 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_data(struct jsdrv_context_s * context, co
 }
 
 struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const struct jsdrvp_msg_s * msg_src) {
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(context);
-    *m = *msg_src;
-    switch (m->value.type) {
-        case JSDRV_UNION_JSON:  // intentional fall-through
-        case JSDRV_UNION_STR:
-            m->value.value.str = m->payload.str;
-            break;
-        case JSDRV_UNION_BIN:
-            if (m->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
-                uint8_t * ptr = jsdrv_alloc(m->value.size);
-                memcpy(ptr, m->value.value.bin, m->value.size);
-                m->value.value.bin = ptr;
-            } else {
-                m->value.value.bin = m->payload.bin;
-            }
-            break;
-        default:
-            break;
+    struct jsdrvp_msg_s * m;
+    if (msg_src->inner_msg_type == JSDRV_MSG_TYPE_DATA) {
+        m = jsdrvp_msg_alloc_data(context, msg_src->topic);
+        m->value = msg_src->value;
+        m->value.value.bin = &m->payload.bin[0];
+        m->payload = msg_src->payload;
+    } else {
+        m = jsdrvp_msg_alloc(context);
+        *m = *msg_src;
+        switch (m->value.type) {
+            case JSDRV_UNION_JSON:  // intentional fall-through
+            case JSDRV_UNION_STR:
+                m->value.value.str = m->payload.str;
+                break;
+            case JSDRV_UNION_BIN:
+                if (m->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
+                    uint8_t *ptr = jsdrv_alloc(m->value.size);
+                    memcpy(ptr, m->value.value.bin, m->value.size);
+                    m->value.value.bin = ptr;
+                } else {
+                    m->value.value.bin = m->payload.bin;
+                }
+                break;
+            default:
+                break;
+        }
     }
     jsdrv_list_initialize(&m->item);
     return m;

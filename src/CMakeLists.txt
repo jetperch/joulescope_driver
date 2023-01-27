@@ -61,6 +61,7 @@ set(SUPPORT_SOURCES
 )
 
 set(SOURCES
+        buffer.c
         #emu.c
         #emulated.c
         js110_usb.c

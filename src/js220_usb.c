@@ -591,10 +591,22 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
 
     if (JSDRV_DEVICE_OPEN_MODE_RAW != opt) {  // normal operation
         JSDRV_RETURN_ON_ERROR(wait_for_connect(d));
+        JSDRV_LOGD1("query metadata");
         JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "$", &jsdrv_union_null()));
         JSDRV_RETURN_ON_ERROR(ping_wait(d, 1));
-        JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "?", &jsdrv_union_null()));
-        JSDRV_RETURN_ON_ERROR(ping_wait(d, 2));
+        if (JSDRV_DEVICE_OPEN_MODE_RESUME == opt) {
+            JSDRV_LOGD1("query values");
+            JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "?", &jsdrv_union_null()));
+            JSDRV_RETURN_ON_ERROR(ping_wait(d, 2));
+        } else if (JSDRV_DEVICE_OPEN_MODE_DEFAULTS == opt) {
+            // todo publish metadata defaults to device
+            // subscribe retained for self
+            // publish ping to PubSub
+            // publish retained to device
+            // on pong, unsubscribe
+        } else {
+            JSDRV_LOGW("invalid open mode: %d", opt);
+        }
     } else {
         send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
     }

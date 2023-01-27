@@ -23,6 +23,12 @@ function (ADD_CMOCKA_TEST _testName)
     add_test(${_testName} ${CMAKE_CURRENT_BINARY_DIR}/${_testName})
 endfunction (ADD_CMOCKA_TEST)
 
+
+add_executable(buffer_test buffer_test.c ../src/buffer.c)
+add_dependencies(buffer_test jsdrv_support_objlib tinyprintf cmocka)
+target_link_libraries(buffer_test jsdrv_support_objlib tinyprintf cmocka)
+add_test(buffer_test ${CMAKE_CURRENT_BINARY_DIR}/buffer_test)
+
 ADD_CMOCKA_TEST(cstr_test)
 
 add_executable(dbc_test dbc_test.c)
