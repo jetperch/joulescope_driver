@@ -18,6 +18,9 @@
 #include <stddef.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 #include "jsdrv.h"
 #include "jsdrv_prv/buffer.h"
 #include "jsdrv_prv/cdef.h"
@@ -249,6 +252,10 @@ static void test_add_remove(void **state) {
 }
 
 int main(void) {
+    struct jsdrv_summary_entry_s data0;
+    struct jsdrv_summary_entry_s data2[2];
+    struct jsdrv_summary_entry_s data3[3];
+    printf("%llu %llu %llu\n", sizeof(data0), sizeof(data2), sizeof(data3));
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_initialize_finalize),
             cmocka_unit_test(test_add_remove),

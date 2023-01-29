@@ -220,6 +220,7 @@ enum jsdrv_payload_type_e {
     JSDRV_PAYLOAD_TYPE_UNION        = 0,    // standard jsdrv_union including string, JSON, and raw binary.
     JSDRV_PAYLOAD_TYPE_STREAM       = 1,    // bin with jsdrv_stream_signal_s
     JSDRV_PAYLOAD_TYPE_STATISTICS   = 2,    // bin with jsdrv_statistics_s
+    JSDRV_PAYLOAD_TYPE_SUMMARY      = 3,    // bin with jsdrv_summary_s
     //JSDRV_PAYLOAD_TYPE_STATUS,      // todo
 };
 
@@ -295,6 +296,41 @@ struct jsdrv_statistics_s {
     double energy_f64;           ///< The energy (integral of power) from accum_sample_id as a 64-bit float.
     uint64_t charge_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
     uint64_t energy_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
+};
+
+/**
+ * @brief A single summary statistics entry.
+ */
+struct jsdrv_summary_entry_s {
+    uint32_t sample_count;      ///< The total number of samples in this window.
+    float avg;                  ///< The average (mean) over the window.
+    float std;                  ///< The standard deviation over the window.
+    float min;                  ///< The maximum value over the window.
+    float max;                  ///< The minimum value over the window.
+};
+
+/**
+ * @brief The sample summary produced by the memory buffer.
+ *
+ * The time increment between samples, for length > 1, is:
+ *       time_incr = (time_end - time_start) / (length - 1)
+ *
+ * Using python, the x-axis time is then:
+ *      x = np.linspace(time_start, time_end, length, dtype=np.int64)
+ *
+ * Note the use of the int64 ddtype as float64 is not able to represent
+ * time with sufficient precision.
+ * For many applications that need floating-point time, use an offset
+ * relative to time_start yields higher precision time.  For example:
+ *      x = np.linspace(0, time_end - time_start, length, dtype=np.float64)
+ */
+struct jsdrv_summary_s {
+    int64_t time_start;                     ///< The time for data[0] (inclusive), in jsdrv/time.h format.
+    int64_t time_end;                       ///< The time for data[-1] (inclusive), in jsdrv/time.h format.
+    uint64_t length;                        ///< The number of data entries.
+    uint8_t field_id;                       ///< jsdrv_field_e
+    uint8_t index;                          ///< The channel index within the field.
+    struct jsdrv_summary_entry_s data[];    ///< The summary data entry for each time.
 };
 
 /// The subscriber flags for jsdrv_subscribe().

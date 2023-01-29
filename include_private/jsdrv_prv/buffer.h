@@ -43,7 +43,9 @@ struct jsdrv_context_s;
 #define JSDRV_BUFFER_MSG_SIGNAL_RANGE                 "s/ZZZ/range"     // start, stop
 #define JSDRV_BUFFER_MSG_SIGNAL_SAMPLE_REQ            "s/ZZZ/req/!spl"  // start, stop, rsp_topic, rsp_int64
 #define JSDRV_BUFFER_MSG_SIGNAL_SUMMARY_REQ           "s/ZZZ/req/!sum"  // start, stop, incr, rsp_topic, rsp_int64
-#define JSDRV_BUFFER_MSG_SIZE                         "g/size"
+#define JSDRV_BUFFER_MSG_SIZE                         "g/size"          // u64 size in bytes
+//#define JSDRV_BUFFER_MSG_HOLD                         "g/hold"          // u8: 0=run (default), 1=hold, clear on 1->0
+//#define JSDRV_BUFFER_MSG_MODE                         "g/mode"          // 0:continuous, 1:fill & hold
 
 
 JSDRV_CPP_GUARD_START
