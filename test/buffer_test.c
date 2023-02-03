@@ -27,7 +27,7 @@
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/list.h"
-#include "jsdrv_prv/thread.h"
+#include "jsdrv_prv/msg_queue.h"
 #include "tinyprintf.h"
 //#include "test.inc"
 
@@ -44,7 +44,7 @@ struct sub_s {
 };
 
 struct jsdrv_context_s {
-    struct jsdrv_list_s msg_sent;
+    struct msg_queue_s * msg_sent;
     struct jsdrv_list_s subscribers;
 };
 
@@ -160,22 +160,21 @@ static void unsubscribe(struct jsdrv_context_s * context, struct jsdrvp_msg_s * 
     }
 }
 
-static void msg_sent_free(struct jsdrv_context_s * context) {
-    struct jsdrv_list_s * item;
-    while (jsdrv_list_length(&context->msg_sent)) {
-        item = jsdrv_list_remove_head(&context->msg_sent);
-        struct jsdrvp_msg_s * m = JSDRV_CONTAINER_OF(item, struct jsdrvp_msg_s, item);
-        jsdrvp_msg_free(context, m);
-    }
+void jsdrvp_backend_send(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
+    msg_queue_push(context->msg_sent, msg);
 }
 
-void jsdrvp_backend_send(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
+static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t timeout_ms) {
+    struct jsdrvp_msg_s * msg = NULL;
+    assert_int_equal(0, msg_queue_pop(context->msg_sent, &msg, timeout_ms));
     if (0 == strcmp(JSDRV_PUBSUB_SUBSCRIBE, msg->topic)) {
+        char * topic = msg->payload.sub.topic;
+        check_expected_ptr(topic);
         subscribe(context, msg);
-        return;
     } else if (0 == strcmp(JSDRV_PUBSUB_UNSUBSCRIBE, msg->topic)) {
+        char * topic = msg->payload.sub.topic;
+        check_expected_ptr(topic);
         unsubscribe(context, msg);
-        return;
     } else if (jsdrv_cstr_ends_with(msg->topic, "$")) {
         const char * meta_topic = msg->topic;
         check_expected_ptr(meta_topic);
@@ -208,45 +207,64 @@ void jsdrvp_backend_send(struct jsdrv_context_s * context, struct jsdrvp_msg_s *
         }
     } else {
         // ???
-        jsdrv_list_add_tail(&context->msg_sent, &msg->item);
-        return;
     }
+    jsdrvp_msg_free(context, msg);
 }
 
-#define expect_meta(topic__) expect_string(jsdrvp_backend_send, meta_topic, topic__)
+#define expect_meta(topic__) expect_string(msg_send_process_next, meta_topic, topic__)
+
+#define expect_subscribe(topic_) \
+    expect_string(msg_send_process_next, topic, topic_);
+
+#define expect_unsubscribe(topic_) \
+    expect_string(msg_send_process_next, topic, topic_);
 
 #define expect_buf_list(ex_list, ex_len) \
-    expect_value(jsdrvp_backend_send, buf_list_length, ex_len); \
-    expect_memory(jsdrvp_backend_send, buf_list_buffers, ex_list, ex_len)
+    expect_value(msg_send_process_next, buf_list_length, ex_len); \
+    expect_memory(msg_send_process_next, buf_list_buffers, ex_list, ex_len)
 
 #define expect_sig_list(ex_list, ex_len) \
-    expect_value(jsdrvp_backend_send, sig_list_length, ex_len); \
-    expect_memory(jsdrvp_backend_send, sig_list_buffers, ex_list, ex_len)
+    expect_value(msg_send_process_next, sig_list_length, ex_len); \
+    expect_memory(msg_send_process_next, sig_list_buffers, ex_list, ex_len)
 
 struct jsdrv_context_s * initialize() {
     uint8_t ex_list_buffer[] = {0};
     struct jsdrv_context_s * context = malloc(sizeof(struct jsdrv_context_s));
     memset(context, 0, sizeof(*context));
+    context->msg_sent = msg_queue_init();
+    assert_non_null(context->msg_sent);
     jsdrv_list_initialize(&context->subscribers);
-    jsdrv_list_initialize(&context->msg_sent);
-    expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_ADD "$");
-    expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE "$");
-    expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_LIST "$");
-    expect_buf_list(ex_list_buffer, sizeof(ex_list_buffer));
     assert_int_equal(0, jsdrv_buffer_initialize(context));
-    assert_int_equal(0, jsdrv_list_length(&context->msg_sent));
+
+    expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_ADD "$");
+    msg_send_process_next(context, 100);
+    expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE "$");
+    msg_send_process_next(context, 100);
+    expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_LIST "$");
+    msg_send_process_next(context, 100);
+    expect_subscribe(JSDRV_BUFFER_MGR_MSG_ACTION_ADD);
+    msg_send_process_next(context, 100);
+    expect_subscribe(JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE);
+    msg_send_process_next(context, 100);
+    expect_buf_list(ex_list_buffer, sizeof(ex_list_buffer));
+    msg_send_process_next(context, 100);
+
     return context;
 }
 
 void finalize(struct jsdrv_context_s * context) {
     struct jsdrv_list_s * item;
     jsdrv_buffer_finalize();
+    expect_unsubscribe(JSDRV_BUFFER_MGR_MSG_ACTION_ADD);
+    msg_send_process_next(context, 100);
+    expect_unsubscribe(JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE);
+    msg_send_process_next(context, 100);
+
     while (jsdrv_list_length(&context->subscribers)) {
         item = jsdrv_list_remove_head(&context->subscribers);
         struct sub_s * sub = JSDRV_CONTAINER_OF(item, struct sub_s, item);
         free(sub);
     }
-    msg_sent_free(context);
     free(context);
 }
 
@@ -287,11 +305,20 @@ static void test_add_remove(void **state) {
     uint8_t ex_list_buffer0[] = {0};
     uint8_t ex_list_buffer1[] = {3, 0};
     struct jsdrv_context_s * context = initialize();
-    expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, &jsdrv_union_u8(3)));
-    expect_buf_list(ex_list_buffer0, sizeof(ex_list_buffer0));
+
+    expect_subscribe("m/003");
+    msg_send_process_next(context, 100);
+    expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
+    msg_send_process_next(context, 100);
+
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE, &jsdrv_union_u8(3)));
-    //finalize(context);
+    expect_unsubscribe("m/003");
+    msg_send_process_next(context, 100);
+    expect_buf_list(ex_list_buffer0, sizeof(ex_list_buffer0));
+    msg_send_process_next(context, 100);
+
+    finalize(context);
 }
 
 static void test_one_signal(void **state) {
@@ -303,32 +330,42 @@ static void test_one_signal(void **state) {
     uint8_t ex_list_buffer1[] = {buffer_id, 0};
     uint8_t ex_list_sig0[] = {0};
     uint8_t ex_list_sig1[] = {signal_id, 0};
+
     struct jsdrv_context_s * context = initialize();
-    expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, &jsdrv_union_u8(buffer_id)));
+    expect_subscribe("m/003");
+    msg_send_process_next(context, 100);
+    expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
+    msg_send_process_next(context, 100);
 
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD);
-    expect_sig_list(ex_list_sig1, sizeof(ex_list_sig1));
     publish(context, msg);
-    // todo waitfor list_sig
+    expect_sig_list(ex_list_sig1, sizeof(ex_list_sig1));
+    msg_send_process_next(context, 100);
 
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_str("u/js220/0123456/s/i/!data"));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/s/%03u/s/topic", buffer_id, signal_id);
-    // expect subscribe
     publish(context, msg);
+    expect_subscribe("u/js220/0123456/s/i/!data");
+    msg_send_process_next(context, 100);
 
     // tear down
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_ACTION_SIGNAL_REMOVE);
-    // expect unsubscribe
+    publish(context, msg);
+    expect_unsubscribe("u/js220/0123456/s/i/!data");
+    msg_send_process_next(context, 100);
     expect_sig_list(ex_list_sig0, sizeof(ex_list_sig0));
-    publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MSG_ACTION_SIGNAL_REMOVE, &jsdrv_union_u8(5)));
-    // todo waitfor list_sig
+    msg_send_process_next(context, 100);
 
+    publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE, &jsdrv_union_u8(buffer_id)));
+    expect_unsubscribe("m/003");
+    msg_send_process_next(context, 100);
     expect_buf_list(ex_list_buffer0, sizeof(ex_list_buffer0));
-    publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE, &jsdrv_union_u8(3)));
-    //finalize(context);
+    msg_send_process_next(context, 100);
+
+    finalize(context);
 }
 
 

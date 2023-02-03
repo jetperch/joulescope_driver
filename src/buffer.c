@@ -354,6 +354,7 @@ static void _buffer_remove_inner(struct buffer_mgr_s * self, uint8_t buffer_id) 
     jsdrv_thread_join(&b->thread, 1000);
     msg_queue_finalize(b->cmd_q);
     b->cmd_q = NULL;
+    unsubscribe(b->context, b->topic, JSDRV_SFLAG_PUB, _buffer_recv, b);
     _send_buffer_list(self);
 }
 
@@ -390,7 +391,14 @@ int32_t jsdrv_buffer_initialize(struct jsdrv_context_s * context) {
 void jsdrv_buffer_finalize() {
     struct buffer_mgr_s * self = &instance_;
     if (self->context) {
-        // todo send thread finalize
+        // finalize all buffers
+        for (uint32_t i = 0; i < JSDRV_BUFFER_COUNT_MAX; ++i) {
+            if (NULL != self->buffers[i].cmd_q) {
+                _buffer_remove_inner(self, i + 1);
+            }
+        }
+        unsubscribe(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, JSDRV_SFLAG_PUB, _buffer_add, self);
+        unsubscribe(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE, JSDRV_SFLAG_PUB, _buffer_remove, self);
         self->context = 0;
     }
 }
