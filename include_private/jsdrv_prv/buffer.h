@@ -29,24 +29,32 @@
 // Forward declarations from "jsdrv.h"
 struct jsdrv_context_s;
 
+#ifndef JSDRV_BUFFER_COUNT_MAX
+#define JSDRV_BUFFER_COUNT_MAX                       16
+#endif
 
-// topics for the buffer manager
-#define JSDRV_BUFFER_MSG_ACTION_ADD                  "m/+/@/!add"
-#define JSDRV_BUFFER_MSG_ACTION_REMOVE               "m/+/@/!remove"
-#define JSDRV_BUFFER_MSG_ACTION_LIST                 "m/+/@/list"
+#ifndef JSDRV_BUFSIG_COUNT_MAX
+#define JSDRV_BUFSIG_COUNT_MAX                       256
+#endif
 
-// topics per buffer: prefix is "m/ZZZ/" where ZZZ is the buffer id
-#define JSDRV_BUFFER_MSG_EVENT_SIGNAL_ADD             "e/!add"          // source signal topic
-#define JSDRV_BUFFER_MSG_EVENT_SIGNAL_REMOVE          "e/!remove"       // source signal topic or ZZZ
-#define JSDRV_BUFFER_MSG_EVENT_SIGNAL_LIST            "e/list"          // [ZZZ, ...]
-#define JSDRV_BUFFER_MSG_SIGNAL_DURATION              "s/ZZZ/dur"       // duration_i64
-#define JSDRV_BUFFER_MSG_SIGNAL_RANGE                 "s/ZZZ/range"     // start, stop
-#define JSDRV_BUFFER_MSG_SIGNAL_SAMPLE_REQ            "s/ZZZ/req/!spl"  // start, stop, rsp_topic, rsp_int64
-#define JSDRV_BUFFER_MSG_SIGNAL_SUMMARY_REQ           "s/ZZZ/req/!sum"  // start, stop, incr, rsp_topic, rsp_int64
+// topics for the buffer manager: add/remove buffers
+#define JSDRV_BUFFER_MGR_MSG_ACTION_ADD               "m/+/@/!add"      // u8: 1 <= id <= JSDRV_BUFFER_COUNT_MAX
+#define JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE            "m/+/@/!remove"   // u8 id
+#define JSDRV_BUFFER_MGR_MSG_ACTION_LIST              "m/+/@/list"      // bin ro: u8[N] ids
+
+// topics per buffer: prefix is "m/BBB/" where BBB is the buffer_id
+#define JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD            "a/!add"          // u8 id
+#define JSDRV_BUFFER_MSG_ACTION_SIGNAL_REMOVE         "a/!remove"       // u8 id
+#define JSDRV_BUFFER_MSG_LIST                         "g/list"          // bin ro: u8[N] ids
 #define JSDRV_BUFFER_MSG_SIZE                         "g/size"          // u64 size in bytes
-//#define JSDRV_BUFFER_MSG_HOLD                         "g/hold"          // u8: 0=run (default), 1=hold, clear on 1->0
-//#define JSDRV_BUFFER_MSG_MODE                         "g/mode"          // 0:continuous, 1:fill & hold
-
+#define JSDRV_BUFFER_MSG_HOLD                         "g/hold"          // u8: 0=run (default), 1=hold, clear on 1->0
+#define JSDRV_BUFFER_MSG_MODE                         "g/mode"          // 0:continuous, 1:fill & hold
+#define JSDRV_BUFFER_MSG_DURATION                     "g/dur"           // i64[2] ro: start, stop
+#define JSDRV_BUFFER_MSG_SIGNAL_TOPIC                 "s/ZZZ/s/topic"   // str: source data topic
+#define JSDRV_BUFFER_MSG_SIGNAL_DURATION              "s/ZZZ/s/dur"     // i64 ro: actual duration
+#define JSDRV_BUFFER_MSG_SIGNAL_RANGE                 "s/ZZZ/s/range"   // i64[2] ro: start, stop
+#define JSDRV_BUFFER_MSG_SIGNAL_SAMPLE_REQ            "s/ZZZ/r/!spl"    // start, stop, rsp_topic, rsp_int64
+#define JSDRV_BUFFER_MSG_SIGNAL_SUMMARY_REQ           "s/ZZZ/r/!sum"    // start, stop, incr, rsp_topic, rsp_int64
 
 JSDRV_CPP_GUARD_START
 
