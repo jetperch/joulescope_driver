@@ -20,6 +20,7 @@
 #include "jsdrv_prv/dbc.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
+#include "jsdrv/time.h"
 #include "jsdrv/topic.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/list.h"
@@ -28,6 +29,7 @@
 #include "jsdrv_prv/thread.h"
 #include "jsdrv.h"
 #include "tinyprintf.h"
+#include <math.h>
 
 
 JSDRV_STATIC_ASSERT(20 == sizeof(struct jsdrv_summary_entry_s), entry_size_one);
@@ -62,8 +64,17 @@ static const char * event_signal_remove_meta = "{"
 "}";
 */
 
+enum buffer_state_s {
+    ST_IDLE = 0,
+    ST_AWAIT,
+    ST_ACTIVE,
+    ST_HOLD,
+};
+
+
 struct buffer_s {
     uint8_t idx;
+    enum buffer_state_s state;
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     struct jsdrv_context_s * context;
     uint64_t size;
@@ -80,7 +91,7 @@ struct buffer_mgr_s {
 };
 
 
-struct buffer_mgr_s instance_;
+static struct buffer_mgr_s instance_;
 
 static uint8_t _buffer_recv_data(void * user_data, struct jsdrvp_msg_s * msg);
 
@@ -146,7 +157,101 @@ static void buf_publish_signal_list(struct buffer_s * self) {
     jsdrvp_backend_send(self->context, m);
 }
 
-bool handle_cmd_q(struct buffer_s * self) {
+static bool await_check(struct buffer_s * self) {
+    if (self->state != ST_AWAIT) {
+        return false;
+    }
+    for (uint32_t idx = 1; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
+        struct bufsig_s *b = &self->signals[idx];
+        if (!b->active) {
+            continue;
+        } else if (0 == b->hdr.sample_rate) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void bufsig_publish_info(struct bufsig_s * self) {
+    struct jsdrv_context_s * context = self->parent->context;
+
+    struct jsdrv_buffer_info_s info;
+    memset(&info, 0, sizeof(info));
+    info.field_id = self->hdr.field_id;
+    info.index = self->hdr.index;
+    info.element_type = self->hdr.element_type;
+    info.element_size_bits = self->hdr.element_size_bits;
+    info.size_in_utc = self->size_in_utc;
+    info.size_in_samples = self->N;
+
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(context, "",
+            &jsdrv_union_cbin_r((uint8_t *) &info, sizeof(info)));
+    tfp_snprintf(m->topic, sizeof(m->topic), "m/%03d/s/%03d/info", self->parent->idx, self->idx);
+    jsdrvp_backend_send(context, m);
+}
+
+static void buffer_alloc(struct buffer_s * self) {
+    double coef_f32 = sizeof(float);
+    double coef_u = 0.0;
+    size_t summary_entry_sz = sizeof(struct jsdrv_summary_entry_s);
+    for (uint32_t lvl = 1; lvl < 8; ++lvl) {
+        double pow_lvl = pow(32.0, lvl - 1);
+        coef_f32 += summary_entry_sz / (128 * pow_lvl);
+        coef_u += summary_entry_sz / (1024 * pow_lvl);
+    }
+
+    // determine size in bytes per second
+    double sz_per_s = 0.0;
+    for (uint32_t idx = 0; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
+        struct bufsig_s *b = &self->signals[idx];
+        if (!b->active) {
+            continue;
+        }
+        uint32_t sample_rate = b->hdr.sample_rate / b->hdr.decimate_factor;
+        if ((b->hdr.element_type == JSDRV_DATA_TYPE_FLOAT) && (b->hdr.element_size_bits == 32)) {
+            sz_per_s +=sample_rate * coef_f32;
+        } else {
+            sz_per_s += sample_rate * ((b->hdr.element_size_bits / 8.0) + coef_u);
+        }
+    }
+
+    // determine sample count for each signal, allocate, and publish duration
+    double duration = self->size / sz_per_s;
+    for (uint32_t idx = 0; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
+        struct bufsig_s *b = &self->signals[idx];
+        if (!b->active) {
+            continue;
+        }
+        uint32_t sample_rate = b->hdr.sample_rate / b->hdr.decimate_factor;
+        double N = duration * sample_rate;
+        uint64_t r0;        // power of 2
+        uint64_t rN = 32;   // power of 2
+        if ((b->hdr.element_type == JSDRV_DATA_TYPE_FLOAT) && (b->hdr.element_size_bits == 32)) {
+            r0 = 128;
+        } else {
+            r0 = 1024;
+        }
+        int64_t level = (int64_t) (ceil(log2(N / (double) (r0 * (rN * rN - 1))) / log2((double) rN) + 1.0));
+        if (level < 1) {
+            level = 1;
+        }
+        uint64_t g = (uint64_t) (pow(32, level - 1.0));
+        uint64_t k = (uint64_t) (round(N / (r0 * g)));
+        uint64_t Np = k * r0 * g;
+        jsdrv_bufsig_alloc(b, Np, r0, rN);
+        bufsig_publish_info(b);
+    }
+}
+
+static void buffer_free(struct buffer_s * self) {
+    for (uint32_t idx = 0; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
+        struct bufsig_s *b = &self->signals[idx];
+        jsdrv_bufsig_free(b);
+        b->hdr.sample_rate = 0;
+    }
+}
+
+static bool handle_cmd_q(struct buffer_s * self) {
     bool rv = true;
     struct jsdrvp_msg_s * msg = msg_queue_pop_immediate(self->cmd_q);
     char idx_str[JSDRV_TOPIC_LENGTH_MAX];
@@ -156,8 +261,16 @@ bool handle_cmd_q(struct buffer_s * self) {
     }
 
     const char * s = msg->topic;
-    if (msg->u32_a != 0) {
-        // todo should be data from signal source.
+    if ((msg->u32_a >= 1) && (msg->u32_a < JSDRV_BUFSIG_COUNT_MAX)) {
+        if ((self->state == ST_ACTIVE) || (self->state == ST_AWAIT)) {
+            struct bufsig_s *b = &self->signals[msg->u32_a];
+            jsdrv_bufsig_recv_data(b, msg);
+            if (await_check(self)) {
+                buffer_alloc(self);
+            }
+        }
+    } else if (msg->u32_a != 0) {
+        JSDRV_LOGW("Invalid buffer index: %s", msg->u32_a);
     } else if ((s[0] == 'a') && (s[1] == '/')) {
         s += 2;
         struct jsdrv_union_s v = msg->value;
@@ -197,11 +310,9 @@ bool handle_cmd_q(struct buffer_s * self) {
             // todo validate idx
         } else {
             struct bufsig_s * b = &self->signals[idx];
-            if (0 == strcmp(s, "r/!spl")) {
-                // todo - insert into pending
-            } else if (0 == strcmp(s, "r/!sum")) {
-                // todo - insert into pending
-            } else if (0 == strcmp(s, "s/topic")) {
+            if (0 == strcmp(s, "!req")) {
+                // todo - insert into pending, dedup by rsp_topic & rsp_id
+            } else if (0 == strcmp(s, "topic")) {
                 bufsig_sub(b, msg->value.value.str);
             } else {
                 JSDRV_LOGW("ignore %s", msg->topic);
@@ -210,10 +321,14 @@ bool handle_cmd_q(struct buffer_s * self) {
     } else if ((s[0] == 'g') && (s[1] == '/')) {
         s += 2;
         if (0 == strcmp(s, "size")) {
-            // todo resize
-        // todo hold
-        // todo mode
+            buffer_free(self);
+            struct jsdrv_union_s v = msg->value;
+            jsdrv_union_widen(&v);
+            self->size = msg->value.value.u64;
+            self->state = (0 == self->size) ? ST_IDLE : ST_AWAIT;
         } else {
+            // todo hold
+            // todo mode
             JSDRV_LOGW("buffer global unsupported: %s", s);
         }
     } else if (0 == strcmp(s, JSDRV_MSG_FINALIZE)) {
@@ -320,6 +435,8 @@ static uint8_t _buffer_add(void * user_data, struct jsdrvp_msg_s * msg) {
     }
     JSDRV_LOGI("buffer_id %u add", buffer_id);
     memset(b, 0, sizeof(*b));
+    b->idx = buffer_id;
+    b->state = ST_IDLE;
     tfp_snprintf(b->topic, sizeof(b->topic), "m/%03u", buffer_id);
     b->context = self->context;
     b->cmd_q = msg_queue_init();

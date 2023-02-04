@@ -32,20 +32,53 @@
 
 struct buffer_s;
 
+struct bufsig_stream_header_s {
+    uint64_t sample_id;                     ///< the starting sample id, which increments by decimate_factor.
+    uint8_t field_id;                       ///< jsdrv_field_e
+    uint8_t index;                          ///< The channel index within the field.
+    uint8_t element_type;                   ///< jsdrv_element_type_e
+    uint8_t element_size_bits;              ///< The element size in bits
+    uint32_t element_count;                 ///< size of data in elements
+    uint32_t sample_rate;                   ///< The frequency for sample_id.
+    uint32_t decimate_factor;               ///< The decimation factor from sample_id to data samples.
+};
+
+
 struct bufsig_s {
     uint32_t idx;
     bool active;
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     struct buffer_s * parent;
+    struct bufsig_stream_header_s hdr;
+    double sample_rate;
+
+    uint64_t N;             // size in samples
+    int64_t size_in_utc;    // size in UTC time
+    uint64_t r0;
+    uint64_t rN;
+    uint64_t k;
+    uint8_t levels;
 
     // todo summary data.
     // todo level 0 data
 };
 
+/**
+ * @brief Allocate the sample buffer and reductions.
+ *
+ * @param self The buffer instance.
+ * @param N The total number of samples to store.
+ * @param r0 The number of samples in the first reduction.
+ * @param rN The number of samples in subsequent reductions.
+ */
+void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_t rN);
+
+void jsdrv_bufsig_free(struct bufsig_s * self);
+
 void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg);
 
 // implemented by buffer.c
-void jsdrv_bufsig_send(struct bufsig_s * self, struct jsdrvp_msg_s * msg);
+//void jsdrv_bufsig_send(struct bufsig_s * self, struct jsdrvp_msg_s * msg);
 
 
 JSDRV_CPP_GUARD_END

@@ -166,13 +166,15 @@ void jsdrvp_backend_send(struct jsdrv_context_s * context, struct jsdrvp_msg_s *
 
 static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t timeout_ms) {
     struct jsdrvp_msg_s * msg = NULL;
+    char topic[JSDRV_TOPIC_LENGTH_MAX];
     assert_int_equal(0, msg_queue_pop(context->msg_sent, &msg, timeout_ms));
+    jsdrv_cstr_copy(topic, msg->topic, sizeof(topic));
     if (0 == strcmp(JSDRV_PUBSUB_SUBSCRIBE, msg->topic)) {
-        char * topic = msg->payload.sub.topic;
+        jsdrv_cstr_copy(topic, msg->payload.sub.topic, sizeof(topic));
         check_expected_ptr(topic);
         subscribe(context, msg);
     } else if (0 == strcmp(JSDRV_PUBSUB_UNSUBSCRIBE, msg->topic)) {
-        char * topic = msg->payload.sub.topic;
+        jsdrv_cstr_copy(topic, msg->payload.sub.topic, sizeof(topic));
         check_expected_ptr(topic);
         unsubscribe(context, msg);
     } else if (jsdrv_cstr_ends_with(msg->topic, "$")) {
@@ -196,17 +198,39 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
         assert_int_equal('/', ch[3]);
         assert_int_equal(0, jsdrv_cstr_to_u32(buffer_id_str, &buffer_id));
         ch += 4;
-        if (0 == strcmp(JSDRV_BUFFER_MSG_LIST, ch)) {
-            const size_t sig_list_length = msg->value.size;
-            const uint8_t *sig_list_buffers = msg->value.value.bin;
-            check_expected(sig_list_length);
-            check_expected_ptr(sig_list_buffers);
-        } else {
+        if ((ch[0] == 's') && (ch[1] == '/')) {
+            ch += 2;
+            char signal_id_str[4] = {0, 0, 0, 0};
+            uint32_t signal_id = 0;
+            for (int i = 0; i < 3; ++i) {
+                signal_id_str[i] = ch[i];
+            }
+            assert_int_equal('/', ch[3]);
+            assert_int_equal(0, jsdrv_cstr_to_u32(signal_id_str, &signal_id));
+            ch += 4;
+            if (0 == strcmp("info", ch)) {
+                check_expected_ptr(topic);
+            } else {
+                // unknown topic, not supported
+                assert_true(0);
+            }
+        } else if ((ch[0] == 'g') && (ch[1] == '/')) {
+            if (0 == strcmp(JSDRV_BUFFER_MSG_LIST, ch)) {
+                const size_t sig_list_length = msg->value.size;
+                const uint8_t *sig_list_buffers = msg->value.value.bin;
+                check_expected(sig_list_length);
+                check_expected_ptr(sig_list_buffers);
+            } else {
+                // unknown topic, not supported
+                assert_true(0);
+            }
+        } else  {
             // unknown topic, not supported
             assert_true(0);
         }
     } else {
         // ???
+        assert_true(0);
     }
     jsdrvp_msg_free(context, msg);
 }
@@ -214,10 +238,10 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
 #define expect_meta(topic__) expect_string(msg_send_process_next, meta_topic, topic__)
 
 #define expect_subscribe(topic_) \
-    expect_string(msg_send_process_next, topic, topic_);
+    expect_string(msg_send_process_next, topic, topic_)
 
 #define expect_unsubscribe(topic_) \
-    expect_string(msg_send_process_next, topic, topic_);
+    expect_string(msg_send_process_next, topic, topic_)
 
 #define expect_buf_list(ex_list, ex_len) \
     expect_value(msg_send_process_next, buf_list_length, ex_len); \
@@ -226,6 +250,10 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
 #define expect_sig_list(ex_list, ex_len) \
     expect_value(msg_send_process_next, sig_list_length, ex_len); \
     expect_memory(msg_send_process_next, sig_list_buffers, ex_list, ex_len)
+
+#define expect_info_any(topic_) \
+    expect_string(msg_send_process_next, topic, topic_)
+
 
 struct jsdrv_context_s * initialize() {
     uint8_t ex_list_buffer[] = {0};
@@ -338,17 +366,53 @@ static void test_one_signal(void **state) {
     expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
     msg_send_process_next(context, 100);
 
+    // Add signal
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD);
     publish(context, msg);
     expect_sig_list(ex_list_sig1, sizeof(ex_list_sig1));
     msg_send_process_next(context, 100);
 
+    // and set source topic
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_str("u/js220/0123456/s/i/!data"));
-    tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/s/%03u/s/topic", buffer_id, signal_id);
+    tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/s/%03u/topic", buffer_id, signal_id);
     publish(context, msg);
     expect_subscribe("u/js220/0123456/s/i/!data");
     msg_send_process_next(context, 100);
+
+    // set buffer size
+    msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u64(1000000LLU));
+    tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_SIZE);
+    publish(context, msg);
+
+    // send first data frame
+    msg = jsdrvp_msg_alloc_data(context, "u/js220/0123456/s/i/!data");
+    struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) msg->value.value.bin;
+    s->sample_id = 10000LLU;
+    s->field_id = JSDRV_FIELD_CURRENT;
+    s->index = 0;
+    s->element_type = JSDRV_DATA_TYPE_FLOAT;
+    s->element_size_bits = 32;
+    s->element_count = 100;
+    s->sample_rate = 2000000;
+    s->decimate_factor = 2;
+    float * sdata = (float *) s->data;
+    for (uint32_t i = 0; i < s->element_count; ++i) {
+        sdata[i] = ((float) i) * 0.001f;
+    }
+    publish(context, msg);
+    expect_info_any("m/003/s/005/info");
+    msg_send_process_next(context, 100);
+
+    // Send second data frame
+    //expect_range("m/003/s/005/s/range", 34LL, 35LL);
+    //msg_send_process_next(context, 100);
+
+    // send second data frame, expect range update
+
+    // request sample data, expect response
+
+    // request summary data, expect response
 
     // tear down
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
@@ -374,6 +438,9 @@ int main(void) {
             cmocka_unit_test(test_initialize_finalize),
             cmocka_unit_test(test_add_remove),
             cmocka_unit_test(test_one_signal),
+            // test hold
+            // test buffer wrap
+            // test mode: fill
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

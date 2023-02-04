@@ -299,10 +299,108 @@ struct jsdrv_statistics_s {
 };
 
 /**
+ * @brief The time specification type.
+ */
+enum jsdrv_time_type_e {
+    JSDRV_TIME_UTC,                         ///< Time is in i64 Q30 UTC, in jsdrv/time.h format.
+    JSDRV_TIME_SAMPLES,                     ///< Time is in sample_ids for the signal channel.
+};
+
+/**
+ * @brief A UTC-defined time range.
+ *
+ * Note the use of the int64 dtype for time.  Float64 only has 53 bits
+ * of precision, which can only represent up to 104 days with nanosecond
+ * precision.  While this precision is adequate for relative time,
+ * it is insufficient to store absolute time.  In contrast, the
+ * jsdrv int64 time with Q30 (0.93 nanosecond resolution)
+ * can store ±272 years relative to its epoch
+ *
+ * For applications that need floating-point time, store a
+ * separate offset in seconds relative to the starting time.
+ * This improves precision between intervals.  For example:
+ *
+ *      x = np.linspace(0, time_end - time_start, length, dtype=np.float64)
+ */
+struct jsdrv_time_range_utc_s {
+    int64_t time_start;                     ///< The time for data[0] (inclusive), in jsdrv/time.h format.
+    int64_t time_end;                       ///< The time for data[-1] (inclusive), in jsdrv/time.h format.
+    uint64_t length;                        ///< The number of entries to populate in the response.
+};
+
+/**
+ * @brief A sample_id-defined time range.
+ */
+struct jsdrv_time_range_samples_s {
+    uint64_t sample_id_start;               ///< The time for data[0] (inclusive), in sample_ids.
+    uint64_t sample_id_end;                 ///< The time for data[-1] (inclusive), in sample_ids.
+    uint64_t length;                        ///< The number of entries to populate in the response.
+};
+
+/**
+ * @brief The signal buffer information.
+ */
+struct jsdrv_buffer_info_s {
+    char topic[JSDRV_TOPIC_LENGTH_MAX];     ///< The source topic that provides jsdrv_stream_signal_s.
+    uint8_t field_id;                       ///< jsdrv_field_e
+    uint8_t index;                          ///< The channel index within the field.
+    uint8_t element_type;                   ///< jsdrv_element_type_e
+    uint8_t element_size_bits;              ///< The element size in bits
+    int64_t size_in_utc;                    ///< The total buffer size in UTC time.
+    uint64_t size_in_samples;               ///< The total buffer size in samples.
+    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time.
+    struct jsdrv_time_range_samples_s time_range_samples;  ///< In sample time.
+    double sample_rate;                     ///< The effective frequency for sample_ids.
+};
+
+/**
+ * @brief Request data from the streaming sample buffer.
+ *
+ * To make a sample request that returns jsdrv_buffer_sample_response_s,
+ * only specify end or length.  Set the unused value to zero.
+ *
+ * If both end and length are specified, then the request may return
+ * jsdrv_buffer_summary_response_s.  However, if the specified increment
+ * is less than or equal to one sample duration, then the request
+ * will return jsdrv_buffer_sample_response_s.
+ *
+ * For JSDRV_TIME_UTC with end and length > 1,
+ * the time increment between samples is:
+ *       time_incr = (time_end - time_start) / (length - 1)
+ *
+ * Using python, the x-axis time is then:
+ *      x = np.linspace(time_start, time_end, length, dtype=np.int64)
+ *
+ * For JSDRV_TIME_SAMPLES with end and length > 1,
+ * the sample increment between samples is:
+ *       sample_id_incr = (sample_id_end - sample_id_start) / (length - 1)
+ *
+ * The buffer implementation may deduplicate requests using
+ * the combination rsp_topic and rsp_id.
+ */
+struct jsdrv_buffer_request_s {
+    int8_t time_type;                    ///< jsdrv_time_type_e
+    union {
+        struct jsdrv_time_range_utc_s utc;
+        struct jsdrv_time_range_samples_s samples;
+    } time;
+    char rsp_topic[JSDRV_TOPIC_LENGTH_MAX]; ///< The topic for this response.
+    int64_t rsp_id;                         ///< The additional identifier to include in the response.
+};
+
+/**
+ * @brief The buffer response type.
+ */
+enum jsdrv_buffer_response_type_e {
+    JSDRV_BUFFER_RESPONSE_SAMPLES,          ///< Data contains samples.
+    JSDRV_BUFFER_RESPONSE_SUMMARY,          ///< Data contains summary statistics.
+};
+
+/**
  * @brief A single summary statistics entry.
  */
 struct jsdrv_summary_entry_s {
-    uint32_t sample_count;      ///< The total number of samples in this window.
+    uint32_t sample_count;      ///< The total number of samples used to compute this window.
     float avg;                  ///< The average (mean) over the window.
     float std;                  ///< The standard deviation over the window.
     float min;                  ///< The maximum value over the window.
@@ -310,27 +408,23 @@ struct jsdrv_summary_entry_s {
 };
 
 /**
- * @brief The sample summary produced by the memory buffer.
+ * @brief The response to jsdrv_buffer_request_s produced by the memory buffer.
  *
- * The time increment between samples, for length > 1, is:
- *       time_incr = (time_end - time_start) / (length - 1)
+ * The response populates both info.time_range_utc and info.time_range_samples.
+ * Both length values are equal, and specify the number of returned data samples.
+ * For response_type JSDRV_BUFFER_RESPONSE_SUMMARY, the data is
+ * jsdrv_summary_entry_s[info.time_range_utc.length].
+ * info.element_type is JSDRV_DATA_TYPE_UNDEFINED and
+ * info.element_size_bits is sizeof(jsdrv_summary_entry_s) * 8.
  *
- * Using python, the x-axis time is then:
- *      x = np.linspace(time_start, time_end, length, dtype=np.int64)
- *
- * Note the use of the int64 ddtype as float64 is not able to represent
- * time with sufficient precision.
- * For many applications that need floating-point time, use an offset
- * relative to time_start yields higher precision time.  For example:
- *      x = np.linspace(0, time_end - time_start, length, dtype=np.float64)
+ * For response_type JSDRV_BUFFER_RESPONSE_SAMPLES, the data type depends
+ * upon info.element_type and info.element_size_bits.
  */
-struct jsdrv_summary_s {
-    int64_t time_start;                     ///< The time for data[0] (inclusive), in jsdrv/time.h format.
-    int64_t time_end;                       ///< The time for data[-1] (inclusive), in jsdrv/time.h format.
-    uint64_t length;                        ///< The number of data entries.
-    uint8_t field_id;                       ///< jsdrv_field_e
-    uint8_t index;                          ///< The channel index within the field.
-    struct jsdrv_summary_entry_s data[];    ///< The summary data entry for each time.
+struct jsdrv_buffer_response_s {
+    uint8_t response_type;                  ///< jsdrv_buffer_response_type_e
+    int64_t rsp_id;                         ///< The value provided to jsdrv_buffer_request_s.
+    struct jsdrv_buffer_info_s info;        ///< The response information.
+    uint8_t data[];                         ///< The response data.
 };
 
 /// The subscriber flags for jsdrv_subscribe().
