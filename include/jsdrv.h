@@ -220,8 +220,9 @@ enum jsdrv_payload_type_e {
     JSDRV_PAYLOAD_TYPE_UNION        = 0,    // standard jsdrv_union including string, JSON, and raw binary.
     JSDRV_PAYLOAD_TYPE_STREAM       = 1,    // bin with jsdrv_stream_signal_s
     JSDRV_PAYLOAD_TYPE_STATISTICS   = 2,    // bin with jsdrv_statistics_s
-    JSDRV_PAYLOAD_TYPE_SUMMARY      = 3,    // bin with jsdrv_summary_s
-    //JSDRV_PAYLOAD_TYPE_STATUS,      // todo
+    JSDRV_PAYLOAD_TYPE_BUFFER_INFO  = 3,    // bin with jsdrv_buffer_info_s
+    JSDRV_PAYLOAD_TYPE_BUFFER_REQ   = 4,    // bin with jsdrv_buffer_request_s
+    JSDRV_PAYLOAD_TYPE_BUFFER_RSP   = 5,    // bin with jsdrv_buffer_response_s
 };
 
 /**
@@ -302,55 +303,65 @@ struct jsdrv_statistics_s {
  * @brief The time specification type.
  */
 enum jsdrv_time_type_e {
-    JSDRV_TIME_UTC,                         ///< Time is in i64 Q30 UTC, in jsdrv/time.h format.
-    JSDRV_TIME_SAMPLES,                     ///< Time is in sample_ids for the signal channel.
+    JSDRV_TIME_UTC = 0,        ///< Time in i64 34Q30 UTC.  See jsdrv/time.h.
+    JSDRV_TIME_SAMPLES = 1,    ///< Time in sample_ids for the corresponding channel.
 };
 
 /**
  * @brief A UTC-defined time range.
  *
- * Note the use of the int64 dtype for time.  Float64 only has 53 bits
- * of precision, which can only represent up to 104 days with nanosecond
- * precision.  While this precision is adequate for relative time,
- * it is insufficient to store absolute time.  In contrast, the
- * jsdrv int64 time with Q30 (0.93 nanosecond resolution)
- * can store ±272 years relative to its epoch
- *
- * For applications that need floating-point time, store a
- * separate offset in seconds relative to the starting time.
- * This improves precision between intervals.  For example:
- *
- *      x = np.linspace(0, time_end - time_start, length, dtype=np.float64)
+ * Times are int64 34Q30 in UTC from the epoch.  See jsdrv/time.h.
  */
 struct jsdrv_time_range_utc_s {
-    int64_t time_start;                     ///< The time for data[0] (inclusive), in jsdrv/time.h format.
-    int64_t time_end;                       ///< The time for data[-1] (inclusive), in jsdrv/time.h format.
-    uint64_t length;                        ///< The number of entries to populate in the response.
+    int64_t start;                   ///< The time for data[0] (inclusive).
+    int64_t end;                     ///< The time for data[-1] (inclusive).
+    uint64_t length;                 ///< The number of evenly-spaced entries.
 };
 
 /**
  * @brief A sample_id-defined time range.
+ *
+ * Times are in uint64_t sample_ids for the corresponding channel.
  */
 struct jsdrv_time_range_samples_s {
-    uint64_t sample_id_start;               ///< The time for data[0] (inclusive), in sample_ids.
-    uint64_t sample_id_end;                 ///< The time for data[-1] (inclusive), in sample_ids.
-    uint64_t length;                        ///< The number of entries to populate in the response.
+    uint64_t start;                   ///< The time for data[0] (inclusive).
+    uint64_t end;                     ///< The time for data[-1] (inclusive).
+    uint64_t length;                  ///< The number of evenly-spaced entries.
 };
 
 /**
  * @brief The signal buffer information.
+ *
+ * This structure contains both the size and range.  The size is
+ * populated immediately, even if the buffer is still empty.
+ * As the buffer contents grows, the buffer range will approach
+ * the buffer size.  When the buffer is full, the range will be
+ * close to the size.  The range when full is not required to be the
+ * entire size to allow for buffering optimizations.
  */
 struct jsdrv_buffer_info_s {
-    char topic[JSDRV_TOPIC_LENGTH_MAX];     ///< The source topic that provides jsdrv_stream_signal_s.
+    uint8_t version;                        ///< The response format version == 1.
+    uint8_t rsv1_u8;                        ///< Reserved, set to 0.
+    uint8_t rsv2_u8;                        ///< Reserved, set to 0.
+    uint8_t rsv3_u8;                        ///< Reserved, set to 0.
     uint8_t field_id;                       ///< jsdrv_field_e
     uint8_t index;                          ///< The channel index within the field.
     uint8_t element_type;                   ///< jsdrv_element_type_e
     uint8_t element_size_bits;              ///< The element size in bits
+    char topic[JSDRV_TOPIC_LENGTH_MAX];     ///< The source topic that provides jsdrv_stream_signal_s.
     int64_t size_in_utc;                    ///< The total buffer size in UTC time.
     uint64_t size_in_samples;               ///< The total buffer size in samples.
     struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time.
     struct jsdrv_time_range_samples_s time_range_samples;  ///< In sample time.
-    double sample_rate;                     ///< The effective frequency for sample_ids.
+    double sample_rate;                     ///< The effective sample frequency (samples per second).
+};
+
+/**
+ * @brief The time range union for buffer requests
+ */
+union jsdrv_buffer_request_time_range_u {
+    struct jsdrv_time_range_utc_s utc;
+    struct jsdrv_time_range_samples_s samples;
 };
 
 /**
@@ -379,11 +390,12 @@ struct jsdrv_buffer_info_s {
  * the combination rsp_topic and rsp_id.
  */
 struct jsdrv_buffer_request_s {
+    uint8_t version;                     ///< The request format version == 1.
     int8_t time_type;                    ///< jsdrv_time_type_e
-    union {
-        struct jsdrv_time_range_utc_s utc;
-        struct jsdrv_time_range_samples_s samples;
-    } time;
+    uint8_t rsv1_u8;                     ///< Reserved, set to 0.
+    uint8_t rsv2_u8;                     ///< Reserved, set to 0.
+    uint32_t rsv3_u32;                   ///< Reserved, set to 0.
+    union jsdrv_buffer_request_time_range_u time;
     char rsp_topic[JSDRV_TOPIC_LENGTH_MAX]; ///< The topic for this response.
     int64_t rsp_id;                         ///< The additional identifier to include in the response.
 };
@@ -392,19 +404,24 @@ struct jsdrv_buffer_request_s {
  * @brief The buffer response type.
  */
 enum jsdrv_buffer_response_type_e {
-    JSDRV_BUFFER_RESPONSE_SAMPLES,          ///< Data contains samples.
-    JSDRV_BUFFER_RESPONSE_SUMMARY,          ///< Data contains summary statistics.
+    JSDRV_BUFFER_RESPONSE_SAMPLES = 1,   ///< Data contains samples.
+    JSDRV_BUFFER_RESPONSE_SUMMARY = 2,   ///< Data contains summary statistics.
 };
 
 /**
  * @brief A single summary statistics entry.
  */
 struct jsdrv_summary_entry_s {
-    uint32_t sample_count;      ///< The total number of samples used to compute this window.
     float avg;                  ///< The average (mean) over the window.
     float std;                  ///< The standard deviation over the window.
     float min;                  ///< The maximum value over the window.
     float max;                  ///< The minimum value over the window.
+};
+
+union jsdrv_buffer_response_data_u {
+    float f32[];
+    uint8_t u8[];
+    struct jsdrv_summary_entry_s entries[];
 };
 
 /**
@@ -421,10 +438,14 @@ struct jsdrv_summary_entry_s {
  * upon info.element_type and info.element_size_bits.
  */
 struct jsdrv_buffer_response_s {
+    uint8_t version;                        ///< The response format version == 1.
     uint8_t response_type;                  ///< jsdrv_buffer_response_type_e
+    uint8_t rsv1_u8;                        ///< Reserved, set to 0.
+    uint8_t rsv2_u8;                        ///< Reserved, set to 0.
+    uint32_t rsv3_u32;                      ///< Reserved, set to 0.
     int64_t rsp_id;                         ///< The value provided to jsdrv_buffer_request_s.
     struct jsdrv_buffer_info_s info;        ///< The response information.
-    uint8_t data[];                         ///< The response data.
+    union jsdrv_buffer_response_data_u data;
 };
 
 /// The subscriber flags for jsdrv_subscribe().

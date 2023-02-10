@@ -32,8 +32,8 @@
 #include <math.h>
 
 
-JSDRV_STATIC_ASSERT(20 == sizeof(struct jsdrv_summary_entry_s), entry_size_one);
-JSDRV_STATIC_ASSERT(40 == sizeof(struct jsdrv_summary_entry_s[2]), entry_size_two);
+JSDRV_STATIC_ASSERT(16 == sizeof(struct jsdrv_summary_entry_s), entry_size_one);
+JSDRV_STATIC_ASSERT(32 == sizeof(struct jsdrv_summary_entry_s[2]), entry_size_two);
 JSDRV_STATIC_ASSERT(JSDRV_BUFSIG_COUNT_MAX <= 256, bufsig_fits_in_u8); // assumed for add/remove/list operations
 
 
@@ -71,6 +71,11 @@ enum buffer_state_s {
     ST_HOLD,
 };
 
+struct req_s {
+    uint32_t signal_id;
+    struct jsdrv_buffer_request_s req;
+    struct jsdrv_list_s item;
+};
 
 struct buffer_s {
     uint8_t idx;
@@ -79,7 +84,8 @@ struct buffer_s {
     struct jsdrv_context_s * context;
     uint64_t size;
     struct msg_queue_s * cmd_q;
-    struct jsdrv_list_s pending;
+    struct jsdrv_list_s req_pending;
+    struct jsdrv_list_s req_free;
     jsdrv_thread_t thread;
     volatile uint8_t do_exit;
     struct bufsig_s signals[JSDRV_BUFSIG_COUNT_MAX];  // 0 is reserved
@@ -158,9 +164,6 @@ static void buf_publish_signal_list(struct buffer_s * self) {
 }
 
 static bool await_check(struct buffer_s * self) {
-    if (self->state != ST_AWAIT) {
-        return false;
-    }
     for (uint32_t idx = 1; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
         struct bufsig_s *b = &self->signals[idx];
         if (!b->active) {
@@ -172,21 +175,31 @@ static bool await_check(struct buffer_s * self) {
     return true;
 }
 
+static void bufsig_info_set(struct bufsig_s * self, struct jsdrv_buffer_info_s * info) {
+    memset(info, 0, sizeof(*info));
+    info->version = 1;
+    info->field_id = self->hdr.field_id;
+    info->index = self->hdr.index;
+    info->element_type = self->hdr.element_type;
+    info->element_size_bits = self->hdr.element_size_bits;
+    info->size_in_utc = self->size_in_utc;
+    info->size_in_samples = self->N;
+    jsdrv_cstr_copy(info->topic, self->topic, sizeof(info->topic));
+    info->size_in_utc = self->size_in_utc;
+    info->size_in_samples = self->N;
+    // todo info.time_range_utc = ?;
+    // todo info.time_range_samples = ?;
+    info->sample_rate = self->sample_rate;
+}
+
 static void bufsig_publish_info(struct bufsig_s * self) {
     struct jsdrv_context_s * context = self->parent->context;
-
     struct jsdrv_buffer_info_s info;
-    memset(&info, 0, sizeof(info));
-    info.field_id = self->hdr.field_id;
-    info.index = self->hdr.index;
-    info.element_type = self->hdr.element_type;
-    info.element_size_bits = self->hdr.element_size_bits;
-    info.size_in_utc = self->size_in_utc;
-    info.size_in_samples = self->N;
-
+    bufsig_info_set(self, &info);
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(context, "",
             &jsdrv_union_cbin_r((uint8_t *) &info, sizeof(info)));
     tfp_snprintf(m->topic, sizeof(m->topic), "m/%03d/s/%03d/info", self->parent->idx, self->idx);
+    m->value.app = JSDRV_PAYLOAD_TYPE_BUFFER_INFO;
     jsdrvp_backend_send(context, m);
 }
 
@@ -251,6 +264,66 @@ static void buffer_free(struct buffer_s * self) {
     }
 }
 
+static void req_post(struct buffer_s * self, uint32_t bufsig_idx, struct jsdrv_buffer_request_s * req) {
+    struct jsdrv_list_s * item;
+    struct req_s * r;
+
+    // Search for existing request
+    jsdrv_list_foreach(&self->req_pending, item) {
+        r = JSDRV_CONTAINER_OF(item, struct req_s, item);
+        if ((r->signal_id == bufsig_idx) && (r->req.rsp_id == req->rsp_id) && (0 == strcmp(r->req.rsp_topic, req->rsp_topic))) {
+            // found existing request still pending; update request.
+            r->req = *req;
+            return;
+        }
+    }
+
+    // No existing request found; create new request.
+    item = jsdrv_list_remove_head(&self->req_free);
+    if (NULL != item) {
+        r = JSDRV_CONTAINER_OF(item, struct req_s, item);
+    } else {
+        r = calloc(1, sizeof(struct req_s));
+        jsdrv_list_initialize(&r->item);
+    }
+    r->signal_id = bufsig_idx;
+    r->req = *req;
+    jsdrv_list_add_tail(&self->req_pending, &r->item);
+}
+
+static bool req_handle_one(struct buffer_s * self) {
+    struct jsdrv_list_s * item = jsdrv_list_remove_head(&self->req_pending);
+    if (NULL == item) {
+        return false;
+    }
+    struct req_s * req = JSDRV_CONTAINER_OF(item, struct req_s, item);
+    struct bufsig_s * b = &self->signals[req->signal_id];
+    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc_data(self->context, req->req.rsp_topic);
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) msg->value.value.bin;
+    memset(rsp, 0, sizeof(*rsp));
+    rsp->version = 1;
+    rsp->rsp_id = req->req.rsp_id;
+    bufsig_info_set(b, &rsp->info);
+    rsp->info.time_range_utc.length = 0;
+    rsp->info.time_range_samples.length = 0;
+    jsdrv_bufsig_process_request(b, &req->req, rsp);
+    msg->value.app = JSDRV_PAYLOAD_TYPE_BUFFER_RSP;
+    jsdrvp_backend_send(self->context, msg);
+    jsdrv_list_add_tail(&self->req_free, item);
+    return true;
+}
+
+static void req_list_free(struct jsdrv_list_s * list) {
+    while (1) {
+        struct jsdrv_list_s * item = jsdrv_list_remove_head(list);
+        if (NULL == item) {
+            break;
+        }
+        struct req_s * req = JSDRV_CONTAINER_OF(item, struct req_s, item);
+        free(req);
+    }
+}
+
 static bool handle_cmd_q(struct buffer_s * self) {
     bool rv = true;
     struct jsdrvp_msg_s * msg = msg_queue_pop_immediate(self->cmd_q);
@@ -265,8 +338,13 @@ static bool handle_cmd_q(struct buffer_s * self) {
         if ((self->state == ST_ACTIVE) || (self->state == ST_AWAIT)) {
             struct bufsig_s *b = &self->signals[msg->u32_a];
             jsdrv_bufsig_recv_data(b, msg);
-            if (await_check(self)) {
-                buffer_alloc(self);
+            if (self->state == ST_AWAIT) {
+                if (await_check(self)) {
+                    buffer_alloc(self);
+                    self->state = ST_ACTIVE;
+                }
+            } else {
+                bufsig_publish_info(b);
             }
         }
     } else if (msg->u32_a != 0) {
@@ -311,7 +389,10 @@ static bool handle_cmd_q(struct buffer_s * self) {
         } else {
             struct bufsig_s * b = &self->signals[idx];
             if (0 == strcmp(s, "!req")) {
-                // todo - insert into pending, dedup by rsp_topic & rsp_id
+                if (msg->value.app != JSDRV_PAYLOAD_TYPE_BUFFER_REQ) {
+                    JSDRV_LOGI("buffer request but app field is %d", (int) msg->value.app);
+                }
+                req_post(self, idx, (struct jsdrv_buffer_request_s *) msg->value.value.bin);
             } else if (0 == strcmp(s, "topic")) {
                 bufsig_sub(b, msg->value.value.str);
             } else {
@@ -341,15 +422,6 @@ static bool handle_cmd_q(struct buffer_s * self) {
     return rv;
 }
 
-bool handle_pending(struct buffer_s * self) {
-    struct jsdrv_list_s * item = jsdrv_list_remove_head(&self->pending);
-    if (NULL == item) {
-        return false;
-    }
-    // todo
-    return false;
-}
-
 static THREAD_RETURN_TYPE buffer_thread(THREAD_ARG_TYPE lpParam) {
     struct buffer_s * self = (struct buffer_s *) lpParam;
     JSDRV_LOGI("buffer thread started: %s", self->topic);
@@ -375,10 +447,12 @@ static THREAD_RETURN_TYPE buffer_thread(THREAD_ARG_TYPE lpParam) {
         do {
             while (handle_cmd_q(self)) { ;
             }
-            handle_pending(self);
-        } while (!self->do_exit && !jsdrv_list_is_empty(&self->pending));
+            req_handle_one(self);
+        } while (!self->do_exit && !jsdrv_list_is_empty(&self->req_pending));
     }
 
+    req_list_free(&self->req_pending);
+    req_list_free(&self->req_free);
     JSDRV_LOGI("buffer thread done: %s", self->topic);
     THREAD_RETURN();
 }
@@ -441,7 +515,8 @@ static uint8_t _buffer_add(void * user_data, struct jsdrvp_msg_s * msg) {
     b->context = self->context;
     b->cmd_q = msg_queue_init();
     subscribe(b->context, b->topic, JSDRV_SFLAG_PUB, _buffer_recv, b);
-    jsdrv_list_initialize(&b->pending);
+    jsdrv_list_initialize(&b->req_pending);
+    jsdrv_list_initialize(&b->req_free);
     for (uint32_t i = 0; i < JSDRV_BUFSIG_COUNT_MAX; i++) {
         struct bufsig_s * s = &b->signals[i];
         s->idx = i;

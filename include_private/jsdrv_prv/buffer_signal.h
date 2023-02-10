@@ -60,7 +60,13 @@ struct bufsig_s {
     uint8_t levels;
 
     // todo summary data.
-    // todo level 0 data
+
+    // level 0
+    // length in N
+    uint64_t level0_head;  // next insert point (also tail when full)
+    uint64_t level0_size;
+    void * level0_data;
+    uint64_t sample_id_head;
 };
 
 /**
@@ -77,9 +83,20 @@ void jsdrv_bufsig_free(struct bufsig_s * self);
 
 void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg);
 
-// implemented by buffer.c
-//void jsdrv_bufsig_send(struct bufsig_s * self, struct jsdrvp_msg_s * msg);
-
+/**
+ * @brief Process a request.
+ *
+ * @param self The buffer instance.
+ * @param req The request to process.
+ * @param rsp The response to populate which is mostly populated by the caller.
+ *      This function simply needs to add the data and update
+ *      rsp->info fields size_in_utc, time_range_utc,
+ *      size_in_samples, time_range_samples.
+ */
+void jsdrv_bufsig_process_request(
+        struct bufsig_s * self,
+        struct jsdrv_buffer_request_s * req,
+        struct jsdrv_buffer_response_s * rsp);
 
 JSDRV_CPP_GUARD_END
 

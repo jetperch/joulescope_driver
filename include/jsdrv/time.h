@@ -51,6 +51,18 @@
  * allow conversion to single precision floating point which has significantly
  * reduce resolution compared to the 34Q30 value.
  *
+ * Float64 only has 53 bits of precision, which can only represent up to
+ * 104 days with nanosecond precision.  While this duration and precision is
+ * often adequate for relative time, it is insufficient to store absolute time
+ * from the epoch.  In contrast, the int64 34Q30 time with nanosecond resolution
+ * can store ±272 years relative to its epoch.
+ *
+ * For applications that need floating-point time, store a
+ * separate offset in seconds relative to the starting time.
+ * This improves precision between intervals.  For example:
+ *
+ *      x = np.linspace(0, time_end - time_start, length, dtype=np.float64)
+ *
  * @{
  */
 

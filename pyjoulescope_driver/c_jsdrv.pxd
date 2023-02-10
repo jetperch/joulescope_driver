@@ -77,6 +77,9 @@ cdef extern from "jsdrv.h":
         JSDRV_PAYLOAD_TYPE_UNION  = 0
         JSDRV_PAYLOAD_TYPE_STREAM = 1
         JSDRV_PAYLOAD_TYPE_STATISTICS = 2
+        JSDRV_PAYLOAD_TYPE_BUFFER_INFO = 3
+        JSDRV_PAYLOAD_TYPE_BUFFER_REQ = 4
+        JSDRV_PAYLOAD_TYPE_BUFFER_RSP = 5
     enum jsdrv_element_type_e:
         JSDRV_DATA_TYPE_UNDEFINED = 0
         JSDRV_DATA_TYPE_INT = 2
@@ -127,6 +130,65 @@ cdef extern from "jsdrv.h":
         double energy_f64
         uint64_t charge_i128[2]
         uint64_t energy_i128[2]
+    enum jsdrv_time_type_e:
+        JSDRV_TIME_UTC = 0
+        JSDRV_TIME_SAMPLES = 1
+    struct jsdrv_time_range_utc_s:
+        int64_t start
+        int64_t end
+        uint64_t length
+    struct jsdrv_time_range_samples_s:
+        uint64_t start
+        uint64_t end
+        uint64_t length
+    struct jsdrv_buffer_info_s:
+        uint8_t version
+        uint8_t rsv1_u8
+        uint8_t rsv2_u8
+        uint8_t rsv3_u8
+        uint8_t field_id
+        uint8_t index
+        uint8_t element_type
+        uint8_t element_size_bits
+        char topic[JSDRV_TOPIC_LENGTH_MAX]
+        int64_t size_in_utc
+        uint64_t size_in_samples
+        jsdrv_time_range_utc_s time_range_utc
+        jsdrv_time_range_samples_s time_range_samples
+        double sample_rate
+    union jsdrv_buffer_request_time_range_u:
+        jsdrv_time_range_utc_s utc
+        jsdrv_time_range_samples_s samples
+    struct jsdrv_buffer_request_s:
+        uint8_t version
+        int8_t time_type
+        uint8_t rsv1_u8
+        uint8_t rsv2_u8
+        uint32_t rsv3_u32
+        jsdrv_buffer_request_time_range_u time
+        char rsp_topic[JSDRV_TOPIC_LENGTH_MAX]
+        int64_t rsp_id
+    enum jsdrv_buffer_response_type_e:
+        JSDRV_BUFFER_RESPONSE_SAMPLES = 1
+        JSDRV_BUFFER_RESPONSE_SUMMARY = 2
+    struct jsdrv_summary_entry_s:
+        float avg
+        float std
+        float min
+        float max
+    union jsdrv_buffer_response_data_u:
+        float f32[0]
+        uint8_t u8[0]
+        jsdrv_summary_entry_s entries[0]
+    struct jsdrv_buffer_response_s:
+        uint8_t version
+        uint8_t response_type
+        uint8_t rsv1_u8
+        uint8_t rsv2_u8
+        uint32_t rsv3_u32
+        int64_t rsp_id
+        jsdrv_buffer_info_s info
+        jsdrv_buffer_response_data_u data
     enum jsdrv_subscribe_flag_e:
         JSDRV_SFLAG_NONE = 0                    # No flags (always 0).
         JSDRV_SFLAG_RETAIN = (1 << 0)           # Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.

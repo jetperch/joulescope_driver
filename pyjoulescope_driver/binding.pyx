@@ -49,6 +49,94 @@ cdef object _i128_to_int(uint64_t high, uint64_t low):
     return i
 
 
+cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
+    v = {
+        'version': info[0].version,
+        'field_id': info[0].field_id,
+        'index': info[0].index,
+        'element_type': info[0].element_type,
+        'element_size_bits': info[0].element_size_bits,
+        'topic': info[0].topic,
+        'size_in_utc': info[0].size_in_utc,
+        'size_in_samples': info[0].size_in_samples,
+        'time_range_utc': {
+            'start': info[0].time_range_utc.start,
+            'end': info[0].time_range_utc.end,
+            'length': info[0].time_range_utc.length,
+        },
+        'time_range_samples': {
+            'start': info[0].time_range_samples.start,
+            'end': info[0].time_range_samples.end,
+            'length': info[0].time_range_samples.length,
+
+        },
+        'sample_rate': info[0].sample_rate,
+    }
+    return v
+
+
+cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
+    cdef np.npy_intp shape[2]
+    v = {
+        'version': r[0].version,
+        'rsp_id': r[0].rsp_id,
+        'info': _parse_buffer_info(&r[0].info),
+    }
+    length = v['info']['time_range_samples']['length']
+    if r[0].response_type == c_jsdrv.JSDRV_BUFFER_RESPONSE_SAMPLES:
+        v['response_type'] = 'samples'
+        if v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_FLOAT and ['info']['element_size_bits'] == 32:
+            shape[0] = <np.npy_intp> length
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> &r[0].data.f32[0])
+        elif v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and ['info']['element_size_bits'] == 1:
+            shape[0] = <np.npy_intp> (length // 8)
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data.u8[0])
+        elif v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and ['info']['element_size_bits'] == 1:
+            shape[0] = <np.npy_intp> (length // 2)
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data.u8[0])
+        else:
+            _log_c.error('unsupported sample format')
+        v['data'] = ndarray.copy()
+    elif r[0].response_type == c_jsdrv.JSDRV_BUFFER_RESPONSE_SUMMARY:
+        v['response_type'] = 'summary'
+        shape[0] = <np.npy_intp> length
+        shape[1] = <np.npy_intp> 4
+        ndarray = np.PyArray_SimpleNewFromData(2, shape, np.NPY_FLOAT32, <void *> &r[0].data.f32[0])
+        v['data'] = ndarray.copy()
+    else:
+        _log_c.error(f'unsupported response_type {r[0].response_type}')
+    return v
+
+
+cdef object _pack_buffer_req(r):
+    cdef c_jsdrv.jsdrv_buffer_request_s s
+    cdef uint8_t * u8_ptr
+
+    s.version = 1
+    time_type = r['time_type'].lower()
+    if time_type == 'utc':
+        s.time_type = c_jsdrv.JSDRV_TIME_UTC
+        s.time.utc.start = r['start']
+        s.time.utc.end = r.get('end', 0)
+        s.time.utc.length = r.get('length', 0)
+    elif time_type == 'samples':
+        s.time_type = c_jsdrv.JSDRV_TIME_SAMPLES
+        s.time.samples.start = r['start']
+        s.time.samples.end = r.get('end', 0)
+        s.time.samples.length = r.get('length', 0)
+    else:
+        raise ValueError(f'invalid time type: {time_type}')
+    s.rsv1_u8 = 0
+    s.rsv2_u8 = 0
+    s.rsv3_u32 = 0
+    s.rsp_topic = r['rsp_topic']
+    s.rsp_id = r['rsp_id']
+
+    u8_ptr = <uint8_t *> &s;
+    return bytes(u8_ptr[:sizeof(s)])
+
+
+
 cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
     cdef c_jsdrv.jsdrv_stream_signal_s * stream;
     cdef np.npy_intp shape[1]
@@ -164,6 +252,10 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                     },
                     'source': 'sensor',
                 }
+            elif value[0].app == c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_INFO:
+                v = _parse_buffer_info(<c_jsdrv.jsdrv_buffer_info_s *> &(value[0].value.bin[0]))
+            elif value[0].app == c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_RSP:
+                v = _parse_buffer_rsp(<c_jsdrv.jsdrv_buffer_response_s *> &(value[0].value.bin[0]))
             else:
                 v = value[0].value.bin[:value[0].size]
         elif t == c_jsdrv.JSDRV_UNION_F32:
@@ -488,23 +580,30 @@ cdef class Driver:
             v.type = c_jsdrv.JSDRV_UNION_STR
             v.value.str = &byte_str[0]
         elif isinstance(value, int):
-            if (value >= 0) and (value < 4294967296):
+            if (value >= 0) and (value < 4294967296LL):
                 v.type = c_jsdrv.JSDRV_UNION_U32
                 v.value.u64 = value
             elif value >= 0:
                 v.type = c_jsdrv.JSDRV_UNION_U64
                 v.value.u64 = value
-            elif value >= -2147483648:
+            elif value >= -2147483648LL:
                 v.type = c_jsdrv.JSDRV_UNION_I32
                 v.value.i64 = value
             else:
                 v.type = c_jsdrv.JSDRV_UNION_I64
                 v.value.i64 = value
+        elif topic.startswith('m/') and topic.endswith('/!req'):
+            value = _pack_buffer_req(value)
+            byte_str = value
+            v.type = c_jsdrv.JSDRV_UNION_BIN
+            v.value.bin = <const uint8_t *> byte_str
+            v.app = c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_REQ
+            v.size = <uint32_t> len(value)
         elif isinstance(value, bytes):
             byte_str = value
             v.type = c_jsdrv.JSDRV_UNION_BIN
             v.value.bin = <const uint8_t *> byte_str
-            v.size = len(value)
+            v.size = <uint32_t> len(value)
         else:
             raise ValueError(f'Unsupported value type: {type(value)}')
         if '!' not in topic:

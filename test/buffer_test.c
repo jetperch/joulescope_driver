@@ -33,6 +33,7 @@
 
 // copied from jsdrv.c, line 55
 static const size_t STREAM_MSG_SZ = sizeof(struct jsdrvp_msg_s) - sizeof(union jsdrvp_payload_u) + sizeof(struct jsdrv_stream_signal_s);
+static const uint32_t TIMEOUT_MS = 100000;  // todo 100
 
 
 struct sub_s {
@@ -228,6 +229,8 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
             // unknown topic, not supported
             assert_true(0);
         }
+    } else if (jsdrv_cstr_ends_with(msg->topic, "!rsp")) {
+        check_expected_ptr(topic);
     } else {
         // ???
         assert_true(0);
@@ -254,6 +257,9 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
 #define expect_info_any(topic_) \
     expect_string(msg_send_process_next, topic, topic_)
 
+#define expect_rsp_any(topic_) \
+    expect_string(msg_send_process_next, topic, topic_)
+
 
 struct jsdrv_context_s * initialize() {
     uint8_t ex_list_buffer[] = {0};
@@ -265,17 +271,17 @@ struct jsdrv_context_s * initialize() {
     assert_int_equal(0, jsdrv_buffer_initialize(context));
 
     expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_ADD "$");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE "$");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_meta(JSDRV_BUFFER_MGR_MSG_ACTION_LIST "$");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_subscribe(JSDRV_BUFFER_MGR_MSG_ACTION_ADD);
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_subscribe(JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE);
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_buf_list(ex_list_buffer, sizeof(ex_list_buffer));
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     return context;
 }
@@ -284,9 +290,9 @@ void finalize(struct jsdrv_context_s * context) {
     struct jsdrv_list_s * item;
     jsdrv_buffer_finalize();
     expect_unsubscribe(JSDRV_BUFFER_MGR_MSG_ACTION_ADD);
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_unsubscribe(JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE);
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     while (jsdrv_list_length(&context->subscribers)) {
         item = jsdrv_list_remove_head(&context->subscribers);
@@ -336,17 +342,36 @@ static void test_add_remove(void **state) {
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, &jsdrv_union_u8(3)));
 
     expect_subscribe("m/003");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE, &jsdrv_union_u8(3)));
     expect_unsubscribe("m/003");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_buf_list(ex_list_buffer0, sizeof(ex_list_buffer0));
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     finalize(context);
+}
+
+static struct jsdrvp_msg_s * generate_msg_data_i(struct jsdrv_context_s * context, uint64_t sample_id, uint32_t length) {
+    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc_data(context, "u/js220/0123456/s/i/!data");
+    struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) msg->value.value.bin;
+    uint32_t decimate_factor = 2;
+    s->sample_id = sample_id * decimate_factor;
+    s->field_id = JSDRV_FIELD_CURRENT;
+    s->index = 0;
+    s->element_type = JSDRV_DATA_TYPE_FLOAT;
+    s->element_size_bits = 32;
+    s->element_count = length;
+    s->sample_rate = 2000000;
+    s->decimate_factor = decimate_factor;
+    float * sdata = (float *) s->data;
+    for (uint32_t i = 0; i < s->element_count; ++i) {
+        sdata[i] = ((float) (sample_id + i)) * 0.001f;
+    }
+    return msg;
 }
 
 static void test_one_signal(void **state) {
@@ -362,23 +387,23 @@ static void test_one_signal(void **state) {
     struct jsdrv_context_s * context = initialize();
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, &jsdrv_union_u8(buffer_id)));
     expect_subscribe("m/003");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     // Add signal
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD);
     publish(context, msg);
     expect_sig_list(ex_list_sig1, sizeof(ex_list_sig1));
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     // and set source topic
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_str("u/js220/0123456/s/i/!data"));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/s/%03u/topic", buffer_id, signal_id);
     publish(context, msg);
     expect_subscribe("u/js220/0123456/s/i/!data");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     // set buffer size
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u64(1000000LLU));
@@ -386,48 +411,59 @@ static void test_one_signal(void **state) {
     publish(context, msg);
 
     // send first data frame
-    msg = jsdrvp_msg_alloc_data(context, "u/js220/0123456/s/i/!data");
-    struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) msg->value.value.bin;
-    s->sample_id = 10000LLU;
-    s->field_id = JSDRV_FIELD_CURRENT;
-    s->index = 0;
-    s->element_type = JSDRV_DATA_TYPE_FLOAT;
-    s->element_size_bits = 32;
-    s->element_count = 100;
-    s->sample_rate = 2000000;
-    s->decimate_factor = 2;
-    float * sdata = (float *) s->data;
-    for (uint32_t i = 0; i < s->element_count; ++i) {
-        sdata[i] = ((float) i) * 0.001f;
-    }
+    msg = generate_msg_data_i(context, 10000LLU, 100);
     publish(context, msg);
     expect_info_any("m/003/s/005/info");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     // Send second data frame
-    //expect_range("m/003/s/005/s/range", 34LL, 35LL);
-    //msg_send_process_next(context, 100);
-
-    // send second data frame, expect range update
+    msg = generate_msg_data_i(context, 10100LLU, 100);
+    publish(context, msg);
+    expect_info_any("m/003/s/005/info");  // todo check range?
+    msg_send_process_next(context, TIMEOUT_MS);
 
     // request sample data, expect response
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = 10000LLU;
+    req.time.samples.length = 200;
+    jsdrv_cstr_copy(req.rsp_topic, "t/!rsp", sizeof(req.rsp_topic));
+    req.rsp_id = 42;
+    msg = jsdrvp_msg_alloc_value(context, "m/003/s/005/!req", &jsdrv_union_bin((uint8_t *) &req, sizeof(req)));
+    publish(context, msg);
+    expect_rsp_any("t/!rsp");
+    msg_send_process_next(context, TIMEOUT_MS);
 
     // request summary data, expect response
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = 10000LLU;
+    req.time.samples.end = 10200LLU;
+    req.time.samples.length = 20;
+    jsdrv_cstr_copy(req.rsp_topic, "t/!rsp", sizeof(req.rsp_topic));
+    req.rsp_id = 43;
+    msg = jsdrvp_msg_alloc_value(context, "m/003/s/005/!req", &jsdrv_union_bin((uint8_t *) &req, sizeof(req)));
+    publish(context, msg);
+    expect_rsp_any("t/!rsp");
+    msg_send_process_next(context, TIMEOUT_MS);
 
     // tear down
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_ACTION_SIGNAL_REMOVE);
     publish(context, msg);
     expect_unsubscribe("u/js220/0123456/s/i/!data");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_sig_list(ex_list_sig0, sizeof(ex_list_sig0));
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE, &jsdrv_union_u8(buffer_id)));
     expect_unsubscribe("m/003");
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_buf_list(ex_list_buffer0, sizeof(ex_list_buffer0));
-    msg_send_process_next(context, 100);
+    msg_send_process_next(context, TIMEOUT_MS);
 
     finalize(context);
 }
