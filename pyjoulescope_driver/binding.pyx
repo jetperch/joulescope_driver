@@ -87,13 +87,13 @@ cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
         v['response_type'] = 'samples'
         if v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_FLOAT and ['info']['element_size_bits'] == 32:
             shape[0] = <np.npy_intp> length
-            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> &r[0].data.f32[0])
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> &r[0].data[0])
         elif v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and ['info']['element_size_bits'] == 1:
             shape[0] = <np.npy_intp> (length // 8)
-            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data.u8[0])
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
         elif v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and ['info']['element_size_bits'] == 1:
             shape[0] = <np.npy_intp> (length // 2)
-            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data.u8[0])
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
         else:
             _log_c.error('unsupported sample format')
         v['data'] = ndarray.copy()
@@ -101,7 +101,7 @@ cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
         v['response_type'] = 'summary'
         shape[0] = <np.npy_intp> length
         shape[1] = <np.npy_intp> 4
-        ndarray = np.PyArray_SimpleNewFromData(2, shape, np.NPY_FLOAT32, <void *> &r[0].data.f32[0])
+        ndarray = np.PyArray_SimpleNewFromData(2, shape, np.NPY_FLOAT32, <void *> &r[0].data[0])
         v['data'] = ndarray.copy()
     else:
         _log_c.error(f'unsupported response_type {r[0].response_type}')

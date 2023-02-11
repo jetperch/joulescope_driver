@@ -178,7 +178,7 @@
 #define JSDRV_MSG_DEVICE_REMOVE         "@/!remove"     ///< Device removed: subscribe only (published automatically)
 #define JSDRV_MSG_DEVICE_LIST           "@/list"        ///< Device list: subscribe only comma-separated device list, updated with each add & remove
 #define JSDRV_MSG_INITIALIZE            "@/!init"       // CAUTION: internal use only
-#define JSDRV_MSG_FINALIZE              "@/!finalize"   // CAUTION: internal use only
+#define JSDRV_MSG_FINALIZE              "@/!final"      // CAUTION: internal use only
 #define JSDRV_MSG_VERSION               "@/version"     ///< Driver version: subscribe only JSDRV version (u32)
 
 
@@ -418,12 +418,6 @@ struct jsdrv_summary_entry_s {
     float max;                  ///< The minimum value over the window.
 };
 
-union jsdrv_buffer_response_data_u {
-    float f32[];
-    uint8_t u8[];
-    struct jsdrv_summary_entry_s entries[];
-};
-
 /**
  * @brief The response to jsdrv_buffer_request_s produced by the memory buffer.
  *
@@ -445,7 +439,23 @@ struct jsdrv_buffer_response_s {
     uint32_t rsv3_u32;                      ///< Reserved, set to 0.
     int64_t rsp_id;                         ///< The value provided to jsdrv_buffer_request_s.
     struct jsdrv_buffer_info_s info;        ///< The response information.
-    union jsdrv_buffer_response_data_u data;
+
+    /**
+     * @brief The response data.
+     *
+     * The data type for the response varies.
+     * Unfortunately, C does not support flexible arrays in union
+     * types.  Your code should cast the data to the appropriate type.
+     * Use info.time_range_samples.length for the number of data
+     * elements in this response data.
+     *
+     * For response_type JSDRV_BUFFER_RESPONSE_SUMMARY, the
+     * data is jsdrv_summary_entry_s[info.time_range_samples.length].
+     *
+     * For response_type JSDRV_BUFFER_RESPONSE_SAMPLES, the data
+     * is defined by info.element_type and info.element_size_bits.
+     */
+    uint64_t data[];
 };
 
 /// The subscriber flags for jsdrv_subscribe().

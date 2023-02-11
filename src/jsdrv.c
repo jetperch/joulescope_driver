@@ -27,6 +27,7 @@
 #include "jsdrv_prv/assert.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
+#include "jsdrv_prv/buffer.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/pubsub.h"
@@ -583,6 +584,10 @@ static bool handle_backend_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s *
         } else {
             JSDRV_LOGW("unhandled %s", msg->topic);
         }
+    } else if (msg->topic[0] == JSDRV_TOPIC_PREFIX_LOCAL) {
+        jsdrv_pubsub_publish(c->pubsub, msg);
+    } else if (msg->topic[0] == 'm') {  // buffer
+        jsdrv_pubsub_publish(c->pubsub, msg);
     } else {
         switch (msg->inner_msg_type) {
             case JSDRV_MSG_TYPE_NORMAL: break;
@@ -883,6 +888,8 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
     msg = jsdrvp_msg_alloc_str(c, JSDRV_MSG_DEVICE_LIST, "");  // start with empty device list
     jsdrv_pubsub_publish(c->pubsub, msg);
     jsdrv_pubsub_process(c->pubsub);
+    JSDRV_RETURN_ON_ERROR(jsdrv_buffer_initialize(c));
+
     int32_t rv = jsdrv_thread_create(&c->thread, frontend_thread, c);
     if (rv) {
         jsdrv_finalize(c, 0);
@@ -908,6 +915,7 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         jsdrv_cstr_copy(msg->topic, JSDRV_MSG_FINALIZE, sizeof(msg->topic));
         msg_queue_push(context->msg_cmd, msg);
         jsdrv_thread_join(&context->thread, timeout_ms);
+        jsdrv_buffer_finalize();
         jsdrv_pubsub_finalize(c->pubsub);
         c->pubsub = NULL;
 

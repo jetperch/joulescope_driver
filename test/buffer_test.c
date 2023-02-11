@@ -168,8 +168,14 @@ void jsdrvp_backend_send(struct jsdrv_context_s * context, struct jsdrvp_msg_s *
 static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t timeout_ms) {
     struct jsdrvp_msg_s * msg = NULL;
     char topic[JSDRV_TOPIC_LENGTH_MAX];
-    assert_int_equal(0, msg_queue_pop(context->msg_sent, &msg, timeout_ms));
-    jsdrv_cstr_copy(topic, msg->topic, sizeof(topic));
+    char return_code_suffix[2] = {JSDRV_TOPIC_SUFFIX_RETURN_CODE, 0};
+    while (1) {
+        assert_int_equal(0, msg_queue_pop(context->msg_sent, &msg, timeout_ms));
+        jsdrv_cstr_copy(topic, msg->topic, sizeof(topic));
+        if (!jsdrv_cstr_ends_with(msg->topic, return_code_suffix)) {
+            break;
+        }
+    }
     if (0 == strcmp(JSDRV_PUBSUB_SUBSCRIBE, msg->topic)) {
         jsdrv_cstr_copy(topic, msg->payload.sub.topic, sizeof(topic));
         check_expected_ptr(topic);
@@ -186,7 +192,7 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
         const uint8_t *buf_list_buffers = msg->value.value.bin;
         check_expected(buf_list_length);
         check_expected_ptr(buf_list_buffers);
-    } else if (jsdrv_cstr_starts_with(msg->topic, "m/+/")) {
+    } else if (jsdrv_cstr_starts_with(msg->topic, "m/@/")) {
         // unknown topic, not supported
         assert_true(0);
     } else if (jsdrv_cstr_starts_with(msg->topic, "m/")) {

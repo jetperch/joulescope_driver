@@ -176,10 +176,6 @@ cdef extern from "jsdrv.h":
         float std
         float min
         float max
-    union jsdrv_buffer_response_data_u:
-        float f32[0]
-        uint8_t u8[0]
-        jsdrv_summary_entry_s entries[0]
     struct jsdrv_buffer_response_s:
         uint8_t version
         uint8_t response_type
@@ -188,7 +184,7 @@ cdef extern from "jsdrv.h":
         uint32_t rsv3_u32
         int64_t rsp_id
         jsdrv_buffer_info_s info
-        jsdrv_buffer_response_data_u data
+        uint64_t data[0]
     enum jsdrv_subscribe_flag_e:
         JSDRV_SFLAG_NONE = 0                    # No flags (always 0).
         JSDRV_SFLAG_RETAIN = (1 << 0)           # Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.

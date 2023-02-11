@@ -140,7 +140,7 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
         length = rsp->info.time_range_samples.end - rsp->info.time_range_samples.start + 1;
     }
 
-    uint8_t * data_rsp = rsp->data.u8;
+    uint8_t * data_rsp = (uint8_t *) rsp->data;
     uint8_t * data_buf = (uint8_t *) self->level0_data;
     uint64_t tail = level0_tail(self);
 
@@ -280,7 +280,7 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
         return;
     }
 
-    struct jsdrv_summary_entry_s * entries = rsp->data.entries;
+    struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     struct jsdrv_summary_entry_s * y;
     uint32_t dst_idx = 0;
     uint64_t sample_id = sample_id_start;

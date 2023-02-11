@@ -38,9 +38,9 @@ struct jsdrv_context_s;
 #endif
 
 // topics for the buffer manager: add/remove buffers
-#define JSDRV_BUFFER_MGR_MSG_ACTION_ADD               "m/+/@/!add"      // u8: 1 <= id <= JSDRV_BUFFER_COUNT_MAX
-#define JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE            "m/+/@/!remove"   // u8 id
-#define JSDRV_BUFFER_MGR_MSG_ACTION_LIST              "m/+/@/list"      // bin ro: u8[N] ids
+#define JSDRV_BUFFER_MGR_MSG_ACTION_ADD               "m/@/!add"      // u8: 1 <= id <= JSDRV_BUFFER_COUNT_MAX
+#define JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE            "m/@/!remove"   // u8 id
+#define JSDRV_BUFFER_MGR_MSG_ACTION_LIST              "m/@/list"      // bin ro: u8[N] ids
 
 // topics per buffer: prefix is "m/BBB/" where BBB is the buffer_id
 #define JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD            "a/!add"          // u8 id

@@ -38,18 +38,17 @@ JSDRV_STATIC_ASSERT(JSDRV_BUFSIG_COUNT_MAX <= 256, bufsig_fits_in_u8); // assume
 
 
 static const char * action_add_meta = "{"
-    "\"dtype\": \"u8\","
-    "\"brief\": \"Add a memory buffer.\","  // any u8 value between 1 and 16, inclusive
+    "\"dtype\": \"u32\","
+    "\"brief\": \"Add a memory buffer.\""  // any u8 value between 1 and 16, inclusive
 "}";
 
 static const char * action_remove_meta = "{"
-    "\"dtype\": \"u8\","
-    "\"brief\": \"Remove a memory buffer.\","
+    "\"dtype\": \"u32\","
+    "\"brief\": \"Remove a memory buffer.\""
 "}";
 
 static const char * action_list_meta = "{"
-    "\"dtype\": \"bin\","
-    "\"brief\": \"The list of available buffers, 0 terminated.\","
+    "\"brief\": \"The list of available buffers, 0 terminated.\""
 "}";
 
 /*
@@ -99,6 +98,7 @@ struct buffer_mgr_s {
 
 static struct buffer_mgr_s instance_;
 
+static uint8_t _buffer_recv(void * user_data, struct jsdrvp_msg_s * msg);
 static uint8_t _buffer_recv_data(void * user_data, struct jsdrvp_msg_s * msg);
 
 static void send_to_frontend(struct buffer_mgr_s * self, const char * topic, const struct jsdrv_union_s * value) {
@@ -324,8 +324,35 @@ static void req_list_free(struct jsdrv_list_s * list) {
     }
 }
 
+static int32_t send_return_code_to_frontend(struct jsdrv_context_s * context, const char * topic, int32_t rc,
+        jsdrv_pubsub_subscribe_fn cbk_fn, void * cbk_user_data) {
+    struct jsdrvp_msg_s * m;
+    m = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_i32(rc));
+    tfp_snprintf(m->topic, sizeof(m->topic), "%s%c", topic, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
+    m->extra.frontend.subscriber.internal_fn = cbk_fn;
+    m->extra.frontend.subscriber.user_data = cbk_user_data;
+    m->extra.frontend.subscriber.is_internal = 1;
+    jsdrvp_backend_send(context, m);
+    return rc;
+}
+
+static int32_t buffer_recv_complete(struct buffer_s * self, const char * subtopic, int32_t rc) {
+    if (rc >= 0) {
+        struct jsdrvp_msg_s *m;
+        m = jsdrvp_msg_alloc_value(self->context, "", &jsdrv_union_i32(rc));
+        tfp_snprintf(m->topic, sizeof(m->topic), "m/%03d/%s%c", self->idx,
+                     subtopic, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
+        m->extra.frontend.subscriber.internal_fn = _buffer_recv;
+        m->extra.frontend.subscriber.user_data = self;
+        m->extra.frontend.subscriber.is_internal = 1;
+        jsdrvp_backend_send(self->context, m);
+    }
+    return rc;
+}
+
 static bool handle_cmd_q(struct buffer_s * self) {
     bool rv = true;
+    int32_t rc = -1;  // ignored
     struct jsdrvp_msg_s * msg = msg_queue_pop_immediate(self->cmd_q);
     char idx_str[JSDRV_TOPIC_LENGTH_MAX];
     // note: ResetEvent handled automatically by msg_queue_pop_immediate
@@ -349,6 +376,7 @@ static bool handle_cmd_q(struct buffer_s * self) {
         }
     } else if (msg->u32_a != 0) {
         JSDRV_LOGW("Invalid buffer index: %s", msg->u32_a);
+        rc = JSDRV_ERROR_NOT_FOUND;
     } else if ((s[0] == 'a') && (s[1] == '/')) {
         s += 2;
         struct jsdrv_union_s v = msg->value;
@@ -358,19 +386,24 @@ static bool handle_cmd_q(struct buffer_s * self) {
 
         if ((idx <= 0) || (idx >= JSDRV_BUFSIG_COUNT_MAX)) {
             JSDRV_LOGW("Invalid signal index: %s", msg->topic);
+            rc = JSDRV_ERROR_NOT_FOUND;
         } else if (0 == strcmp(s, "!add")) {
             if (b->active) {
                 JSDRV_LOGW("signal already active: %u", idx);
+                rc = JSDRV_ERROR_BUSY;
             } else {
                 b->active = true;
                 buf_publish_signal_list(self);
+                rc = 0;
             }
         } else if (0 == strcmp(s, "!remove")) {
             bufsig_unsub(b);
             b->active = false;
             buf_publish_signal_list(self);
+            rc = 0;
         } else {
             JSDRV_LOGW("signal unsupported: %s", s);
+            rc = JSDRV_ERROR_NOT_FOUND;
         }
     } else if ((s[0] == 's') && (s[1] == '/')) {
         s += 2;
@@ -383,9 +416,11 @@ static bool handle_cmd_q(struct buffer_s * self) {
         s++;
         if (0 != jsdrv_cstr_to_u32(idx_str, &idx)) {
             JSDRV_LOGW("Could not parse signal index: %s", msg->topic);
+            rc = JSDRV_ERROR_PARAMETER_INVALID;
         } else if ((idx <= 0) || (idx >= JSDRV_BUFSIG_COUNT_MAX)) {
             JSDRV_LOGW("Invalid signal index: %s", msg->topic);
             // todo validate idx
+            rc = JSDRV_ERROR_NOT_FOUND;
         } else {
             struct bufsig_s * b = &self->signals[idx];
             if (0 == strcmp(s, "!req")) {
@@ -393,10 +428,13 @@ static bool handle_cmd_q(struct buffer_s * self) {
                     JSDRV_LOGI("buffer request but app field is %d", (int) msg->value.app);
                 }
                 req_post(self, idx, (struct jsdrv_buffer_request_s *) msg->value.value.bin);
+                rc = 0;
             } else if (0 == strcmp(s, "topic")) {
                 bufsig_sub(b, msg->value.value.str);
+                rc = 0;
             } else {
                 JSDRV_LOGW("ignore %s", msg->topic);
+                rc = JSDRV_ERROR_PARAMETER_INVALID;
             }
         }
     } else if ((s[0] == 'g') && (s[1] == '/')) {
@@ -407,17 +445,22 @@ static bool handle_cmd_q(struct buffer_s * self) {
             jsdrv_union_widen(&v);
             self->size = msg->value.value.u64;
             self->state = (0 == self->size) ? ST_IDLE : ST_AWAIT;
+            rc = 0;
         } else {
             // todo hold
             // todo mode
             JSDRV_LOGW("buffer global unsupported: %s", s);
+            rc = JSDRV_ERROR_PARAMETER_INVALID;
         }
     } else if (0 == strcmp(s, JSDRV_MSG_FINALIZE)) {
         self->do_exit = 1;
         rv = false;
+        rc = 0;
     } else {
         JSDRV_LOGW("ignore %s", msg->topic);
+        rc = JSDRV_ERROR_PARAMETER_INVALID;
     }
+    buffer_recv_complete(self, msg->topic, rc);
     jsdrvp_msg_free(self->context, msg);
     return rv;
 }
@@ -498,14 +541,14 @@ static uint8_t _buffer_add(void * user_data, struct jsdrvp_msg_s * msg) {
     uint64_t buffer_id_i64 = v.value.i64;
     if ((buffer_id_i64 < 1) || (buffer_id_i64 > JSDRV_BUFFER_COUNT_MAX)) {
         JSDRV_LOGE("buffer_id %llu invalid", buffer_id_i64);
-        return 1;
+        return send_return_code_to_frontend(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, JSDRV_ERROR_PARAMETER_INVALID, _buffer_add, self);
     }
 
     uint8_t buffer_id = (uint8_t) buffer_id_i64;
     struct buffer_s * b = &self->buffers[buffer_id - 1];
     if (NULL != b->cmd_q) {
         JSDRV_LOGE("buffer_id %u already exists", buffer_id);
-        return 1;
+        return send_return_code_to_frontend(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, JSDRV_ERROR_ALREADY_EXISTS, _buffer_add, self);
     }
     JSDRV_LOGI("buffer_id %u add", buffer_id);
     memset(b, 0, sizeof(*b));
@@ -527,11 +570,11 @@ static uint8_t _buffer_add(void * user_data, struct jsdrvp_msg_s * msg) {
 
     if (jsdrv_thread_create(&b->thread, buffer_thread, b)) {
         JSDRV_LOGE("buffer_id %u thread create failed", buffer_id);
-        return 1;
+        return send_return_code_to_frontend(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, JSDRV_ERROR_UNSPECIFIED, _buffer_add, self);
     }
 
     _send_buffer_list(self);
-    return 0;
+    return send_return_code_to_frontend(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, 0, _buffer_add, self);
 }
 
 static void _buffer_remove_inner(struct buffer_mgr_s * self, uint8_t buffer_id) {
@@ -557,10 +600,10 @@ static uint8_t _buffer_remove(void * user_data, struct jsdrvp_msg_s * msg) {
     uint64_t buffer_id_i64 = v.value.i64;
     if ((buffer_id_i64 < 1) || (buffer_id_i64 > JSDRV_BUFFER_COUNT_MAX)) {
         JSDRV_LOGE("invalid buffer_id: %llu", buffer_id_i64);
-        return 1;
+        return send_return_code_to_frontend(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, JSDRV_ERROR_NOT_FOUND, _buffer_remove, self);
     }
     _buffer_remove_inner(self, (uint8_t) buffer_id_i64);
-    return 0;
+    return send_return_code_to_frontend(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, 0, _buffer_remove, self);
 }
 
 int32_t jsdrv_buffer_initialize(struct jsdrv_context_s * context) {
