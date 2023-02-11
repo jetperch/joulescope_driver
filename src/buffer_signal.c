@@ -73,6 +73,10 @@ void jsdrv_bufsig_free(struct bufsig_s * self) {
 }
 
 static void summarize(struct bufsig_s * self, uint64_t start_idx, uint64_t length) {
+    (void) self;
+    (void) start_idx;
+    (void) length;
+    // todo support summary level optimization.
 }
 
 void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg) {
@@ -233,6 +237,9 @@ static void summary_level0_get(struct bufsig_s * self, uint64_t sample_id, uint6
                     x_u8 = (x_u8 >> 4);
                 }
                 x_u8 &= 0x0f;
+            } else {
+                // should never get here, only 1 & 4 bits supported
+                x_u8 = 0;
             }
             x1 += x_u8;
             x2 = js220_i128_add(x2, js220_i128_square_i64(x_u8));
@@ -242,13 +249,13 @@ static void summary_level0_get(struct bufsig_s * self, uint64_t sample_id, uint6
             if (x_u8 > y_max) {
                 y_max = x_u8;
             }
+            ++src_idx;
         }
         y->avg = (float) (((double) x1) / (double) incr);
         y->std = (float) js220_i128_compute_std(x1, x2, incr, 0);
         y->min = y_min;
         y->max = y_max;
     }
-
 }
 
 static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s * rsp) {
