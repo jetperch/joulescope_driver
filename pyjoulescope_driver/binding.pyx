@@ -498,12 +498,16 @@ cdef int32_t _timeout_validate(value, default=None):
     return <int32_t> (float(value) * 1000)
 
 
-def _handle_rc(rc, src):
+def _handle_rc(rc, src, cause=None):
     if rc:
-        if rc == ErrorCode.TIMED_OUT:
-            raise TimeoutError(f'{src} timed out')
+        if cause:
+            cause = f' | {cause}'
         else:
-            raise RuntimeError(f'{src} failed {rc}')
+            ''
+        if rc == ErrorCode.TIMED_OUT:
+            raise TimeoutError(f'{src} timed out{cause}')
+        else:
+            raise RuntimeError(f'{src} failed {rc}{cause}')
 
 
 cdef class Driver:
@@ -610,7 +614,7 @@ cdef class Driver:
             v.flags = c_jsdrv.JSDRV_UNION_FLAG_RETAIN
         with nogil:
             rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms)
-        _handle_rc(rc, 'jsdrv_publish')
+        _handle_rc(rc, 'jsdrv_publish', topic)
 
     def query(self, topic: str, timeout=None):
         """Query the value for a topic.
@@ -631,7 +635,7 @@ cdef class Driver:
         v.value.str = byte_str
         with nogil:
             rc = c_jsdrv.jsdrv_query(self._context, <char *> &topic_str[0], &v, timeout_ms)
-        _handle_rc(rc, 'jsdrv_query')
+        _handle_rc(rc, 'jsdrv_query', topic)
         return _jsdrv_union_to_py(&v)
 
     def device_paths(self, timeout=None):
@@ -691,7 +695,7 @@ cdef class Driver:
         self._subscribers.add((topic, fn))
         with nogil:
             rc = c_jsdrv.jsdrv_subscribe(self._context, <char *> &topic_str[0], c_flags, _on_cmd_publish1_cbk, fn_ptr, timeout_ms)
-        _handle_rc(rc, 'jsdrv_subscribe')
+        _handle_rc(rc, 'jsdrv_subscribe', topic)
 
     def unsubscribe(self, topic, fn, timeout=None):
         """Unsubscribe from a topic.
@@ -709,7 +713,7 @@ cdef class Driver:
         self._subscribers.discard((topic, fn))
         with nogil:
             rc = c_jsdrv.jsdrv_unsubscribe(self._context, <char *> &topic_str[0], _on_cmd_publish1_cbk, fn_ptr, timeout_ms)
-        _handle_rc(rc, 'jsdrv_unsubscribe')
+        _handle_rc(rc, 'jsdrv_unsubscribe', topic)
 
     def unsubscribe_all(self, fn, timeout=None):
         """Unsubscribe a callback from all topics.
@@ -759,7 +763,7 @@ cdef class Driver:
 
         with nogil:
             rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms);
-        _handle_rc(rc, 'jsdrv_open')
+        _handle_rc(rc, 'jsdrv_open', device_prefix)
 
     def close(self, device_prefix, timeout=None):
         """Close an attached device.
@@ -779,7 +783,7 @@ cdef class Driver:
         v.value.i32 = 0
         with nogil:
             rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms);
-        _handle_rc(rc, 'jsdrv_close')
+        _handle_rc(rc, 'jsdrv_close', device_prefix)
 
 
 cdef void _on_cmd_publish2_cbk(void * user_data, const char * topic, const c_jsdrv.jsdrv_union_s * value) with gil:

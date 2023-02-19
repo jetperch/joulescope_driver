@@ -30,6 +30,7 @@
 #include "jsdrv.h"
 #include "tinyprintf.h"
 #include <math.h>
+#include <inttypes.h>
 
 
 JSDRV_STATIC_ASSERT(16 == sizeof(struct jsdrv_summary_entry_s), entry_size_one);
@@ -175,27 +176,10 @@ static bool await_check(struct buffer_s * self) {
     return true;
 }
 
-static void bufsig_info_set(struct bufsig_s * self, struct jsdrv_buffer_info_s * info) {
-    memset(info, 0, sizeof(*info));
-    info->version = 1;
-    info->field_id = self->hdr.field_id;
-    info->index = self->hdr.index;
-    info->element_type = self->hdr.element_type;
-    info->element_size_bits = self->hdr.element_size_bits;
-    info->size_in_utc = self->size_in_utc;
-    info->size_in_samples = self->N;
-    jsdrv_cstr_copy(info->topic, self->topic, sizeof(info->topic));
-    info->size_in_utc = self->size_in_utc;
-    info->size_in_samples = self->N;
-    // todo info.time_range_utc = ?;
-    // todo info.time_range_samples = ?;
-    info->sample_rate = self->sample_rate;
-}
-
 static void bufsig_publish_info(struct bufsig_s * self) {
     struct jsdrv_context_s * context = self->parent->context;
     struct jsdrv_buffer_info_s info;
-    bufsig_info_set(self, &info);
+    jsdrv_bufsig_info(self, &info);
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(context, "",
             &jsdrv_union_cbin_r((uint8_t *) &info, sizeof(info)));
     tfp_snprintf(m->topic, sizeof(m->topic), "m/%03d/s/%03d/info", self->parent->idx, self->idx);
@@ -206,6 +190,7 @@ static void bufsig_publish_info(struct bufsig_s * self) {
 static void buffer_alloc(struct buffer_s * self) {
     double coef_f32 = sizeof(float);
     double coef_u = 0.0;
+    JSDRV_LOGI("buffer_alloc %" PRIu64, self->size);
     size_t summary_entry_sz = sizeof(struct jsdrv_summary_entry_s);
     for (uint32_t lvl = 1; lvl < 8; ++lvl) {
         double pow_lvl = pow(32.0, lvl - 1);
@@ -227,9 +212,9 @@ static void buffer_alloc(struct buffer_s * self) {
             sz_per_s += sample_rate * ((b->hdr.element_size_bits / 8.0) + coef_u);
         }
     }
-
     // determine sample count for each signal, allocate, and publish duration
     double duration = self->size / sz_per_s;
+    JSDRV_LOGI("%d B/s -> %d seconds", (int) sz_per_s, (int) duration);
     for (uint32_t idx = 0; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
         struct bufsig_s *b = &self->signals[idx];
         if (!b->active) {
@@ -303,7 +288,7 @@ static bool req_handle_one(struct buffer_s * self) {
     memset(rsp, 0, sizeof(*rsp));
     rsp->version = 1;
     rsp->rsp_id = req->req.rsp_id;
-    bufsig_info_set(b, &rsp->info);
+    jsdrv_bufsig_info(b, &rsp->info);
     rsp->info.time_range_utc.length = 0;
     rsp->info.time_range_samples.length = 0;
     jsdrv_bufsig_process_request(b, &req->req, rsp);
@@ -430,8 +415,11 @@ static bool handle_cmd_q(struct buffer_s * self) {
                 req_post(self, idx, (struct jsdrv_buffer_request_s *) msg->value.value.bin);
                 rc = 0;
             } else if (0 == strcmp(s, "topic")) {
+                JSDRV_LOGI("buffer %d set topic %s", idx, msg->value.value.str);
                 bufsig_sub(b, msg->value.value.str);
                 rc = 0;
+            } else if (0 == strcmp(s, "info")) {
+                // published by us, ignore
             } else {
                 JSDRV_LOGW("ignore %s", msg->topic);
                 rc = JSDRV_ERROR_PARAMETER_INVALID;
@@ -440,12 +428,17 @@ static bool handle_cmd_q(struct buffer_s * self) {
     } else if ((s[0] == 'g') && (s[1] == '/')) {
         s += 2;
         if (0 == strcmp(s, "size")) {
-            buffer_free(self);
             struct jsdrv_union_s v = msg->value;
             jsdrv_union_widen(&v);
-            self->size = msg->value.value.u64;
+            uint64_t sz = v.value.u64;
+            JSDRV_LOGW("buffer set size start: %" PRIu64, sz);
+            buffer_free(self);
+            self->size = sz;
             self->state = (0 == self->size) ? ST_IDLE : ST_AWAIT;
+            JSDRV_LOGW("buffer set size done %d: %" PRIu64, self->state, sz);
             rc = 0;
+        } else if (0 == strcmp(s, "list")) {
+            // published by us, ignore
         } else {
             // todo hold
             // todo mode

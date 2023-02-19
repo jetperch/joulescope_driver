@@ -83,6 +83,7 @@ add_executable(jsdrv_util
         jsdrv_util/scan.c
         jsdrv_util/set.c
         jsdrv_util/statistics.c
+        jsdrv_util/stream_buffer.c
         jsdrv_util/threads.c
         jsdrv_util/version.c
         )

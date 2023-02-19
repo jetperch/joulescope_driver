@@ -1372,7 +1372,8 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         d->in_frame_id = hdr.h.frame_id;
     }
     if ((d->stream_in_port_enable & (1U << hdr.h.port_id)) == 0U) {
-        JSDRV_LOGW("stream in ignore on inactive port %d", hdr.h.port_id);
+        // JSDRV_LOGW("stream in ignore on inactive port %d", hdr.h.port_id);
+        // todo keep statistics
     } else if (hdr.h.port_id >= 16U) {
         if (hdr.h.port_id == (16U + 13U)) {
             handle_uart_in(d, p_u32 + 1, hdr.h.length);

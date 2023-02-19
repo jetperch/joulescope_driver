@@ -83,6 +83,8 @@ void jsdrv_bufsig_free(struct bufsig_s * self);
 
 void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg);
 
+void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info);
+
 /**
  * @brief Process a request.
  *

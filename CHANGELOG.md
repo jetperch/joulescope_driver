@@ -6,7 +6,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.2.0
 
-2023 Feb 10 [in progress]
+2023 Feb 19[in progress]
 
 * Added memory buffer.
   * Added bare sample buffer for f32, u4, u1
