@@ -77,6 +77,7 @@ static void on_buf_rsp(void * user_data, const char * topic, const struct jsdrv_
 
 static void on_buf_info(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     struct app_s * self = (struct app_s *) user_data;
+    (void) topic;
     if ((value->type != JSDRV_UNION_BIN) || (value->app != JSDRV_PAYLOAD_TYPE_BUFFER_INFO)) {
         printf("info value type invalid\n");
         return;
