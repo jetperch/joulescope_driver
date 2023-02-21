@@ -25,6 +25,7 @@
 
 #include "jsdrv/cmacro_inc.h"
 #include "jsdrv/union.h"
+#include "jsdrv/time.h"
 #include <stdint.h>
 
 /**
@@ -353,7 +354,7 @@ struct jsdrv_buffer_info_s {
     uint64_t size_in_samples;               ///< The total buffer size in samples.
     struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time.
     struct jsdrv_time_range_samples_s time_range_samples;  ///< In sample time.
-    double sample_rate;                     ///< The effective sample frequency (samples per second).
+    struct jsdrv_time_map_s time_map;       ///< The map between samples and utc time.
 };
 
 /**

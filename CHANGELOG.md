@@ -6,11 +6,15 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.2.0
 
-2023 Feb 19[in progress]
+2023 Feb 21 [in progress]
 
 * Added memory buffer.
   * Added bare sample buffer for f32, u4, u1
   * Summary optimizations not yet implemented
+  * This feature is still in development!
+* Bumped python support (3.8 - 3.11).  Dropped 3.7.
+* Added API struct jsdrv_time_map_s and functions
+  jsdrv_time_from_counter(), jsdrv_time_to_counter.
 
 
 ## 1.1.4

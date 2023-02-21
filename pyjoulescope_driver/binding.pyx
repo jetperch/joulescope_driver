@@ -23,7 +23,7 @@ Python binding for the native Joulescope driver implementation.
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t
 from libc.float cimport DBL_MAX
 from libc.math cimport isfinite, NAN
-from libc.string cimport memset
+from libc.string cimport memset, strcpy
 
 from collections.abc import Mapping
 import json
@@ -70,7 +70,11 @@ cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
             'length': info[0].time_range_samples.length,
 
         },
-        'sample_rate': info[0].sample_rate,
+        'time_map': {
+            'offset_time': info[0].time_map.offset_time,
+            'offset_counter': info[0].time_map.offset_counter,
+            'counter_rate': info[0].time_map.counter_rate,
+        },
     }
     return v
 
@@ -85,13 +89,14 @@ cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
     length = v['info']['time_range_samples']['length']
     if r[0].response_type == c_jsdrv.JSDRV_BUFFER_RESPONSE_SAMPLES:
         v['response_type'] = 'samples'
-        if v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_FLOAT and ['info']['element_size_bits'] == 32:
+        info = v['info']
+        if info['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_FLOAT and info['element_size_bits'] == 32:
             shape[0] = <np.npy_intp> length
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> &r[0].data[0])
-        elif v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and ['info']['element_size_bits'] == 1:
+        elif info['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and info['element_size_bits'] == 1:
             shape[0] = <np.npy_intp> (length // 8)
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
-        elif v['info']['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and ['info']['element_size_bits'] == 1:
+        elif info['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and info['element_size_bits'] == 1:
             shape[0] = <np.npy_intp> (length // 2)
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
         else:
@@ -109,6 +114,7 @@ cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
 
 
 cdef object _pack_buffer_req(r):
+    cdef const uint8_t[:] rsp_topic_str = r['rsp_topic'].encode('utf-8')
     cdef c_jsdrv.jsdrv_buffer_request_s s
     cdef uint8_t * u8_ptr
 
@@ -129,8 +135,8 @@ cdef object _pack_buffer_req(r):
     s.rsv1_u8 = 0
     s.rsv2_u8 = 0
     s.rsv3_u32 = 0
-    s.rsp_topic = r['rsp_topic']
-    s.rsp_id = r['rsp_id']
+    strcpy(s.rsp_topic, <const char *> &rsp_topic_str[0])
+    s.rsp_id = int(r['rsp_id'])
 
     u8_ptr = <uint8_t *> &s;
     return bytes(u8_ptr[:sizeof(s)])
@@ -281,7 +287,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
         else:
             v = None
     except Exception as ex:
-        print(f'_jsdrv_union_to_py conversion failed: {ex}')
+        _log_c.exception(ex)
         v = None
     return v
 

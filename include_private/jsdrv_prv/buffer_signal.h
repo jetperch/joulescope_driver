@@ -50,7 +50,7 @@ struct bufsig_s {
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     struct buffer_s * parent;
     struct bufsig_stream_header_s hdr;
-    double sample_rate;
+    struct jsdrv_time_map_s time_map;
 
     uint64_t N;             // size in samples
     int64_t size_in_utc;    // size in UTC time

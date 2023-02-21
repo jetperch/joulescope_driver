@@ -431,11 +431,11 @@ static bool handle_cmd_q(struct buffer_s * self) {
             struct jsdrv_union_s v = msg->value;
             jsdrv_union_widen(&v);
             uint64_t sz = v.value.u64;
-            JSDRV_LOGW("buffer set size start: %" PRIu64, sz);
+            JSDRV_LOGI("buffer set size start: %" PRIu64, sz);
             buffer_free(self);
             self->size = sz;
             self->state = (0 == self->size) ? ST_IDLE : ST_AWAIT;
-            JSDRV_LOGW("buffer set size done %d: %" PRIu64, self->state, sz);
+            JSDRV_LOGI("buffer set size done %d: %" PRIu64, self->state, sz);
             rc = 0;
         } else if (0 == strcmp(s, "list")) {
             // published by us, ignore

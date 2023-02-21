@@ -22,6 +22,13 @@ DEF JSDRV_STREAM_DATA_SIZE      = (1024 * 64)
 DEF JSDRV_STREAM_PAYLOAD_LENGTH_MAX = (JSDRV_STREAM_DATA_SIZE - 16)
 
 
+cdef extern from "jsdrv/time.h":
+    struct jsdrv_time_map_s:
+        int64_t offset_time
+        uint64_t offset_counter
+        double counter_rate
+
+
 cdef extern from "jsdrv/union.h":
     enum jsdrv_union_e:
         JSDRV_UNION_NULL = 0  # NULL value.  Also used to clear existing value.
@@ -155,7 +162,7 @@ cdef extern from "jsdrv.h":
         uint64_t size_in_samples
         jsdrv_time_range_utc_s time_range_utc
         jsdrv_time_range_samples_s time_range_samples
-        double sample_rate
+        jsdrv_time_map_s time_map
     union jsdrv_buffer_request_time_range_u:
         jsdrv_time_range_utc_s utc
         jsdrv_time_range_samples_s samples

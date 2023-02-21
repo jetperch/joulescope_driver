@@ -29,7 +29,6 @@
 const uint64_t SUMMARY_LENGTH_MAX = (sizeof(struct jsdrv_stream_signal_s) - sizeof(struct jsdrv_buffer_response_s)) /
         sizeof(struct jsdrv_summary_entry_s);
 
-
 void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_t rN) {
     self->N = N;
     self->r0 = r0;
@@ -43,7 +42,7 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
     }
 
     double size_in_utc = ((double) N) / (self->hdr.sample_rate / self->hdr.decimate_factor);
-    self->sample_rate = ((double) self->hdr.sample_rate) / self->hdr.decimate_factor;
+    self->time_map.counter_rate = ((double) self->hdr.sample_rate) / self->hdr.decimate_factor;
     self->size_in_utc = JSDRV_F64_TO_TIME(size_in_utc);
 
     if (JSDRV_DATA_TYPE_FLOAT == self->hdr.element_type) {
@@ -77,15 +76,19 @@ void jsdrv_bufsig_free(struct bufsig_s * self) {
 static void samples_to_utc(struct bufsig_s * self,
         struct jsdrv_time_range_samples_s const * samples,
         struct jsdrv_time_range_utc_s * utc) {
-    // todo add correct UTC support
-    int64_t offset_seconds = (int64_t) (samples->start / self->sample_rate);
-    int64_t offset_samples = (int64_t) (offset_seconds * self->sample_rate);
-    offset_seconds *= JSDRV_TIME_SECOND;
-    double dt1 = (double) (samples->start - offset_samples) / self->sample_rate;
-    double dt2 = (double) (samples->end - offset_samples) / self->sample_rate;
-    utc->start = offset_seconds + JSDRV_F64_TO_TIME(dt1);
-    utc->end = offset_seconds + JSDRV_F64_TO_TIME(dt2);
-    utc->length = samples->length;
+    uint64_t length = samples->length;
+    utc->start = jsdrv_time_from_counter(&self->time_map, samples->start);
+    utc->end = jsdrv_time_from_counter(&self->time_map, samples->end);
+    utc->length = length;
+}
+
+static void utc_to_samples(struct bufsig_s * self,
+                           struct jsdrv_time_range_utc_s const * utc,
+                           struct jsdrv_time_range_samples_s * samples) {
+    uint64_t length = utc->length;
+    samples->start = jsdrv_time_to_counter(&self->time_map, utc->start);
+    samples->end = jsdrv_time_to_counter(&self->time_map, utc->end);
+    samples->length = length;
 }
 
 void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info) {
@@ -104,7 +107,7 @@ void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
     info->time_range_samples.end = self->sample_id_head;
     info->time_range_samples.length = self->level0_size;
     samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
-    info->sample_rate = self->sample_rate;
+    info->time_map = self->time_map;
 }
 
 static void summarize(struct bufsig_s * self, uint64_t start_idx, uint64_t length) {
@@ -136,8 +139,12 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg) {
     uint64_t sample_id_expect = self->sample_id_head + length;
     if (s->sample_id == 0) {
         // initial sample, ignore skips
+        // todo device should provide time_map
+        self->time_map.offset_counter = s->sample_id;
+        self->time_map.offset_time = jsdrv_time_utc();
     } else if (sample_id_expect != sample_id) {
-        JSDRV_LOGW("bufsig_recv_data: mismatch rcv=%" PRIu64 " expect=%" PRIu64, sample_id, sample_id_expect);
+        JSDRV_LOGW("bufsig_recv_data %s: mismatch rcv=%" PRIu64 " expect=%" PRIu64,
+                   self->topic, sample_id, sample_id_expect);
         // todo handle sample skips
     }
 
@@ -349,10 +356,16 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
         } else {
             summary_level0_get(self, sample_id, incr, y);
         }
+        sample_id = sample_id_next;
     }
 
     if (out_of_range_count) {
-        JSDRV_LOGI("summary request: out_of_range_count == %" PRIu32, out_of_range_count);
+        JSDRV_LOGI("summary request: out_of_range_count == %" PRIu32
+                   " fs=%.0f,"
+                   " req=[%" PRIu64 ", %" PRIu64 "], buf=[%" PRIu64 ", %" PRIu64 "]",
+                   out_of_range_count, self->time_map.counter_rate,
+                   sample_id_start, sample_id_start + length * incr,
+                   sample_id_tail, self->sample_id_head);
     }
 
     rsp->info.time_range_utc.length = rsp->info.time_range_samples.length;
@@ -365,15 +378,7 @@ void jsdrv_bufsig_process_request(
         struct jsdrv_buffer_request_s * req,
         struct jsdrv_buffer_response_s * rsp) {
     if (JSDRV_TIME_UTC == req->time_type) {
-        // todo convert from UTC to samples for real
-        struct jsdrv_time_range_utc_s * utc = &rsp->info.time_range_utc;
-        struct jsdrv_time_range_samples_s * samples = &rsp->info.time_range_samples;
-        int64_t offset_seconds = utc->start / JSDRV_TIME_SECOND;
-        int64_t offset_time64 = offset_seconds * JSDRV_TIME_SECOND;
-        uint64_t offset_samples = (uint64_t) ((double) offset_seconds * self->sample_rate);
-        samples->start = offset_samples + (uint64_t) ((double) (utc->start - offset_time64) / self->sample_rate);
-        samples->end   = offset_samples + (uint64_t) ((double) (utc->end - offset_time64) / self->sample_rate);
-        samples->length = utc->length;
+        utc_to_samples(self, &req->time.utc, &req->time.samples);
         req->time_type = JSDRV_TIME_SAMPLES;
     }
     if (JSDRV_TIME_SAMPLES == req->time_type) {
