@@ -62,7 +62,6 @@ add_test(pubsub_test ${CMAKE_CURRENT_BINARY_DIR}/pubsub_test)
 
 add_executable(frontend_test frontend_test.c
         ../src/buffer.c
-        ../src/buffer_signal.c
         ../src/js110_usb.c
         ../src/js220_usb.c
         ../src/js220_params.c
