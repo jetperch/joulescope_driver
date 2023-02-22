@@ -40,6 +40,7 @@ else()
 endif()
 
 set(SUPPORT_SOURCES
+        buffer_signal.c
         error_code.c
         cstr.c
         devices.c
@@ -63,7 +64,6 @@ set(SUPPORT_SOURCES
 
 set(SOURCES
         buffer.c
-        buffer_signal.c
         #emu.c
         #emulated.c
         js110_usb.c

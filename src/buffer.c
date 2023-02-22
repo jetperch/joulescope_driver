@@ -200,7 +200,7 @@ static void buffer_alloc(struct buffer_s * self) {
 
     // determine size in bytes per second
     double sz_per_s = 0.0;
-    for (uint32_t idx = 0; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
+    for (uint32_t idx = 1; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
         struct bufsig_s *b = &self->signals[idx];
         if (!b->active) {
             continue;
@@ -215,7 +215,7 @@ static void buffer_alloc(struct buffer_s * self) {
     // determine sample count for each signal, allocate, and publish duration
     double duration = self->size / sz_per_s;
     JSDRV_LOGI("%d B/s -> %d seconds", (int) sz_per_s, (int) duration);
-    for (uint32_t idx = 0; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
+    for (uint32_t idx = 1; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
         struct bufsig_s *b = &self->signals[idx];
         if (!b->active) {
             continue;
@@ -285,12 +285,6 @@ static bool req_handle_one(struct buffer_s * self) {
     struct bufsig_s * b = &self->signals[req->signal_id];
     struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc_data(self->context, req->req.rsp_topic);
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) msg->value.value.bin;
-    memset(rsp, 0, sizeof(*rsp));
-    rsp->version = 1;
-    rsp->rsp_id = req->req.rsp_id;
-    jsdrv_bufsig_info(b, &rsp->info);
-    rsp->info.time_range_utc.length = 0;
-    rsp->info.time_range_samples.length = 0;
     jsdrv_bufsig_process_request(b, &req->req, rsp);
     msg->value.app = JSDRV_PAYLOAD_TYPE_BUFFER_RSP;
     jsdrvp_backend_send(self->context, msg);
@@ -346,10 +340,11 @@ static bool handle_cmd_q(struct buffer_s * self) {
     }
 
     const char * s = msg->topic;
-    if ((msg->u32_a >= 1) && (msg->u32_a < JSDRV_BUFSIG_COUNT_MAX)) {
+    if ((msg->u32_a > 0) && (msg->u32_a < JSDRV_BUFSIG_COUNT_MAX)) {
         if ((self->state == ST_ACTIVE) || (self->state == ST_AWAIT)) {
             struct bufsig_s *b = &self->signals[msg->u32_a];
-            jsdrv_bufsig_recv_data(b, msg);
+            struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) msg->value.value.bin;
+            jsdrv_bufsig_recv_data(b, signal);
             if (self->state == ST_AWAIT) {
                 if (await_check(self)) {
                     buffer_alloc(self);
@@ -553,7 +548,7 @@ static uint8_t _buffer_add(void * user_data, struct jsdrvp_msg_s * msg) {
     subscribe(b->context, b->topic, JSDRV_SFLAG_PUB, _buffer_recv, b);
     jsdrv_list_initialize(&b->req_pending);
     jsdrv_list_initialize(&b->req_free);
-    for (uint32_t i = 0; i < JSDRV_BUFSIG_COUNT_MAX; i++) {
+    for (uint32_t i = 0; i < JSDRV_BUFSIG_COUNT_MAX; i++) {  // initialize 0 (invalid) just in case
         struct bufsig_s * s = &b->signals[i];
         s->idx = i;
         s->parent = b;

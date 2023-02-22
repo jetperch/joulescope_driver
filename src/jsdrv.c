@@ -127,7 +127,7 @@ struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const s
         m = jsdrvp_msg_alloc_data(context, msg_src->topic);
         m->value = msg_src->value;
         m->value.value.bin = &m->payload.bin[0];
-        m->payload = msg_src->payload;
+        memcpy(m->payload.bin, msg_src->payload.bin, msg_src->value.size);
     } else {
         m = jsdrvp_msg_alloc(context);
         *m = *msg_src;

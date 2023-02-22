@@ -63,10 +63,10 @@ struct bufsig_s {
 
     // level 0
     // length in N
-    uint64_t level0_head;  // next insert point (also tail when full)
-    uint64_t level0_size;
-    void * level0_data;
-    uint64_t sample_id_head;
+    uint64_t level0_head;     // next insert point (also tail when full)
+    uint64_t level0_size;     // the number of valid entries
+    uint64_t sample_id_head;  // the next expected sample id (last valid + 1)
+    void * level0_data;       // the data
 };
 
 /**
@@ -81,7 +81,7 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
 
 void jsdrv_bufsig_free(struct bufsig_s * self);
 
-void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg);
+void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s * s);
 
 void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info);
 

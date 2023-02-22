@@ -104,7 +104,7 @@ void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
     info->size_in_utc = self->size_in_utc;
     info->size_in_samples = self->N;
     info->time_range_samples.start = self->sample_id_head - self->level0_size;
-    info->time_range_samples.end = self->sample_id_head;
+    info->time_range_samples.end = self->sample_id_head - 1;
     info->time_range_samples.length = self->level0_size;
     samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
     info->time_map = self->time_map;
@@ -117,8 +117,15 @@ static void summarize(struct bufsig_s * self, uint64_t start_idx, uint64_t lengt
     // todo support summary level optimization.
 }
 
-void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg) {
-    struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) msg->value.value.bin;
+static void clear(struct bufsig_s * self, uint64_t sample_id) {
+    self->level0_head = 0;
+    self->level0_size = 0;
+    self->sample_id_head = sample_id;
+    self->time_map.offset_counter = sample_id;
+    self->time_map.offset_time = jsdrv_time_utc();
+}
+
+void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s * s) {
     self->hdr.sample_id = s->sample_id;
     self->hdr.field_id = s->field_id;
     self->hdr.index = s->index;
@@ -135,17 +142,32 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg) {
     uint64_t length = s->element_count;
     uint8_t * f_src =  s->data;
     uint8_t * f_dst = (uint8_t *) self->level0_data;
-    uint64_t sample_id = s->sample_id / self->hdr.decimate_factor + length;
-    uint64_t sample_id_expect = self->sample_id_head + length;
-    if (s->sample_id == 0) {
+    uint64_t sample_id = s->sample_id / self->hdr.decimate_factor;
+    uint64_t sample_id_end = sample_id + length - 1;
+    uint64_t sample_id_expect = self->sample_id_head;
+    if (self->sample_id_head == 0) {
         // initial sample, ignore skips
         // todo device should provide time_map
-        self->time_map.offset_counter = s->sample_id;
-        self->time_map.offset_time = jsdrv_time_utc();
-    } else if (sample_id_expect != sample_id) {
-        JSDRV_LOGW("bufsig_recv_data %s: mismatch rcv=%" PRIu64 " expect=%" PRIu64,
-                   self->topic, sample_id, sample_id_expect);
-        // todo handle sample skips
+        clear(self, sample_id);
+    } else if (sample_id_end < sample_id_expect) {
+        JSDRV_LOGW("bufsig_recv_data %s: duplicate rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
+                   self->topic, sample_id, sample_id_end, sample_id_expect);
+        if ((sample_id_expect - sample_id_end) < self->N) {
+            clear(self, sample_id);
+        }
+        return;
+    } else if (sample_id < sample_id_expect) {
+        JSDRV_LOGW("bufsig_recv_data %s: overlap rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
+                   self->topic, sample_id, sample_id_end, sample_id_expect);
+        return;
+    } else if (sample_id > sample_id_expect) {
+        JSDRV_LOGW("bufsig_recv_data %s: skip rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
+                   self->topic, sample_id, sample_id_end, sample_id_expect);
+        if ((sample_id - sample_id_expect) > self->N) {
+            clear(self, sample_id);
+        } else {
+            // todo fill
+        }
     }
 
     // JSDRV_LOGI("bufsig_recv_data: sample_id=%" PRIu64 " length=%" PRIu64, s->sample_id, length);
@@ -157,7 +179,7 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg) {
             k = self->N - head;
             head_next = 0;
         }
-        uint64_t copy_size = (k * self->hdr.element_size_bits) / 8;
+        uint64_t copy_size = (k * self->hdr.element_size_bits + 7) / 8;
         memcpy(&f_dst[(head * self->hdr.element_size_bits) / 8], f_src, copy_size);
         self->level0_size += k;
         if (self->level0_size > self->N) {
@@ -167,6 +189,7 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg) {
         f_src += copy_size;
         length -= k;
         self->level0_head = head_next;
+        sample_id += k;
     }
     self->sample_id_head = sample_id;
 }
@@ -174,53 +197,97 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrvp_msg_s * msg) {
 static uint64_t level0_tail(struct bufsig_s * self) {
     if (self->level0_size != self->N) {
         return 0;
-    } else if ((self->level0_head + 1) == self->N) {
-        return 0;
     } else {
-        return self->level0_head + 1;
+        return self->level0_head;
     }
 }
 
+static void rsp_empty(struct jsdrv_buffer_response_s * rsp) {
+    rsp->info.time_range_samples.start = 0;
+    rsp->info.time_range_samples.end = 0;
+    rsp->info.time_range_samples.length = 0;
+    rsp->info.time_range_utc.start = 0;
+    rsp->info.time_range_utc.end = 0;
+    rsp->info.time_range_utc.length = 0;
+}
+
 static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s * rsp) {
-    uint64_t length;
+    rsp->response_type = JSDRV_BUFFER_RESPONSE_SAMPLES;
+    uint64_t sample_id = rsp->info.time_range_samples.start;
+    uint64_t length = rsp->info.time_range_samples.length;
     uint64_t sample_id_tail = self->sample_id_head - self->level0_size;
-    if (rsp->info.time_range_samples.end >= self->sample_id_head) {
-        rsp->info.time_range_samples.end = self->sample_id_head - 1;
+
+    if (self->level0_size == 0) {
+        rsp_empty(rsp);
+        return;
     }
-    if (rsp->info.time_range_samples.start < sample_id_tail) {
+    if (sample_id < sample_id_tail) {
+        uint64_t k = sample_id_tail - sample_id;
+        if (k >= length) {  // no data available
+            rsp_empty(rsp);
+            return;
+        }
+        length -= k;
+        sample_id = sample_id_tail;
         rsp->info.time_range_samples.start = sample_id_tail;
+        rsp->info.time_range_samples.length = length;
     }
-    if (rsp->info.time_range_samples.end < rsp->info.time_range_samples.start) {
-        length = 0;
-    } else {
-        length = rsp->info.time_range_samples.end - rsp->info.time_range_samples.start + 1;
+    if (sample_id >= self->sample_id_head) {
+        rsp_empty(rsp);
+        return;
+    }
+    uint64_t sample_id_end = sample_id + length - 1;
+    if (sample_id_end >= self->sample_id_head) {
+        length = self->sample_id_head - sample_id;
+        rsp->info.time_range_samples.end = self->sample_id_head - 1;
     }
 
     uint8_t * data_rsp = (uint8_t *) rsp->data;
     uint8_t * data_buf = (uint8_t *) self->level0_data;
-    uint64_t tail = level0_tail(self);
+    uint64_t idx = sample_id - sample_id_tail + level0_tail(self);
+    if (idx >= self->N) {
+        idx = 0;
+    }
 
     while (length) {
-        uint64_t tail_next = tail + length;
+        uint64_t idx_next = idx + length;
         uint64_t k = length;
-        if (tail_next > self->N) {
-            k = self->N - tail;
-            tail_next = 0;
+        if (idx_next >= self->N) {
+            k = self->N - idx;
+            idx_next = 0;
         }
         uint64_t copy_size = (k * self->hdr.element_size_bits) / 8;
-        memcpy(data_rsp, &data_buf[(tail * self->hdr.element_size_bits) / 8], copy_size);
+        memcpy(data_rsp, &data_buf[(idx * self->hdr.element_size_bits) / 8], copy_size);
         data_rsp += copy_size;
         length -= k;
+        idx = idx_next;
     }
     samples_to_utc(self, &rsp->info.time_range_samples, &rsp->info.time_range_utc);
-    rsp->response_type = JSDRV_BUFFER_RESPONSE_SAMPLES;
 }
 
-static void summary_level0_get(struct bufsig_s * self, uint64_t sample_id, uint64_t incr, struct jsdrv_summary_entry_s * y) {
+static uint64_t summary_level0_get(struct bufsig_s * self, uint64_t sample_id, uint64_t incr, struct jsdrv_summary_entry_s * y) {
     const uint32_t Q = 30;
     uint64_t src_idx;
     uint64_t tail = level0_tail(self);
     uint64_t sample_id_tail = self->sample_id_head - self->level0_size;
+    uint64_t sample_id_end = sample_id + incr;  // one past end
+    if ((sample_id_end <= sample_id_tail) || (sample_id >= self->sample_id_head)) {
+        y->avg = NAN;
+        y->std = NAN;
+        y->min = NAN;
+        y->max = NAN;
+        return 0;
+    }
+    if (sample_id < sample_id_tail) {
+        uint64_t k = sample_id_tail - sample_id;
+        sample_id += k;
+        incr -= k;
+    }
+    if (sample_id_end > self->sample_id_head) {
+        uint64_t k = sample_id_end - self->sample_id_head;
+        incr -= k;
+    }
+
     JSDRV_ASSERT(sample_id >= sample_id_tail);
     JSDRV_ASSERT((sample_id + incr) <= self->sample_id_head);
     uint64_t sample_count = 0;
@@ -236,9 +303,10 @@ static void summary_level0_get(struct bufsig_s * self, uint64_t sample_id, uint6
         int64_t x1 = 0;
 
         src_idx = tail + (sample_id - sample_id_tail);
+        src_idx %= self->N;
         for (uint64_t k = 0; k < incr; ++k) {
             if (src_idx >= self->N) {
-                src_idx = 0;
+                src_idx %= self->N;
             }
             float f = src_f32[src_idx++];
             if (isnan(f)) {
@@ -307,9 +375,11 @@ static void summary_level0_get(struct bufsig_s * self, uint64_t sample_id, uint6
         y->min = y_min;
         y->max = y_max;
     }
+    return sample_count;
 }
 
 static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s * rsp) {
+    rsp->response_type = JSDRV_BUFFER_RESPONSE_SUMMARY;
     uint64_t sample_id_tail = self->sample_id_head - self->level0_size;
     uint64_t sample_id_start = rsp->info.time_range_samples.start;
     uint64_t sample_id_end = rsp->info.time_range_samples.end;
@@ -347,14 +417,8 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     while (dst_idx < length) {
         uint64_t sample_id_next = sample_id + incr;
         y = &entries[dst_idx++];
-        if ((sample_id < sample_id_tail) || (sample_id_next > self->sample_id_head)) {
-            y->avg = NAN;
-            y->std = NAN;
-            y->min = NAN;
-            y->max = NAN;
+        if (0 == summary_level0_get(self, sample_id, incr, y)) {
             ++out_of_range_count;
-        } else {
-            summary_level0_get(self, sample_id, incr, y);
         }
         sample_id = sample_id_next;
     }
@@ -368,38 +432,44 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
                    sample_id_tail, self->sample_id_head);
     }
 
-    rsp->info.time_range_utc.length = rsp->info.time_range_samples.length;
-    // todo set UTC time: rsp->info.time_range_utc time_start & time_end
-    rsp->response_type = JSDRV_BUFFER_RESPONSE_SUMMARY;
+    samples_to_utc(self, &rsp->info.time_range_samples, &rsp->info.time_range_utc);
 }
 
 void jsdrv_bufsig_process_request(
         struct bufsig_s * self,
         struct jsdrv_buffer_request_s * req,
         struct jsdrv_buffer_response_s * rsp) {
-    if (JSDRV_TIME_UTC == req->time_type) {
-        utc_to_samples(self, &req->time.utc, &req->time.samples);
-        req->time_type = JSDRV_TIME_SAMPLES;
-    }
+    rsp->version = 1;
+    rsp->response_type = 0;
+    rsp->rsv1_u8 = 0;
+    rsp->rsv2_u8 = 0;
+    rsp->rsv3_u32 = 0;
+    rsp->rsp_id = req->rsp_id;
+    jsdrv_bufsig_info(self, &rsp->info);
+
     if (JSDRV_TIME_SAMPLES == req->time_type) {
-        struct jsdrv_time_range_samples_s * r = &rsp->info.time_range_samples;
-        *r = req->time.samples;
-        uint64_t interval = r->end - r->start + 1;
-        if (r->length && r->end) {
-            if (r->length >= interval) {
-                r->length = interval;
-                samples_get(self, rsp);
-            } else {
-                summary_get(self, rsp);
-            }
-        } else if (req->time.samples.length) {
-            r->end = r->start + r->length - 1;
-            samples_get(self, rsp);
-        } else {
+        // no action needed
+    } else if (JSDRV_TIME_UTC == req->time_type) {
+        utc_to_samples(self, &req->time.utc, &req->time.samples);
+    } else {
+        JSDRV_LOGW("invalid time_type: %d", (int) req->time_type);
+        return;
+    }
+    rsp->info.time_range_samples = req->time.samples;
+    struct jsdrv_time_range_samples_s * r = &rsp->info.time_range_samples;
+    uint64_t interval = r->end - r->start + 1;
+    if (r->length && r->end) {
+        if (r->length >= interval) {
             r->length = interval;
             samples_get(self, rsp);
+        } else {
+            summary_get(self, rsp);
         }
+    } else if (req->time.samples.length) {
+        r->end = r->start + r->length - 1;
+        samples_get(self, rsp);
     } else {
-        JSDRV_LOGW("Request with unknown time type: %d", (int) req->time_type);
+        r->length = interval;
+        samples_get(self, rsp);
     }
 }
