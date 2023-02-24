@@ -32,6 +32,13 @@ const uint64_t SUMMARY_LENGTH_MAX = (sizeof(struct jsdrv_stream_signal_s) - size
 
 static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index, uint64_t incr, struct jsdrv_summary_entry_s * y);
 
+static void entry_clear(struct jsdrv_summary_entry_s * y) {
+    y->avg = NAN;
+    y->std = NAN;
+    y->min = NAN;
+    y->max = NAN;
+}
+
 static struct jsdrv_summary_entry_s * level_entry(struct bufsig_s * self, uint8_t level, uint64_t idx) {
     if ((level == 0) || (level >= JSDRV_BUFSIG_LEVELS_MAX) || (idx >= self->levels[level - 1].k)) {
         return NULL;
@@ -252,17 +259,32 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
             clear(self, sample_id);
         } else {
             uint64_t k = sample_id - sample_id_expect;
-            if ((s->element_type == JSDRV_DATA_TYPE_FLOAT) && (s->element_size_bits == 32)) {
-                uint64_t idx = self->level0_head;
-                float * f32 = (float *) self->level0_data;
-                for (int i = 0; i < k; ++i) {
-                    if (idx >= self->N) {
-                        idx = 0;
+            if (s->element_type == JSDRV_DATA_TYPE_FLOAT) {
+                if (s->element_size_bits == 32) {
+                    // fill float32 with NaN
+                    uint64_t idx = self->level0_head;
+                    float *f32 = (float *) self->level0_data;
+                    for (uint64_t i = 0; i < k; ++i) {
+                        if (idx >= self->N) {
+                            idx = idx % self->N;
+                        }
+                        f32[idx] = NAN;
+                        ++idx;
                     }
-                    f32[idx] = NAN;
-                    ++idx;
+                } else if (s->element_size_bits == 64) {
+                    // fill float64 with NaN
+                    uint64_t idx = self->level0_head;
+                    double *f64 = (double *) self->level0_data;
+                    for (uint64_t i = 0; i < k; ++i) {
+                        if (idx >= self->N) {
+                            idx = idx % self->N;
+                        }
+                        f64[idx] = NAN;
+                        ++idx;
+                    }
                 }
-            } else {  // fill with zeros
+            } else {
+                // fill integer types with zeros
                 uint64_t size = (k * s->element_size_bits + 7) / 8;
                 uint8_t * data = (uint8_t *) self->level0_data;
                 if ((self->level0_head + size) > self->N) {
@@ -387,10 +409,7 @@ static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index
     JSDRV_ASSERT(incr <= self->N);
 
     if (0 == incr) {
-        y->avg = NAN;
-        y->std = NAN;
-        y->min = NAN;
-        y->max = NAN;
+        entry_clear(y);
         return 0;
     }
 
@@ -429,10 +448,7 @@ static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index
             y->min = y_min;
             y->max = y_max;
         } else {
-            y->avg = NAN;
-            y->std = NAN;
-            y->min = NAN;
-            y->max = NAN;
+            entry_clear(y);
         }
     } else {
         uint8_t * src_u8 = (uint8_t *) self->level0_data;
@@ -481,12 +497,9 @@ static uint64_t summary_level0_get(struct bufsig_s * self, uint64_t sample_id, u
     uint64_t src_idx;
     uint64_t tail = level0_tail(self);
     uint64_t sample_id_tail = self->sample_id_head - self->level0_size;
-    uint64_t sample_id_end = sample_id + incr;  // one past end
-    if ((sample_id_end <= sample_id_tail) || (sample_id >= self->sample_id_head)) {
-        y->avg = NAN;
-        y->std = NAN;
-        y->min = NAN;
-        y->max = NAN;
+    uint64_t sample_id_end = sample_id + incr;  // exclusive, one past end
+    if ((incr == 0) || (sample_id_end <= sample_id_tail) || (sample_id >= self->sample_id_head)) {
+        entry_clear(y);
         return 0;
     }
     if (sample_id < sample_id_tail) {
@@ -497,6 +510,10 @@ static uint64_t summary_level0_get(struct bufsig_s * self, uint64_t sample_id, u
     if (sample_id_end > self->sample_id_head) {
         uint64_t k = sample_id_end - self->sample_id_head;
         incr -= k;
+    }
+    if (incr == 0) {
+        entry_clear(y);
+        return 0;
     }
 
     JSDRV_ASSERT(sample_id >= sample_id_tail);
@@ -538,7 +555,6 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
 
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     struct jsdrv_summary_entry_s * src;
-    struct jsdrv_summary_entry_s entry_tmp;
     uint64_t sample_id = sample_id_start;
 
     struct jsdrv_statistics_accum_s s_tmp;
@@ -555,17 +571,20 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
 
     uint64_t remaining = incr;
     uint64_t idx;
+    uint64_t valid_count = 0;
 
     for (uint64_t entry_idx = 0; entry_idx < entries_length; ++entry_idx) {
         uint64_t s_start = sample_id + incr * entry_idx;  // inclusive
         uint64_t s_end = s_start + incr;                  // exclusive
+        if (s_end > self->sample_id_head) {
+            uint64_t dsize = s_end - self->sample_id_head;
+            remaining = (dsize > remaining) ? 0 : (remaining - dsize);
+            s_end -= dsize;
+        }
         struct jsdrv_summary_entry_s * dst = &entries[entry_idx];
         if ((s_end <= sample_id_tail) || (s_start >= self->sample_id_head)) {
             // completely out of range
-            dst->avg = NAN;
-            dst->std = NAN;
-            dst->min = NAN;
-            dst->max = NAN;
+            entry_clear(dst);
             continue;
         }
         if (0 == tgt_level) {
@@ -574,18 +593,22 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
         }
 
         idx = ((self->level0_head + self->N) - (self->sample_id_head - s_start)) % self->N;
-        if (entry_idx == 0) {
+        if (0 == valid_count) {
+            ++valid_count;
             uint64_t lvl_dn_step = 1;
             uint64_t lvl_up_step = self->r0;
             uint64_t lvl1_idx = (idx + self->levels[0].samples_per_entry - 1) / self->levels[0].samples_per_entry;
             uint64_t idx_aligned = lvl1_idx * self->levels[0].samples_per_entry;
             if (idx != idx_aligned) {
                 uint64_t sz0 = idx_aligned - idx;
-                summary_level0_get_by_idx(self, idx, sz0, &entry_tmp);
+                if (remaining < sz0) {
+                    sz0 = remaining;
+                }
+                struct jsdrv_summary_entry_s entry_tmp;
+                summary_level0_get(self, s_start, sz0, &entry_tmp);
                 jsdrv_statistics_from_entry(&s_accum, &entry_tmp, sz0);
-                JSDRV_ASSERT(remaining >= sz0);
                 remaining -= sz0;
-                idx = idx_aligned;
+                idx = idx_aligned % self->N;
             }
 
             while (level <= tgt_level) {
@@ -611,6 +634,8 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
                     break;
                 }
             }
+        } else {
+            ++valid_count;
         }
 
         uint64_t lvl_k = self->levels[level - 1].k;
@@ -629,7 +654,8 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
             // final, get exact ending statistics
             while (remaining) {
                 if (level == 0) {
-                    summary_level0_get_by_idx(self, lvl_idx, remaining, &entry_tmp);
+                    struct jsdrv_summary_entry_s entry_tmp;
+                    summary_level0_get(self, s_end - remaining, remaining, &entry_tmp);
                     jsdrv_statistics_from_entry(&s_tmp, &entry_tmp, remaining);
                     jsdrv_statistics_combine(&s_accum, &s_accum, &s_tmp);
                     remaining = 0;
@@ -653,10 +679,15 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
         } else {
             // get approximate (averaged) statistics
             src = level_entry(self, level, lvl_idx);
+
+            // complete this entry
             jsdrv_statistics_from_entry(&s_tmp, src, lvl_step);
             jsdrv_statistics_adjust_k(&s_tmp, remaining);
             jsdrv_statistics_combine(&s_accum, &s_accum, &s_tmp);
             jsdrv_statistics_to_entry(&s_accum, dst);
+
+            // and start the next entry
+            jsdrv_statistics_from_entry(&s_tmp, src, lvl_step);
             jsdrv_statistics_adjust_k(&s_tmp, lvl_step - remaining);
             jsdrv_statistics_copy(&s_accum, &s_tmp);
             JSDRV_ASSERT(incr >= s_tmp.k);

@@ -28,9 +28,7 @@ void jsdrv_statistics_reset(struct jsdrv_statistics_accum_s *s) {
 }
 
 void jsdrv_statistics_adjust_k(struct jsdrv_statistics_accum_s * s, uint64_t k) {
-    if (s->k == 0) {
-        s->s = 0.0;
-    } else {
+    if (s->k > 0) {
         s->s /= s->k;
         s->s *= k;
     }
@@ -134,7 +132,7 @@ double jsdrv_statistics_var(struct jsdrv_statistics_accum_s *s) {
 }
 
 void jsdrv_statistics_copy(struct jsdrv_statistics_accum_s *tgt,
-                         const struct jsdrv_statistics_accum_s *src) {
+                           const struct jsdrv_statistics_accum_s *src) {
     tgt->k = src->k;
     tgt->mean = src->mean;
     tgt->s = src->s;
@@ -143,8 +141,8 @@ void jsdrv_statistics_copy(struct jsdrv_statistics_accum_s *tgt,
 }
 
 void jsdrv_statistics_combine(struct jsdrv_statistics_accum_s *tgt,
-                            const struct jsdrv_statistics_accum_s *a,
-                            const struct jsdrv_statistics_accum_s *b) {
+                              const struct jsdrv_statistics_accum_s *a,
+                              const struct jsdrv_statistics_accum_s *b) {
     uint64_t kt;
     double f1;
     double m1_diff;
@@ -180,7 +178,11 @@ void jsdrv_statistics_from_entry(struct jsdrv_statistics_accum_s * s, struct jsd
 
 void jsdrv_statistics_to_entry(struct jsdrv_statistics_accum_s const * s, struct jsdrv_summary_entry_s * e) {
     e->avg = (float) s->mean;
-    e->std = (float) sqrt(s->s / (s->k - 1));
+    if (s->k > 1) {
+        e->std = (float) sqrt(s->s / (s->k - 1));
+    } else {
+        e->std = 0.0f;
+    }
     e->min = (float) s->min;
     e->max = (float) s->max;
 }
