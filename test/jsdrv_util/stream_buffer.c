@@ -56,7 +56,6 @@ static void on_pub_cmd(void * user_data, const char * topic, const struct jsdrv_
 static void on_buf_rsp(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
     (void) topic;
-    const char * rsp_type;
     if ((value->type != JSDRV_UNION_BIN) || (value->app != JSDRV_PAYLOAD_TYPE_BUFFER_RSP)) {
         printf("response value type invalid\n");
         return;
@@ -66,14 +65,17 @@ static void on_buf_rsp(void * user_data, const char * topic, const struct jsdrv_
         printf("response version unsupported: %d\n", (int) rsp->version);
         return;
     }
-    switch (rsp->response_type) {
-        case JSDRV_BUFFER_RESPONSE_SAMPLES: rsp_type = "samples"; break;
-        case JSDRV_BUFFER_RESPONSE_SUMMARY: rsp_type = "summary"; break;
-        default: rsp_type = "unknown"; break;
-    };
 
-    //printf("response %s rsp_id=%" PRIu64 ", length=%" PRIu64 "\n",
-    //       rsp_type, rsp->rsp_id, rsp->info.time_range_samples.length);
+     if (0) {
+        const char * rsp_type;
+        switch (rsp->response_type) {
+            case JSDRV_BUFFER_RESPONSE_SAMPLES: rsp_type = "samples"; break;
+            case JSDRV_BUFFER_RESPONSE_SUMMARY: rsp_type = "summary"; break;
+            default: rsp_type = "unknown"; break;
+        };
+        printf("response %s rsp_id=%" PRIu64 ", length=%" PRIu64 "\n",
+               rsp_type, rsp->rsp_id, rsp->info.time_range_samples.length);
+     }
 }
 
 static void on_buf_info(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
