@@ -55,6 +55,7 @@ set(SUPPORT_SOURCES
         pubsub.c
         meta.c
         sample_buffer_f32.c
+        statistics.c
         time.c
         topic.c
         union.c

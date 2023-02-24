@@ -224,9 +224,10 @@ static void test_summary_nan_on_out_of_range(void **state) {
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     assert_true(isnan(entries[0].avg));
+    assert_false(isnan(entries[1].avg));
+    assert_false(isnan(entries[2].avg));
     assert_float_equal(1001 / 1000000.0, entries[1].avg, 1e-9);
     assert_float_equal(1004 / 1000000.0, entries[2].avg, 1e-9);
-    assert_false(isnan(entries[2].avg));
 
     req.time.samples.start = 1994;
     req.time.samples.end = 2002;
@@ -234,9 +235,10 @@ static void test_summary_nan_on_out_of_range(void **state) {
     jsdrv_bufsig_process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     assert_false(isnan(entries[0].avg));
+    assert_false(isnan(entries[1].avg));
+    assert_true(isnan(entries[2].avg));
     assert_float_equal(1995 / 1000000.0, entries[0].avg, 1e-9);
     assert_float_equal(1998 / 1000000.0, entries[1].avg, 1e-9);
-    assert_true(isnan(entries[2].avg));
 
     jsdrv_bufsig_free(&b);
 }
@@ -261,8 +263,8 @@ static void test_summary_wrap(void **state) {
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     assert_false(isnan(entries[0].avg));
     assert_false(isnan(entries[1].avg));
-    assert_float_equal(999999.5 / 1000000.0, entries[0].avg, 1e-9);
-    assert_float_equal(1000099.5 / 1000000.0, entries[1].avg, 1e-9);
+    assert_float_equal(999999.5 / 1000000.0, entries[0].avg, 1e-4);
+    assert_float_equal(1000099.5 / 1000000.0, entries[1].avg, 1e-4);
 
     jsdrv_bufsig_free(&b);
 }

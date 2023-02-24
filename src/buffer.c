@@ -502,6 +502,10 @@ static void _send_buffer_list(struct buffer_mgr_s * self) {
 static uint8_t _buffer_recv(void * user_data, struct jsdrvp_msg_s * msg) {
     // topic should be "m/xxx/..."
     struct buffer_s * b = (struct buffer_s *) user_data;
+    if (jsdrv_cstr_ends_with(msg->topic, "!rsp")) {
+        // allow external to register to our !rsp topic.
+        return 0;
+    }
     if (!jsdrv_cstr_starts_with(msg->topic, b->topic)) {
         JSDRV_LOGE("unexpected topic %s to %s", msg->topic, b->topic);
         return 1;

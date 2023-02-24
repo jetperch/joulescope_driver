@@ -26,7 +26,8 @@
 
 
 static volatile bool _removed = false;
-static const char RESPONSE_TOPIC[] = "zzz/!rsp";
+static const char RESPONSE_TOPIC[] = "m/007/!rsp";
+static uint32_t request_length = 100;
 
 
 static void on_device_remove(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
@@ -71,8 +72,8 @@ static void on_buf_rsp(void * user_data, const char * topic, const struct jsdrv_
         default: rsp_type = "unknown"; break;
     };
 
-    printf("response %s rsp_id=%" PRIu64 ", length=%" PRIu64 "\n",
-           rsp_type, rsp->rsp_id, rsp->info.time_range_samples.length);
+    //printf("response %s rsp_id=%" PRIu64 ", length=%" PRIu64 "\n",
+    //       rsp_type, rsp->rsp_id, rsp->info.time_range_samples.length);
 }
 
 static void on_buf_info(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
@@ -94,7 +95,7 @@ static void on_buf_info(void * user_data, const char * topic, const struct jsdrv
     req.time_type = JSDRV_TIME_SAMPLES;
     req.time.samples.start = info->time_range_samples.start;
     req.time.samples.end = info->time_range_samples.end;
-    req.time.samples.length = 1;  // summary
+    req.time.samples.length = request_length;  // summary
     jsdrv_cstr_copy(req.rsp_topic, RESPONSE_TOPIC, sizeof(req.rsp_topic));
     req.rsp_id = 1;
     struct jsdrv_union_s req_value = jsdrv_union_cbin((uint8_t *) &req, sizeof(req));
@@ -121,7 +122,11 @@ static int32_t device_publish(struct app_s * self, const char * device, const ch
 }
 
 static int usage(void) {
-    printf("usage: jsdrv_util demo [--duration duration_ms]\n");
+    printf("usage: jsdrv_util stream_buffer [--option value]\n"
+           "    --duration   duration in milliseconds\n"
+           "    --length     number of entries per summary request\n"
+           "    --mem_size   Memory size in bytes (< 4294967296)\n"
+           );
     return 1;
 }
 
@@ -135,6 +140,7 @@ static bool wait_for_duration_ms(uint32_t duration_ms) {
 
 int on_stream_buffer(struct app_s * self, int argc, char * argv[]) {
     uint32_t duration_ms = 5000;
+    uint32_t mem_size = 100000000U;
     while (argc) {
         if (argv[0][0] != '-') {
             return usage();
@@ -142,6 +148,16 @@ int on_stream_buffer(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
             ARG_REQUIRE();
             ROE(jsdrv_cstr_to_u32(argv[0], &duration_ms));
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--length")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &request_length));
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--mem_size")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &mem_size));
             ARG_CONSUME();
         } else {
             return usage();
@@ -165,7 +181,7 @@ int on_stream_buffer(struct app_s * self, int argc, char * argv[]) {
         jsdrv_topic_append(&t, "s/i/!data");
         ROE(publish(self, "m/007/s/003/topic",  &jsdrv_union_cstr_r(t.topic), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(jsdrv_subscribe(self->context, "m/007/s/003/info", JSDRV_SFLAG_PUB, on_buf_info, self, JSDRV_TIMEOUT_MS_DEFAULT));
-        ROE(publish(self, "m/007/g/size",  &jsdrv_union_u64_r(100000000), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, "m/007/g/size",  &jsdrv_union_u64_r(mem_size), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(device_publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
         if (wait_for_duration_ms(duration_ms)) {
             ROE(device_publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));

@@ -759,7 +759,8 @@ static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m
             timeout.timeout = jsdrv_time_utc() + timeout_ms * JSDRV_TIME_MILLISECOND;
             timeout.ev = jsdrv_os_event_alloc();
             timeout.return_code = 0;
-            m->timeout = &timeout;
+            // use a stack variable, but block on timeout to ensure stays in scopre
+            m->timeout = &timeout;  // cppcheck-suppress autoVariables
             m->source = 1;
         }
     }
@@ -789,7 +790,7 @@ static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m
             rc = timeout.return_code;
         }
 #endif
-        m->timeout = NULL;
+        m->timeout = NULL;  // remove reference to stack variable
         jsdrv_os_event_free(timeout.ev);
     }
     JSDRV_LOGD1("api_cmd(%s) done %lu", m->topic, rc);

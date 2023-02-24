@@ -209,7 +209,7 @@ static int32_t device_open(struct dev_s * d) {
     if (rc) {
         if (rc == LIBUSB_ERROR_ACCESS) {
             JSDRV_LOGE("libusb_open - insufficient permissions");
-        } else if (rc) {
+        } else {
             JSDRV_LOGE("libusb_open failed %d", rc);
         }
         return (int32_t) rc;

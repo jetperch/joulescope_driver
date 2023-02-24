@@ -30,6 +30,9 @@
 #include <stdint.h>
 
 
+#define JSDRV_BUFSIG_LEVELS_MAX 32
+
+
 struct buffer_s;
 
 struct bufsig_stream_header_s {
@@ -43,6 +46,12 @@ struct bufsig_stream_header_s {
     uint32_t decimate_factor;               ///< The decimation factor from sample_id to data samples.
 };
 
+struct bufsig_level_s {
+    uint64_t k;                             ///< number of reduction entries.
+    uint64_t r;                             ///< reduction from previous layer (0=r0, rN otherwise)
+    uint64_t samples_per_entry;
+    struct jsdrv_summary_entry_s * data;
+};
 
 struct bufsig_s {
     uint32_t idx;
@@ -57,12 +66,12 @@ struct bufsig_s {
     uint64_t r0;
     uint64_t rN;
     uint64_t k;
-    uint8_t levels;
+    uint8_t level_count;
 
     // todo summary data.
+    struct bufsig_level_s levels[JSDRV_BUFSIG_LEVELS_MAX];
 
-    // level 0
-    // length in N
+    // level 0, length N
     uint64_t level0_head;     // next insert point (also tail when full)
     uint64_t level0_size;     // the number of valid entries
     uint64_t sample_id_head;  // the next expected sample id (last valid + 1)

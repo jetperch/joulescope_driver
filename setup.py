@@ -155,6 +155,7 @@ extensions = [
                                      'src/pubsub.c',
                                      'src/meta.c',
                                      'src/sample_buffer_f32.c',
+                                     'src/statistics.c',
                                      'src/time.c',
                                      'src/topic.c',
                                      'src/union.c',
