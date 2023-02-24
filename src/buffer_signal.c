@@ -381,10 +381,7 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
 
     uint8_t * data_rsp = (uint8_t *) rsp->data;
     uint8_t * data_buf = (uint8_t *) self->level0_data;
-    uint64_t idx = sample_id - sample_id_tail + level0_tail(self);
-    if (idx >= self->N) {
-        idx = 0;
-    }
+    uint64_t idx = (sample_id - sample_id_tail + level0_tail(self)) % self->N;
 
     while (length) {
         uint64_t idx_next = idx + length;
@@ -399,6 +396,24 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
         length -= k;
         idx = idx_next;
     }
+
+    uint8_t shift = 0;
+    if (1 == self->hdr.element_size_bits) {
+        shift = idx & 7;
+    } else if (4 == self->hdr.element_size_bits) {
+        shift = (idx & 1) << 2;
+    }
+    if (shift) {
+        uint8_t shift_left = 64 - shift;
+        uint64_t * p = (uint64_t *) rsp->data;
+        uint64_t fwd = p[0];
+        for (uint64_t i = 1; i < rsp->info.time_range_samples.length; ++i) {
+            uint64_t z = p[i];
+            p[i - 1] = (fwd >> shift) | (z << shift_left);
+            fwd = z;
+        }
+    }
+
     samples_to_utc(self, &rsp->info.time_range_samples, &rsp->info.time_range_utc);
 }
 
