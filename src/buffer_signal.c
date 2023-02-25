@@ -40,9 +40,6 @@ static void entry_clear(struct jsdrv_summary_entry_s * y) {
 }
 
 static struct jsdrv_summary_entry_s * level_entry(struct bufsig_s * self, uint8_t level, uint64_t idx) {
-    if ((level == 0) || (level >= JSDRV_BUFSIG_LEVELS_MAX) || (idx >= self->levels[level - 1].k)) {
-        return NULL;
-    }
     JSDRV_ASSERT(level > 0);
     JSDRV_ASSERT(level < JSDRV_BUFSIG_LEVELS_MAX);
     struct bufsig_level_s * lvl = &self->levels[level - 1];
