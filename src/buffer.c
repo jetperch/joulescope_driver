@@ -68,7 +68,6 @@ enum buffer_state_s {
     ST_IDLE = 0,
     ST_AWAIT,
     ST_ACTIVE,
-    ST_HOLD,
 };
 
 struct req_s {
@@ -79,6 +78,7 @@ struct req_s {
 
 struct buffer_s {
     uint8_t idx;
+    uint8_t hold;
     enum buffer_state_s state;
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     struct jsdrv_context_s * context;
@@ -434,8 +434,13 @@ static bool handle_cmd_q(struct buffer_s * self) {
             rc = 0;
         } else if (0 == strcmp(s, "list")) {
             // published by us, ignore
+        } else if (0 == strcmp(s, "hold")) {
+            bool bool_v = false;
+            jsdrv_union_to_bool(&msg->value, &bool_v);
+            self->hold = bool_v ? 1 : 0;
+            JSDRV_LOGI("hold %s", self->hold ? "on" : "off");
+            rc = 0;
         } else {
-            // todo hold
             // todo mode
             JSDRV_LOGW("buffer global unsupported: %s", s);
             rc = JSDRV_ERROR_PARAMETER_INVALID;
@@ -520,9 +525,11 @@ static uint8_t _buffer_recv(void * user_data, struct jsdrvp_msg_s * msg) {
 static uint8_t _buffer_recv_data(void * user_data, struct jsdrvp_msg_s * msg) {
     // topic should be "m/xxx/..."
     struct bufsig_s * b = (struct bufsig_s *) user_data;
-    struct jsdrvp_msg_s * m = jsdrvp_msg_clone(b->parent->context, msg);
-    m->u32_a = b->idx;  // signal_id=0 (invalid), for main processing
-    msg_queue_push(b->parent->cmd_q, m);
+    if (0 == b->parent->hold) {
+        struct jsdrvp_msg_s * m = jsdrvp_msg_clone(b->parent->context, msg);
+        m->u32_a = b->idx;  // signal_id=0 (invalid), for main processing
+        msg_queue_push(b->parent->cmd_q, m);
+    }
     return 0;
 }
 
@@ -545,6 +552,7 @@ static uint8_t _buffer_add(void * user_data, struct jsdrvp_msg_s * msg) {
     JSDRV_LOGI("buffer_id %u add", buffer_id);
     memset(b, 0, sizeof(*b));
     b->idx = buffer_id;
+    b->hold = 0;
     b->state = ST_IDLE;
     tfp_snprintf(b->topic, sizeof(b->topic), "m/%03u", buffer_id);
     b->context = self->context;

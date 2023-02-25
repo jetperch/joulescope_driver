@@ -93,14 +93,14 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
         uint64_t r = (i == 0) ? r0 : rN;
         samples_per_entry *= r;
         uint64_t k = N / samples_per_entry;
-        if (k == 0) {
+        if (k <= 1) {
             break;
         }
         struct bufsig_level_s *lvl = &self->levels[i];
         lvl->k = k;
         lvl->r = r;
         lvl->samples_per_entry = samples_per_entry;
-        JSDRV_LOGD3("alloc lvl=%d %" PRIu64 "\n", i + 1, k);
+        JSDRV_LOGD3("alloc lvl=%d %" PRIu64, i + 1, k);
         lvl->data = malloc(k * sizeof(struct jsdrv_summary_entry_s));
     }
 }
