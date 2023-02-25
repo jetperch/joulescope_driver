@@ -17,6 +17,7 @@
 #include "jsdrv_prv/buffer_signal.h"
 #include "jsdrv_prv/assert.h"
 #include "jsdrv/cstr.h"
+#include "jsdrv/error_code.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv/time.h"
@@ -103,7 +104,6 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
 }
 
 void jsdrv_bufsig_free(struct bufsig_s * self) {
-    JSDRV_LOGI("jsdrv_bufsig_free %d", (int) self->idx);
     for (int i = 0; i < JSDRV_BUFSIG_LEVELS_MAX; ++i) {
         if (NULL != self->levels[i].data) {
             free(self->levels[i].data);
@@ -111,9 +111,16 @@ void jsdrv_bufsig_free(struct bufsig_s * self) {
         }
     }
     if (self->level0_data) {
+        JSDRV_LOGI("jsdrv_bufsig_free %d", (int) self->idx);
         free(self->level0_data);
         self->level0_data = NULL;
     }
+    memset(&self->hdr, 0, sizeof(self->hdr));
+    self->N = 0;
+    self->level_count = 0;
+    self->sample_id_head = 0;
+    self->time_map.offset_time = 0;
+    self->time_map.offset_counter = 0;
 }
 
 static void samples_to_utc(struct bufsig_s * self,
@@ -710,7 +717,7 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     samples_to_utc(self, &rsp->info.time_range_samples, &rsp->info.time_range_utc);
 }
 
-void jsdrv_bufsig_process_request(
+int32_t jsdrv_bufsig_process_request(
         struct bufsig_s * self,
         struct jsdrv_buffer_request_s * req,
         struct jsdrv_buffer_response_s * rsp) {
@@ -722,13 +729,22 @@ void jsdrv_bufsig_process_request(
     rsp->rsp_id = req->rsp_id;
     jsdrv_bufsig_info(self, &rsp->info);
 
+    if (!self->active) {
+        JSDRV_LOGW("jsdrv_bufsig_process_request inactive");
+        return JSDRV_ERROR_UNAVAILABLE;
+    }
+    if (NULL == self->level0_data) {
+        JSDRV_LOGW("jsdrv_bufsig_process_request unallocated");
+        return JSDRV_ERROR_UNAVAILABLE;
+    }
+
     if (JSDRV_TIME_SAMPLES == req->time_type) {
         // no action needed
     } else if (JSDRV_TIME_UTC == req->time_type) {
         utc_to_samples(self, &req->time.utc, &req->time.samples);
     } else {
         JSDRV_LOGW("invalid time_type: %d", (int) req->time_type);
-        return;
+        return JSDRV_ERROR_PARAMETER_INVALID;
     }
     rsp->info.time_range_samples = req->time.samples;
     struct jsdrv_time_range_samples_s * r = &rsp->info.time_range_samples;
@@ -747,4 +763,5 @@ void jsdrv_bufsig_process_request(
         r->length = interval;
         samples_get(self, rsp);
     }
+    return 0;
 }

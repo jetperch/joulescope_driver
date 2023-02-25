@@ -242,10 +242,12 @@ static void buffer_alloc(struct buffer_s * self) {
 }
 
 static void buffer_free(struct buffer_s * self) {
+    if (self->state == ST_ACTIVE) {
+        self->state = ST_AWAIT;
+    }
     for (uint32_t idx = 0; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
         struct bufsig_s *b = &self->signals[idx];
         jsdrv_bufsig_free(b);
-        b->hdr.sample_rate = 0;
     }
 }
 
@@ -283,12 +285,18 @@ static bool req_handle_one(struct buffer_s * self) {
     }
     struct req_s * req = JSDRV_CONTAINER_OF(item, struct req_s, item);
     struct bufsig_s * b = &self->signals[req->signal_id];
+    if (!b->active) {
+        return false;
+    }
     struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc_data(self->context, req->req.rsp_topic);
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) msg->value.value.bin;
-    jsdrv_bufsig_process_request(b, &req->req, rsp);
-    msg->value.app = JSDRV_PAYLOAD_TYPE_BUFFER_RSP;
-    jsdrvp_backend_send(self->context, msg);
-    jsdrv_list_add_tail(&self->req_free, item);
+    if (jsdrv_bufsig_process_request(b, &req->req, rsp)) {
+        jsdrvp_msg_free(self->context, msg);
+    } else {
+        msg->value.app = JSDRV_PAYLOAD_TYPE_BUFFER_RSP;
+        jsdrvp_backend_send(self->context, msg);
+        jsdrv_list_add_tail(&self->req_free, item);
+    }
     return true;
 }
 
@@ -372,6 +380,7 @@ static bool handle_cmd_q(struct buffer_s * self) {
                 JSDRV_LOGW("signal already active: %u", idx);
                 rc = JSDRV_ERROR_BUSY;
             } else {
+                buffer_free(self);
                 b->active = true;
                 buf_publish_signal_list(self);
                 rc = 0;
@@ -379,6 +388,7 @@ static bool handle_cmd_q(struct buffer_s * self) {
         } else if (0 == strcmp(s, "!remove")) {
             bufsig_unsub(b);
             b->active = false;
+            buffer_free(self);
             buf_publish_signal_list(self);
             rc = 0;
         } else {

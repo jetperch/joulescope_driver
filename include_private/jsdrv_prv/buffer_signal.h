@@ -103,8 +103,9 @@ void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
  *      This function simply needs to add the data and update
  *      rsp->info fields size_in_utc, time_range_utc,
  *      size_in_samples, time_range_samples.
+ * @return 0 or error code.
  */
-void jsdrv_bufsig_process_request(
+int32_t jsdrv_bufsig_process_request(
         struct bufsig_s * self,
         struct jsdrv_buffer_request_s * req,
         struct jsdrv_buffer_response_s * rsp);

@@ -43,6 +43,7 @@ const char SRC_TOPIC[] = "src/topic/!data";
     b.hdr.decimate_factor = 1;                              \
     b.hdr.sample_rate = 1000000;                            \
     b.time_map.counter_rate = (double) b.hdr.sample_rate;   \
+    b.active = true;                                        \
     jsdrv_bufsig_alloc(&b, 1000000, 10, 10)
 
 
