@@ -180,15 +180,22 @@ int on_stream_buffer(struct app_s * self, int argc, char * argv[]) {
         ROE(publish(self, "m/007/a/!add",  &jsdrv_union_u8_r(3), JSDRV_TIMEOUT_MS_DEFAULT));
         struct jsdrv_topic_s t;
         jsdrv_topic_set(&t, device);
-        jsdrv_topic_append(&t, "s/i/!data");
+        const char * ctrl_str;
+        if (1) {
+            jsdrv_topic_append(&t, "s/i/!data");
+            ctrl_str = "s/i/ctrl";
+        } else {
+            jsdrv_topic_append(&t, "s/gpi/0/!data");
+            ctrl_str = "s/gpi/0/ctrl";
+        }
         ROE(publish(self, "m/007/s/003/topic",  &jsdrv_union_cstr_r(t.topic), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(jsdrv_subscribe(self->context, "m/007/s/003/info", JSDRV_SFLAG_PUB, on_buf_info, self, JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, "m/007/g/size",  &jsdrv_union_u64_r(mem_size), JSDRV_TIMEOUT_MS_DEFAULT));
-        ROE(device_publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(device_publish(self, device, ctrl_str, &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
         if (wait_for_duration_ms(duration_ms)) {
-            ROE(device_publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+            ROE(device_publish(self, device, ctrl_str, &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
         } else {
-            device_publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+            device_publish(self, device, ctrl_str, &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
         }
     } else if (jsdrv_cstr_starts_with(device, "u/js110")) {
         ROE(device_publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));

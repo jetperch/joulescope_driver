@@ -583,6 +583,9 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     uint8_t level = 0;
     uint8_t tgt_level;
     for (tgt_level = 0; tgt_level < JSDRV_BUFSIG_LEVELS_MAX; ++tgt_level) {
+        if (self->levels[tgt_level].k == 0) {
+            break;
+        }
         if (incr < self->levels[tgt_level].samples_per_entry) {
             break;
         }
@@ -634,10 +637,11 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
                 uint64_t idx_lvl_dn = (idx + lvl_dn_step - 1) / lvl_dn_step;
                 uint64_t idx_lvl_up = (idx + lvl_up_step - 1) / lvl_up_step;
                 if ((idx_lvl_dn * lvl_dn_step) == (idx_lvl_up * lvl_up_step)) {
-                    if (level == tgt_level) {
+                    ++level;
+                    if (level >= tgt_level) {
+                        level = tgt_level;
                         break;
                     }
-                    ++level;
                     lvl_dn_step = self->levels[level - 1].samples_per_entry;
                     lvl_up_step = self->levels[level].samples_per_entry;
                 } else if (remaining < lvl_dn_step) {
