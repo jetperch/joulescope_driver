@@ -41,6 +41,43 @@ _log_c_name = 'jsdrv'
 _log_c = logging.getLogger(_log_c_name)
 
 
+class ElementType:
+    UNDEFINED = 0
+    INT = 2
+    UINT = 3
+    FLOAT = 4
+
+
+class Field:
+    UNDEFINED = 0
+    CURRENT   = 1
+    VOLTAGE   = 2
+    POWER     = 3
+    RANGE     = 4
+    GPI       = 5
+    UART      = 6
+    RAW       = 7
+
+
+_element_type_to_prefix = {
+    ElementType.INT: 'i',
+    ElementType.UINT: 'u',
+    ElementType.FLOAT: 'f',
+}
+
+
+_field_to_meta = {
+    #field         [name,            field, units, use_index]
+    Field.CURRENT: ['current',       'i',   'A',   False],
+    Field.VOLTAGE: ['voltage',       'v',   'V',   False],
+    Field.POWER:   ['power',         'p',   'W',   False],
+    Field.RANGE:   ['current_range', 'r',   None,  False],
+    Field.GPI:     ['gpi',           '',    None,  True],
+    Field.UART:    ['uart',          'u',   None,  True],
+    Field.RAW:     ['raw',           'z',   None,  True],
+}
+
+
 cdef object _i128_to_int(uint64_t high, uint64_t low):
     i = int(high) << 64
     i |= int(low)
@@ -50,12 +87,21 @@ cdef object _i128_to_int(uint64_t high, uint64_t low):
 
 
 cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
+    element_prefix = _element_type_to_prefix[info[0].element_type]
+    name, field_name, units, use_index = _field_to_meta[info[0].field_id]
+    if use_index:
+        name = f'{name}{info[0].index:d}'
+        field_name = f'{field_name}{info[0].index:d}'
     v = {
         'version': info[0].version,
+        'name': name,
+        'field': field_name,
         'field_id': info[0].field_id,
         'index': info[0].index,
-        'element_type': info[0].element_type,
+        'element_type': f'{element_prefix}{info[0].element_size_bits:d}',
+        'element_type_enum': info[0].element_type,
         'element_size_bits': info[0].element_size_bits,
+        'units': units,
         'topic': info[0].topic,
         'size_in_utc': info[0].size_in_utc,
         'size_in_samples': info[0].size_in_samples,
@@ -90,22 +136,20 @@ cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
     if r[0].response_type == c_jsdrv.JSDRV_BUFFER_RESPONSE_SAMPLES:
         v['response_type'] = 'samples'
         info = v['info']
-        if info['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_FLOAT and info['element_size_bits'] == 32:
+        element_type = info['element_type']
+        if element_type == 'f32':
             shape[0] = <np.npy_intp> length
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> &r[0].data[0])
-            data_type = 'f32'
-        elif info['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and info['element_size_bits'] == 1:
+        elif element_type == 'u1':
             shape[0] = <np.npy_intp> (length // 8)
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
-            data_type = 'u1'
-        elif info['element_type'] == c_jsdrv.JSDRV_DATA_TYPE_UINT and info['element_size_bits'] == 2:
+        elif element_type == 'u4':
             shape[0] = <np.npy_intp> (length // 2)
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
-            data_type = 'u4'
         else:
-            data_type = 'raw'
             _log_c.error('unsupported sample format')
-        v['data_type'] = data_type
+            return
+        v['data_type'] = info['element_type']
         v['data'] = ndarray.copy()
     elif r[0].response_type == c_jsdrv.JSDRV_BUFFER_RESPONSE_SUMMARY:
         v['response_type'] = 'summary'
