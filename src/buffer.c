@@ -233,9 +233,15 @@ static void buffer_alloc(struct buffer_s * self) {
         if (level < 1) {
             level = 1;
         }
-        uint64_t g = (uint64_t) (pow(32, level - 1.0));
-        uint64_t k = (uint64_t) (round(N / (r0 * g)));
-        uint64_t Np = k * r0 * g;
+        uint64_t rZ = r0;
+        for (int i = 1; i <= level; ++i) {
+            rZ *= rN;
+        }
+        uint64_t k = (uint64_t) (round(N / rZ));
+        if (k == 0) {
+            k = 1;
+        }
+        uint64_t Np = k * rZ;
         jsdrv_bufsig_alloc(b, Np, r0, rN);
         bufsig_publish_info(b);
     }

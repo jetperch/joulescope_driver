@@ -551,10 +551,7 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
 
     uint64_t range_req = sample_id_end + 1 - sample_id_start;
     uint64_t incr = range_req / entries_length;
-    if ((range_req / incr) != entries_length) {
-        JSDRV_LOGI("summary request: adjusting increment %f -> %" PRIu64,
-                   (double) range_req / (double) entries_length, incr);
-    }
+    entries_length = (range_req + 1 + incr - 1) / incr;
 
     if (self->level0_size == 0) {
         JSDRV_LOGI("summary request: buffer empty");

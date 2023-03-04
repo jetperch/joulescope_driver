@@ -1,4 +1,4 @@
-# Copyright 2022 Jetperch LLC
+# Copyright 2022-2023 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -90,8 +90,11 @@ cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
     element_prefix = _element_type_to_prefix[info[0].element_type]
     name, field_name, units, use_index = _field_to_meta[info[0].field_id]
     if use_index:
-        name = f'{name}{info[0].index:d}'
-        field_name = f'{field_name}{info[0].index:d}'
+        name = f'{name}[{info[0].index:d}]'
+        if not field_name:
+            field_name = f'{info[0].index:d}'
+        else:
+            field_name = f'{field_name}[{info[0].index:d}]'
     v = {
         'version': info[0].version,
         'name': name,

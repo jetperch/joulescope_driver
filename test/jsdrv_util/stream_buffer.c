@@ -73,8 +73,11 @@ static void on_buf_rsp(void * user_data, const char * topic, const struct jsdrv_
             case JSDRV_BUFFER_RESPONSE_SUMMARY: rsp_type = "summary"; break;
             default: rsp_type = "unknown"; break;
         };
-        printf("response %s rsp_id=%" PRIu64 ", length=%" PRIu64 "\n",
-               rsp_type, rsp->rsp_id, rsp->info.time_range_samples.length);
+        int64_t duration = rsp->info.time_range_utc.end - rsp->info.time_range_utc.start;
+        printf("response %s rsp_id=%" PRIu64 ", duration=%.3f, length=%" PRIu64 "\n",
+               rsp_type, rsp->rsp_id,
+               (double) duration / JSDRV_TIME_SECOND,
+               rsp->info.time_range_samples.length);
      }
 }
 
@@ -94,10 +97,19 @@ static void on_buf_info(void * user_data, const char * topic, const struct jsdrv
     struct jsdrv_buffer_request_s req;
     memset(&req, 0, sizeof(req));
     req.version = 1;
-    req.time_type = JSDRV_TIME_SAMPLES;
-    req.time.samples.start = info->time_range_samples.start;
-    req.time.samples.end = info->time_range_samples.end;
-    req.time.samples.length = request_length;  // summary
+    if (0) {
+        req.time_type = JSDRV_TIME_SAMPLES;
+        req.time.samples.start = info->time_range_samples.start;
+        req.time.samples.end = info->time_range_samples.end;
+        req.time.samples.length = request_length;  // summary
+    } else {
+        int64_t duration = info->time_range_utc.end - info->time_range_utc.start;
+        duration = duration / 5;
+        req.time_type = JSDRV_TIME_UTC;
+        req.time.utc.start = info->time_range_utc.start + duration;
+        req.time.utc.end = info->time_range_utc.end - duration;
+        req.time.utc.length = request_length;  // summary
+    }
     jsdrv_cstr_copy(req.rsp_topic, RESPONSE_TOPIC, sizeof(req.rsp_topic));
     req.rsp_id = 1;
     struct jsdrv_union_s req_value = jsdrv_union_cbin((uint8_t *) &req, sizeof(req));
