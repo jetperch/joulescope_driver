@@ -128,7 +128,11 @@ static void samples_to_utc(struct bufsig_s * self,
         struct jsdrv_time_range_utc_s * utc) {
     uint64_t length = samples->length;
     utc->start = jsdrv_time_from_counter(&self->time_map, samples->start);
-    utc->end = jsdrv_time_from_counter(&self->time_map, samples->end);
+    if (samples->end == 0) {
+        utc->end = 0;
+    } else {
+        utc->end = jsdrv_time_from_counter(&self->time_map, samples->end);
+    }
     utc->length = length;
 }
 
@@ -137,7 +141,11 @@ static void utc_to_samples(struct bufsig_s * self,
                            struct jsdrv_time_range_samples_s * samples) {
     uint64_t length = utc->length;
     samples->start = jsdrv_time_to_counter(&self->time_map, utc->start);
-    samples->end = jsdrv_time_to_counter(&self->time_map, utc->end);
+    if (utc->end == 0) {
+        samples->end = 0;
+    } else {
+        samples->end = jsdrv_time_to_counter(&self->time_map, utc->end);
+    }
     samples->length = length;
 }
 
