@@ -79,6 +79,9 @@ static void insert_samples(struct bufsig_s * b, uint64_t sample_id_start, uint32
     s.element_count = length;
     s.sample_rate = 1000000;
     s.decimate_factor = 1;
+    s.time_map.offset_time = JSDRV_TIME_HOUR;
+    s.time_map.counter_rate = s.sample_rate;
+    s.time_map.offset_counter = 0;
     float * f32 = (float *) s.data;
     for (uint32_t i = 0; i < s.element_count; ++i) {
         f32[i] = (s.sample_id + i) / 1000000.0f;
@@ -117,8 +120,9 @@ static void test_samples_start_length(void **state) {
     assert_int_equal(1000, info.time_range_samples.start);
     assert_int_equal(1999, info.time_range_samples.end);
 
-    assert_int_equal(b.time_map.offset_time, info.time_range_utc.start);
-    assert_int_equal(b.time_map.offset_time + JSDRV_TIME_MILLISECOND - JSDRV_TIME_MICROSECOND, info.time_range_utc.end);
+    int64_t offset_time = jsdrv_time_from_counter(&b.time_map, 1000);
+    assert_int_equal(offset_time, info.time_range_utc.start);
+    assert_int_equal(offset_time + JSDRV_TIME_MILLISECOND - JSDRV_TIME_MICROSECOND, info.time_range_utc.end);
 
     struct jsdrv_buffer_request_s req;
     memset(&req, 0, sizeof(req));

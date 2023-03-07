@@ -27,6 +27,8 @@ cdef extern from "jsdrv/time.h":
         int64_t offset_time
         uint64_t offset_counter
         double counter_rate
+    int64_t jsdrv_time_from_counter(jsdrv_time_map_s * self, uint64_t counter)
+    uint64_t jsdrv_time_to_counter(jsdrv_time_map_s * self, int64_t time64)
 
 
 cdef extern from "jsdrv/union.h":
@@ -110,6 +112,7 @@ cdef extern from "jsdrv.h":
         uint32_t element_count
         uint32_t sample_rate
         uint32_t decimate_factor
+        jsdrv_time_map_s time_map
         uint8_t data[JSDRV_STREAM_PAYLOAD_LENGTH_MAX]
     struct jsdrv_statistics_s:
         uint8_t version
@@ -137,6 +140,7 @@ cdef extern from "jsdrv.h":
         double energy_f64
         uint64_t charge_i128[2]
         uint64_t energy_i128[2]
+        jsdrv_time_map_s time_map
     enum jsdrv_time_type_e:
         JSDRV_TIME_UTC = 0
         JSDRV_TIME_SAMPLES = 1

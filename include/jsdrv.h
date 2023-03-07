@@ -125,7 +125,7 @@
 /// The maximum size for normal PubSub messages
 #define JSDRV_PAYLOAD_LENGTH_MAX        (1024U)
 /// The header size of jsdrv_stream_signal_s before the data field.
-#define JSDRV_STREAM_HEADER_SIZE        (24U)
+#define JSDRV_STREAM_HEADER_SIZE        (48U)
 /// The size of data in jsdrv_stream_signal_s.
 #define JSDRV_STREAM_DATA_SIZE          (1024 * 64)    // 64 kB max
 
@@ -266,6 +266,7 @@ struct jsdrv_stream_signal_s {
     uint32_t element_count;                 ///< size of data in elements
     uint32_t sample_rate;                   ///< The frequency for sample_id.
     uint32_t decimate_factor;               ///< The decimation factor from sample_id to data samples.
+    struct jsdrv_time_map_s time_map;       ///< The time map between sample_id (before decimate_factor) and UTC.
     uint8_t data[JSDRV_STREAM_DATA_SIZE];   ///< The channel data.
 };
 
@@ -298,6 +299,7 @@ struct jsdrv_statistics_s {
     double energy_f64;           ///< The energy (integral of power) from accum_sample_id as a 64-bit float.
     uint64_t charge_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
     uint64_t energy_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
+    struct jsdrv_time_map_s time_map;  ///< The time map between sample_id and UTC.
 };
 
 /**

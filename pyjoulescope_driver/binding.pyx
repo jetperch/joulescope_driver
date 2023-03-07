@@ -216,10 +216,16 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 el = (stream[0].element_type, stream[0].element_size_bits)
                 v = {
                     'sample_id': stream[0].sample_id,
+                    'utc': c_jsdrv.jsdrv_time_from_counter(&stream[0].time_map, stream[0].sample_id),
                     'field_id': stream[0].field_id,
                     'index': stream[0].index,
                     'sample_rate': stream[0].sample_rate,
                     'decimate_factor': stream[0].decimate_factor,
+                    'time_map': {
+                        'offset_time': stream[0].time_map.offset_time,
+                        'offset_counter': stream[0].time_map.offset_counter,
+                        'counter_rate': stream[0].time_map.counter_rate,
+                    }
                 }
                 if el == (c_jsdrv.JSDRV_DATA_TYPE_FLOAT, 32):  # float32
                     shape[0] = <np.npy_intp> stream[0].element_count
@@ -262,12 +268,24 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 v = {
                     'time': {
                         'samples': {'value': [sample_id_start, sample_id_end], 'units': 'samples'},
+                        'utc': {
+                            'value': [
+                                c_jsdrv.jsdrv_time_from_counter(&stats[0].time_map, sample_id_start),
+                                c_jsdrv.jsdrv_time_from_counter(&stats[0].time_map, sample_id_end),
+                            ],
+                            'units': 'time64',
+                        },
                         'sample_freq': {'value': sample_freq, 'units': 'Hz'},
                         'range': {'value': [t_start, t_start + t_delta], 'units': 's'},
                         'delta': {'value': t_delta, 'units': 's'},
                         'decimate_factor': {'value': stats[0].decimate_factor, 'units': 'samples'},
                         'decimate_sample_count': {'value': stats[0].block_sample_count, 'units': 'samples'},
                         'accum_samples': {'value': [stats[0].accum_sample_id, sample_id_end], 'units': 'samples'},
+                        'time_map': {
+                            'offset_time': stats[0].time_map.offset_time,
+                            'offset_counter': stats[0].time_map.offset_counter,
+                            'counter_rate': stats[0].time_map.counter_rate,
+                        }
                     },
                     'signals': {
                         'current': {

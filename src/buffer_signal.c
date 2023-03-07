@@ -251,7 +251,6 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
     uint64_t sample_id_expect = self->sample_id_head;
     if (self->sample_id_head == 0) {
         // initial sample, ignore skips
-        // todo device should provide time_map
         clear(self, sample_id);
     } else if (sample_id_end < sample_id_expect) {
         JSDRV_LOGW("bufsig_recv_data %s: duplicate rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
@@ -317,6 +316,10 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
             summarize(self, start_idx, k);
         }
     }
+
+    self->time_map.offset_time = s->time_map.offset_time;
+    self->time_map.offset_counter = s->time_map.offset_counter / s->decimate_factor;
+    self->time_map.counter_rate = s->time_map.counter_rate / s->decimate_factor;
 
     // JSDRV_LOGI("bufsig_recv_data: sample_id=%" PRIu64 " length=%" PRIu64, s->sample_id, length);
     self->sample_id_head = sample_id;
