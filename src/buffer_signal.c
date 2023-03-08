@@ -564,8 +564,8 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     uint64_t entries_length = rsp->info.time_range_samples.length;
 
     uint64_t range_req = sample_id_end + 1 - sample_id_start;
-    uint64_t incr = (range_req + 1) / entries_length;
-    entries_length = (range_req + incr - 1) / incr;
+    uint64_t incr = range_req / entries_length;
+    entries_length = range_req / incr;
 
     if (self->level0_size == 0) {
         JSDRV_LOGI("summary request: buffer empty");
