@@ -457,7 +457,7 @@ static bool handle_cmd_q(struct buffer_s * self) {
             JSDRV_LOGI("hold %s", self->hold ? "on" : "off");
             rc = 0;
         } else {
-            // todo mode
+            // todo mode circular or single capture
             JSDRV_LOGW("buffer global unsupported: %s", s);
             rc = JSDRV_ERROR_PARAMETER_INVALID;
         }

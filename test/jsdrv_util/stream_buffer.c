@@ -23,6 +23,7 @@
 #include "jsdrv_prv/thread.h"
 #include <stdio.h>
 #include <inttypes.h>
+#include <math.h>
 
 
 static volatile bool _removed = false;
@@ -66,7 +67,7 @@ static void on_buf_rsp(void * user_data, const char * topic, const struct jsdrv_
         return;
     }
 
-     if (0) {
+    if (1) {
         const char * rsp_type;
         switch (rsp->response_type) {
             case JSDRV_BUFFER_RESPONSE_SAMPLES: rsp_type = "samples"; break;
@@ -74,11 +75,15 @@ static void on_buf_rsp(void * user_data, const char * topic, const struct jsdrv_
             default: rsp_type = "unknown"; break;
         };
         int64_t duration = rsp->info.time_range_utc.end - rsp->info.time_range_utc.start;
-        printf("response %s rsp_id=%" PRIu64 ", duration=%.3f, length=%" PRIu64 "\n",
-               rsp_type, rsp->rsp_id,
-               (double) duration / JSDRV_TIME_SECOND,
-               rsp->info.time_range_samples.length);
-     }
+        float * f32 = (float *) rsp->data;
+        if (fabs(f32[0]) >= 20.0) {
+            printf("response %s rsp_id=%" PRIu64 ", duration=%.3f, length=%" PRIu64 ", %g, %g, %g, %g\n",
+                   rsp_type, rsp->rsp_id,
+                   (double) duration / JSDRV_TIME_SECOND,
+                   rsp->info.time_range_samples.length,
+                   f32[0], f32[1], f32[2], f32[3]);
+        }
+    }
 }
 
 static void on_buf_info(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
@@ -211,9 +216,19 @@ int on_stream_buffer(struct app_s * self, int argc, char * argv[]) {
         }
     } else if (jsdrv_cstr_starts_with(device, "u/js110")) {
         ROE(device_publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, "m/@/!add",  &jsdrv_union_u8_r(7), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, "m/007/a/!add",  &jsdrv_union_u8_r(3), JSDRV_TIMEOUT_MS_DEFAULT));
+        struct jsdrv_topic_s t;
+        jsdrv_topic_set(&t, device);
+        jsdrv_topic_append(&t, "s/i/!data");
+        ROE(publish(self, "m/007/s/003/topic",  &jsdrv_union_cstr_r(t.topic), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(jsdrv_subscribe(self->context, "m/007/s/003/info", JSDRV_SFLAG_PUB, on_buf_info, self, JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, "m/007/g/size",  &jsdrv_union_u64_r(mem_size), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(device_publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
         if (wait_for_duration_ms(duration_ms)) {
             ROE(device_publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+        } else {
+            device_publish(self, device, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
         }
     } else {
         printf("Unsupported device: %s\n", device);

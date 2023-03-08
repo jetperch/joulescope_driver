@@ -250,7 +250,7 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
     uint64_t sample_id_end = sample_id + length - 1;
     uint64_t sample_id_expect = self->sample_id_head;
     if (self->sample_id_head == 0) {
-        // initial sample, ignore skips
+        JSDRV_LOGI("received initial sample, ignore skips, sample_rate=%d, decimate=%d", s->decimate_factor);
         clear(self, sample_id);
     } else if (sample_id_end < sample_id_expect) {
         JSDRV_LOGW("bufsig_recv_data %s: duplicate rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
@@ -315,6 +315,9 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
             self->level0_head = (self->level0_head + k) % self->N;
             summarize(self, start_idx, k);
         }
+    } else {
+        //JSDRV_LOGI("bufsig_recv_data %s: good rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
+        //           self->topic, sample_id, sample_id_end, sample_id_expect);
     }
 
     self->time_map.offset_time = s->time_map.offset_time;
@@ -561,8 +564,8 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     uint64_t entries_length = rsp->info.time_range_samples.length;
 
     uint64_t range_req = sample_id_end + 1 - sample_id_start;
-    uint64_t incr = range_req / entries_length;
-    entries_length = (range_req + 1 + incr - 1) / incr;
+    uint64_t incr = (range_req + 1) / entries_length;
+    entries_length = (range_req + incr - 1) / incr;
 
     if (self->level0_size == 0) {
         JSDRV_LOGI("summary request: buffer empty");

@@ -1198,11 +1198,6 @@ static void add_u1_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t valu
 
 static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_range) {
     struct js110_sample_s z = js110_sp_process(&d->sample_processor, sample, v_range);
-    if (0 == d->time_map.offset_time) {
-        d->time_map.offset_time = jsdrv_time_utc();
-        d->time_map.counter_rate = 2000000.0;
-        d->time_map.offset_counter = d->sample_id;
-    }
     add_f32_field(d, 0, z.i);
     add_f32_field(d, 1, z.v);
     add_f32_field(d, 2, z.p);
@@ -1254,6 +1249,11 @@ static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
         //}
         // todo handle skips better.
         d->packet_index = pkt_index;
+    }
+    if (0 == d->time_map.offset_time) {
+        d->time_map.offset_time = jsdrv_time_utc();
+        d->time_map.counter_rate = 2000000.0;
+        d->time_map.offset_counter = d->sample_id;
     }
     for (uint32_t i = 2; i < (FRAME_SIZE_BYTES / 4); ++i) {
         handle_sample(d, p_u32[i], voltage_range);
