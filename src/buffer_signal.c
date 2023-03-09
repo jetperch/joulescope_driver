@@ -382,6 +382,7 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
             rsp_empty(rsp);
             return;
         }
+        JSDRV_LOGW("sample req too early: %" PRIu64 " -> %" PRIu64, sample_id, sample_id_tail);
         length -= k;
         sample_id = sample_id_tail;
         rsp->info.time_range_samples.start = sample_id_tail;
@@ -393,6 +394,7 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     }
     uint64_t sample_id_end = sample_id + length - 1;
     if (sample_id_end >= self->sample_id_head) {
+        JSDRV_LOGW("sample req too late: %" PRIu64 " -> %" PRIu64, sample_id + length, self->sample_id_head - 1);
         length = self->sample_id_head - sample_id;
         rsp->info.time_range_samples.end = self->sample_id_head - 1;
     }
@@ -566,6 +568,8 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     uint64_t range_req = sample_id_end + 1 - sample_id_start;
     uint64_t incr = range_req / entries_length;
     entries_length = range_req / incr;
+    rsp->info.time_range_samples.length = entries_length;
+    rsp->info.time_range_samples.end = sample_id_start + incr * entries_length;
 
     if (self->level0_size == 0) {
         JSDRV_LOGI("summary request: buffer empty");
@@ -765,7 +769,7 @@ int32_t jsdrv_bufsig_process_request(
     struct jsdrv_time_range_samples_s * r = &rsp->info.time_range_samples;
     uint64_t interval = r->end - r->start + 1;
     if (r->length && r->end) {
-        if (r->length >= interval) {
+        if ((r->length * 2) > interval) {
             r->length = interval;
             samples_get(self, rsp);
         } else {

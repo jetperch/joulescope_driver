@@ -6,7 +6,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.2.0
 
-2023 Mar 7 [in progress]
+2023 Mar 9
 
 * Added memory buffer for f32, u4, u1 data types.
 * Bumped python support (3.8 - 3.11).  Dropped 3.7.
@@ -15,6 +15,8 @@ This file contains the list of changes made to the Joulescope driver.
 * Added jsdrv_time_map_s to 
   jsdrv_stream_signal_s and jsdrv_statistics_s.
 * Added host-side time map.
+* Fixed JS110 sample stream message size.
+* Fixed buffer_signal sample and utc response time entries. 
 
 
 ## 1.1.4
