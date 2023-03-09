@@ -1127,6 +1127,7 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
     if ((((s->element_count * s->element_size_bits) / 8) >= STREAM_PAYLOAD_FULL)
             || (s->element_count >= element_count_max)) {
         s->time_map = d->time_map;
+        p->msg->value.size = JSDRV_STREAM_HEADER_SIZE + s->element_count * s->element_size_bits / 8;
         jsdrvp_backend_send(d->context, p->msg);
         p->msg = NULL;
     }
