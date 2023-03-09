@@ -1,4 +1,4 @@
-# Copyright 2022 Jetperch LLC
+# Copyright 2022-2023 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ Python binding for the native Joulescope driver implementation.
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t
 from libc.float cimport DBL_MAX
 from libc.math cimport isfinite, NAN
-from libc.string cimport memset
+from libc.string cimport memset, strcpy
 
 from collections.abc import Mapping
 import json
@@ -41,12 +41,158 @@ _log_c_name = 'jsdrv'
 _log_c = logging.getLogger(_log_c_name)
 
 
+class ElementType:
+    UNDEFINED = 0
+    INT = 2
+    UINT = 3
+    FLOAT = 4
+
+
+class Field:
+    UNDEFINED = 0
+    CURRENT   = 1
+    VOLTAGE   = 2
+    POWER     = 3
+    RANGE     = 4
+    GPI       = 5
+    UART      = 6
+    RAW       = 7
+
+
+_element_type_to_prefix = {
+    ElementType.INT: 'i',
+    ElementType.UINT: 'u',
+    ElementType.FLOAT: 'f',
+}
+
+
+_field_to_meta = {
+    #field         [name,            field, units, use_index]
+    Field.CURRENT: ['current',       'i',   'A',   False],
+    Field.VOLTAGE: ['voltage',       'v',   'V',   False],
+    Field.POWER:   ['power',         'p',   'W',   False],
+    Field.RANGE:   ['current_range', 'r',   None,  False],
+    Field.GPI:     ['gpi',           '',    None,  True],
+    Field.UART:    ['uart',          'u',   None,  True],
+    Field.RAW:     ['raw',           'z',   None,  True],
+}
+
+
 cdef object _i128_to_int(uint64_t high, uint64_t low):
     i = int(high) << 64
     i |= int(low)
     if i & 0x8000_0000_0000_0000:
         i = ((~i) & 0xffff_ffff_ffff_ffff) - 1
     return i
+
+
+cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
+    element_prefix = _element_type_to_prefix[info[0].element_type]
+    name, field_name, units, use_index = _field_to_meta[info[0].field_id]
+    if use_index:
+        name = f'{name}[{info[0].index:d}]'
+        if not field_name:
+            field_name = f'{info[0].index:d}'
+        else:
+            field_name = f'{field_name}[{info[0].index:d}]'
+    v = {
+        'version': info[0].version,
+        'name': name,
+        'field': field_name,
+        'field_id': info[0].field_id,
+        'index': info[0].index,
+        'element_type': f'{element_prefix}{info[0].element_size_bits:d}',
+        'element_type_enum': info[0].element_type,
+        'element_size_bits': info[0].element_size_bits,
+        'units': units,
+        'topic': info[0].topic,
+        'size_in_utc': info[0].size_in_utc,
+        'size_in_samples': info[0].size_in_samples,
+        'time_range_utc': {
+            'start': info[0].time_range_utc.start,
+            'end': info[0].time_range_utc.end,
+            'length': info[0].time_range_utc.length,
+        },
+        'time_range_samples': {
+            'start': info[0].time_range_samples.start,
+            'end': info[0].time_range_samples.end,
+            'length': info[0].time_range_samples.length,
+
+        },
+        'time_map': {
+            'offset_time': info[0].time_map.offset_time,
+            'offset_counter': info[0].time_map.offset_counter,
+            'counter_rate': info[0].time_map.counter_rate,
+        },
+    }
+    return v
+
+
+cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
+    cdef np.npy_intp shape[2]
+    v = {
+        'version': r[0].version,
+        'rsp_id': r[0].rsp_id,
+        'info': _parse_buffer_info(&r[0].info),
+    }
+    length = v['info']['time_range_samples']['length']
+    if r[0].response_type == c_jsdrv.JSDRV_BUFFER_RESPONSE_SAMPLES:
+        v['response_type'] = 'samples'
+        info = v['info']
+        element_type = info['element_type']
+        if element_type == 'f32':
+            shape[0] = <np.npy_intp> length
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> &r[0].data[0])
+        elif element_type == 'u1':
+            shape[0] = <np.npy_intp> (length // 8)
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
+        elif element_type == 'u4':
+            shape[0] = <np.npy_intp> (length // 2)
+            ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
+        else:
+            _log_c.error('unsupported sample format')
+            return
+        v['data_type'] = info['element_type']
+        v['data'] = ndarray.copy()
+    elif r[0].response_type == c_jsdrv.JSDRV_BUFFER_RESPONSE_SUMMARY:
+        v['response_type'] = 'summary'
+        shape[0] = <np.npy_intp> length
+        shape[1] = <np.npy_intp> 4
+        ndarray = np.PyArray_SimpleNewFromData(2, shape, np.NPY_FLOAT32, <void *> &r[0].data[0])
+        v['data'] = ndarray.copy()
+    else:
+        _log_c.error(f'unsupported response_type {r[0].response_type}')
+    return v
+
+
+cdef object _pack_buffer_req(r):
+    cdef const uint8_t[:] rsp_topic_str = r['rsp_topic'].encode('utf-8')
+    cdef c_jsdrv.jsdrv_buffer_request_s s
+    cdef uint8_t * u8_ptr
+
+    s.version = 1
+    time_type = r['time_type'].lower()
+    if time_type == 'utc':
+        s.time_type = c_jsdrv.JSDRV_TIME_UTC
+        s.time.utc.start = r['start']
+        s.time.utc.end = r.get('end', 0)
+        s.time.utc.length = r.get('length', 0)
+    elif time_type == 'samples':
+        s.time_type = c_jsdrv.JSDRV_TIME_SAMPLES
+        s.time.samples.start = r['start']
+        s.time.samples.end = r.get('end', 0)
+        s.time.samples.length = r.get('length', 0)
+    else:
+        raise ValueError(f'invalid time type: {time_type}')
+    s.rsv1_u8 = 0
+    s.rsv2_u8 = 0
+    s.rsv3_u32 = 0
+    strcpy(s.rsp_topic, <const char *> &rsp_topic_str[0])
+    s.rsp_id = int(r['rsp_id'])
+
+    u8_ptr = <uint8_t *> &s;
+    return bytes(u8_ptr[:sizeof(s)])
+
 
 
 cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
@@ -70,10 +216,16 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 el = (stream[0].element_type, stream[0].element_size_bits)
                 v = {
                     'sample_id': stream[0].sample_id,
+                    'utc': c_jsdrv.jsdrv_time_from_counter(&stream[0].time_map, stream[0].sample_id),
                     'field_id': stream[0].field_id,
                     'index': stream[0].index,
                     'sample_rate': stream[0].sample_rate,
                     'decimate_factor': stream[0].decimate_factor,
+                    'time_map': {
+                        'offset_time': stream[0].time_map.offset_time,
+                        'offset_counter': stream[0].time_map.offset_counter,
+                        'counter_rate': stream[0].time_map.counter_rate,
+                    }
                 }
                 if el == (c_jsdrv.JSDRV_DATA_TYPE_FLOAT, 32):  # float32
                     shape[0] = <np.npy_intp> stream[0].element_count
@@ -116,12 +268,24 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 v = {
                     'time': {
                         'samples': {'value': [sample_id_start, sample_id_end], 'units': 'samples'},
+                        'utc': {
+                            'value': [
+                                c_jsdrv.jsdrv_time_from_counter(&stats[0].time_map, sample_id_start),
+                                c_jsdrv.jsdrv_time_from_counter(&stats[0].time_map, sample_id_end),
+                            ],
+                            'units': 'time64',
+                        },
                         'sample_freq': {'value': sample_freq, 'units': 'Hz'},
                         'range': {'value': [t_start, t_start + t_delta], 'units': 's'},
                         'delta': {'value': t_delta, 'units': 's'},
                         'decimate_factor': {'value': stats[0].decimate_factor, 'units': 'samples'},
                         'decimate_sample_count': {'value': stats[0].block_sample_count, 'units': 'samples'},
                         'accum_samples': {'value': [stats[0].accum_sample_id, sample_id_end], 'units': 'samples'},
+                        'time_map': {
+                            'offset_time': stats[0].time_map.offset_time,
+                            'offset_counter': stats[0].time_map.offset_counter,
+                            'counter_rate': stats[0].time_map.counter_rate,
+                        }
                     },
                     'signals': {
                         'current': {
@@ -164,6 +328,10 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                     },
                     'source': 'sensor',
                 }
+            elif value[0].app == c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_INFO:
+                v = _parse_buffer_info(<c_jsdrv.jsdrv_buffer_info_s *> &(value[0].value.bin[0]))
+            elif value[0].app == c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_RSP:
+                v = _parse_buffer_rsp(<c_jsdrv.jsdrv_buffer_response_s *> &(value[0].value.bin[0]))
             else:
                 v = value[0].value.bin[:value[0].size]
         elif t == c_jsdrv.JSDRV_UNION_F32:
@@ -189,7 +357,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
         else:
             v = None
     except Exception as ex:
-        print(f'_jsdrv_union_to_py conversion failed: {ex}')
+        _log_c.exception(ex)
         v = None
     return v
 
@@ -406,12 +574,16 @@ cdef int32_t _timeout_validate(value, default=None):
     return <int32_t> (float(value) * 1000)
 
 
-def _handle_rc(rc, src):
+def _handle_rc(rc, src, cause=None):
     if rc:
-        if rc == ErrorCode.TIMED_OUT:
-            raise TimeoutError(f'{src} timed out')
+        if cause:
+            cause = f' | {cause}'
         else:
-            raise RuntimeError(f'{src} failed {rc}')
+            ''
+        if rc == ErrorCode.TIMED_OUT:
+            raise TimeoutError(f'{src} timed out{cause}')
+        else:
+            raise RuntimeError(f'{src} failed {rc}{cause}')
 
 
 cdef class Driver:
@@ -488,30 +660,37 @@ cdef class Driver:
             v.type = c_jsdrv.JSDRV_UNION_STR
             v.value.str = &byte_str[0]
         elif isinstance(value, int):
-            if (value >= 0) and (value < 4294967296):
+            if (value >= 0) and (value < 4294967296LL):
                 v.type = c_jsdrv.JSDRV_UNION_U32
                 v.value.u64 = value
             elif value >= 0:
                 v.type = c_jsdrv.JSDRV_UNION_U64
                 v.value.u64 = value
-            elif value >= -2147483648:
+            elif value >= -2147483648LL:
                 v.type = c_jsdrv.JSDRV_UNION_I32
                 v.value.i64 = value
             else:
                 v.type = c_jsdrv.JSDRV_UNION_I64
                 v.value.i64 = value
+        elif topic.startswith('m/') and topic.endswith('/!req'):
+            value = _pack_buffer_req(value)
+            byte_str = value
+            v.type = c_jsdrv.JSDRV_UNION_BIN
+            v.value.bin = <const uint8_t *> byte_str
+            v.app = c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_REQ
+            v.size = <uint32_t> len(value)
         elif isinstance(value, bytes):
             byte_str = value
             v.type = c_jsdrv.JSDRV_UNION_BIN
             v.value.bin = <const uint8_t *> byte_str
-            v.size = len(value)
+            v.size = <uint32_t> len(value)
         else:
             raise ValueError(f'Unsupported value type: {type(value)}')
         if '!' not in topic:
             v.flags = c_jsdrv.JSDRV_UNION_FLAG_RETAIN
         with nogil:
             rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms)
-        _handle_rc(rc, 'jsdrv_publish')
+        _handle_rc(rc, 'jsdrv_publish', topic)
 
     def query(self, topic: str, timeout=None):
         """Query the value for a topic.
@@ -532,7 +711,7 @@ cdef class Driver:
         v.value.str = byte_str
         with nogil:
             rc = c_jsdrv.jsdrv_query(self._context, <char *> &topic_str[0], &v, timeout_ms)
-        _handle_rc(rc, 'jsdrv_query')
+        _handle_rc(rc, 'jsdrv_query', topic)
         return _jsdrv_union_to_py(&v)
 
     def device_paths(self, timeout=None):
@@ -592,7 +771,7 @@ cdef class Driver:
         self._subscribers.add((topic, fn))
         with nogil:
             rc = c_jsdrv.jsdrv_subscribe(self._context, <char *> &topic_str[0], c_flags, _on_cmd_publish1_cbk, fn_ptr, timeout_ms)
-        _handle_rc(rc, 'jsdrv_subscribe')
+        _handle_rc(rc, 'jsdrv_subscribe', topic)
 
     def unsubscribe(self, topic, fn, timeout=None):
         """Unsubscribe from a topic.
@@ -610,7 +789,7 @@ cdef class Driver:
         self._subscribers.discard((topic, fn))
         with nogil:
             rc = c_jsdrv.jsdrv_unsubscribe(self._context, <char *> &topic_str[0], _on_cmd_publish1_cbk, fn_ptr, timeout_ms)
-        _handle_rc(rc, 'jsdrv_unsubscribe')
+        _handle_rc(rc, 'jsdrv_unsubscribe', topic)
 
     def unsubscribe_all(self, fn, timeout=None):
         """Unsubscribe a callback from all topics.
@@ -660,7 +839,7 @@ cdef class Driver:
 
         with nogil:
             rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms);
-        _handle_rc(rc, 'jsdrv_open')
+        _handle_rc(rc, 'jsdrv_open', device_prefix)
 
     def close(self, device_prefix, timeout=None):
         """Close an attached device.
@@ -680,7 +859,7 @@ cdef class Driver:
         v.value.i32 = 0
         with nogil:
             rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms);
-        _handle_rc(rc, 'jsdrv_close')
+        _handle_rc(rc, 'jsdrv_close', device_prefix)
 
 
 cdef void _on_cmd_publish2_cbk(void * user_data, const char * topic, const c_jsdrv.jsdrv_union_s * value) with gil:

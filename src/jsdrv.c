@@ -27,6 +27,7 @@
 #include "jsdrv_prv/assert.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
+#include "jsdrv_prv/buffer.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/pubsub.h"
@@ -121,24 +122,32 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_data(struct jsdrv_context_s * context, co
 }
 
 struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const struct jsdrvp_msg_s * msg_src) {
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(context);
-    *m = *msg_src;
-    switch (m->value.type) {
-        case JSDRV_UNION_JSON:  // intentional fall-through
-        case JSDRV_UNION_STR:
-            m->value.value.str = m->payload.str;
-            break;
-        case JSDRV_UNION_BIN:
-            if (m->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
-                uint8_t * ptr = jsdrv_alloc(m->value.size);
-                memcpy(ptr, m->value.value.bin, m->value.size);
-                m->value.value.bin = ptr;
-            } else {
-                m->value.value.bin = m->payload.bin;
-            }
-            break;
-        default:
-            break;
+    struct jsdrvp_msg_s * m;
+    if (msg_src->inner_msg_type == JSDRV_MSG_TYPE_DATA) {
+        m = jsdrvp_msg_alloc_data(context, msg_src->topic);
+        m->value = msg_src->value;
+        m->value.value.bin = &m->payload.bin[0];
+        memcpy(m->payload.bin, msg_src->payload.bin, msg_src->value.size);
+    } else {
+        m = jsdrvp_msg_alloc(context);
+        *m = *msg_src;
+        switch (m->value.type) {
+            case JSDRV_UNION_JSON:  // intentional fall-through
+            case JSDRV_UNION_STR:
+                m->value.value.str = m->payload.str;
+                break;
+            case JSDRV_UNION_BIN:
+                if (m->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
+                    uint8_t *ptr = jsdrv_alloc(m->value.size);
+                    memcpy(ptr, m->value.value.bin, m->value.size);
+                    m->value.value.bin = ptr;
+                } else {
+                    m->value.value.bin = m->payload.bin;
+                }
+                break;
+            default:
+                break;
+        }
     }
     jsdrv_list_initialize(&m->item);
     return m;
@@ -575,6 +584,10 @@ static bool handle_backend_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s *
         } else {
             JSDRV_LOGW("unhandled %s", msg->topic);
         }
+    } else if (msg->topic[0] == JSDRV_TOPIC_PREFIX_LOCAL) {
+        jsdrv_pubsub_publish(c->pubsub, msg);
+    } else if (msg->topic[0] == 'm') {  // buffer
+        jsdrv_pubsub_publish(c->pubsub, msg);
     } else {
         switch (msg->inner_msg_type) {
             case JSDRV_MSG_TYPE_NORMAL: break;
@@ -746,7 +759,8 @@ static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m
             timeout.timeout = jsdrv_time_utc() + timeout_ms * JSDRV_TIME_MILLISECOND;
             timeout.ev = jsdrv_os_event_alloc();
             timeout.return_code = 0;
-            m->timeout = &timeout;
+            // use a stack variable, but block on timeout to ensure stays in scopre
+            m->timeout = &timeout;  // cppcheck-suppress autoVariables
             m->source = 1;
         }
     }
@@ -776,7 +790,7 @@ static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m
             rc = timeout.return_code;
         }
 #endif
-        m->timeout = NULL;
+        m->timeout = NULL;  // remove reference to stack variable
         jsdrv_os_event_free(timeout.ev);
     }
     JSDRV_LOGD1("api_cmd(%s) done %lu", m->topic, rc);
@@ -875,6 +889,8 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
     msg = jsdrvp_msg_alloc_str(c, JSDRV_MSG_DEVICE_LIST, "");  // start with empty device list
     jsdrv_pubsub_publish(c->pubsub, msg);
     jsdrv_pubsub_process(c->pubsub);
+    JSDRV_RETURN_ON_ERROR(jsdrv_buffer_initialize(c));
+
     int32_t rv = jsdrv_thread_create(&c->thread, frontend_thread, c);
     if (rv) {
         jsdrv_finalize(c, 0);
@@ -900,6 +916,7 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         jsdrv_cstr_copy(msg->topic, JSDRV_MSG_FINALIZE, sizeof(msg->topic));
         msg_queue_push(context->msg_cmd, msg);
         jsdrv_thread_join(&context->thread, timeout_ms);
+        jsdrv_buffer_finalize();
         jsdrv_pubsub_finalize(c->pubsub);
         c->pubsub = NULL;
 

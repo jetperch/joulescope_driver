@@ -265,7 +265,10 @@ static int8_t subscriber_call(struct jsdrv_pubsub_subscriber_s * s, struct jsdrv
     } else {
         if ((msg->value.app == JSDRV_PAYLOAD_TYPE_UNION)
                 || (msg->value.app == JSDRV_PAYLOAD_TYPE_STREAM)
-                || (msg->value.app == JSDRV_PAYLOAD_TYPE_STATISTICS)) {
+                || (msg->value.app == JSDRV_PAYLOAD_TYPE_STATISTICS)
+                || (msg->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_INFO)
+                || (msg->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_REQ)
+                || (msg->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_RSP)) {
             s->external_fn(s->user_data, msg->topic, &msg->value);
         } else if ((msg->value.type == JSDRV_UNION_BIN) && (msg->value.app == JSDRV_PAYLOAD_TYPE_DEVICE)) {
             s->external_fn(s->user_data, msg->topic, &jsdrv_union_str(msg->payload.device.prefix));

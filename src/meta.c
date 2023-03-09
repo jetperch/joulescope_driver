@@ -136,9 +136,9 @@ static int32_t on_default(void * user_data, const struct jsdrv_union_s * token) 
             }
             break;
         case JSDRV_JSON_KEY:
-            if ((s->state == DEFAULT_ST_DTYPE_SEARCH) && (s->depth = 1) && (0 == jsdrv_json_strcmp("dtype", token))) {
+            if ((s->state == DEFAULT_ST_DTYPE_SEARCH) && (s->depth == 1) && (0 == jsdrv_json_strcmp("dtype", token))) {
                 s->state = DEFAULT_ST_DTYPE_KEY;
-            } else if ((s->state == DEFAULT_ST_DEFAULT_SEARCH) && (s->depth = 1) && (0 == jsdrv_json_strcmp("default", token))) {
+            } else if ((s->state == DEFAULT_ST_DEFAULT_SEARCH) && (s->depth == 1) && (0 == jsdrv_json_strcmp("default", token))) {
                 s->state = DEFAULT_ST_DEFAULT_KEY;
             }
             break;
@@ -265,11 +265,11 @@ static int32_t on_value(void * user_data, const struct jsdrv_union_s * token) {
             }
             break;
         case JSDRV_JSON_KEY:
-            if ((s->state == VALUE_ST_DTYPE_SEARCH) && (s->depth = 1) && (0 == jsdrv_json_strcmp("dtype", token))) {
+            if ((s->state == VALUE_ST_DTYPE_SEARCH) && (s->depth == 1) && (0 == jsdrv_json_strcmp("dtype", token))) {
                 s->state = VALUE_ST_DTYPE_KEY;
-            } else if ((s->state == VALUE_ST_SEARCH) && (s->depth = 1) && (0 == jsdrv_json_strcmp("range", token))) {
+            } else if ((s->state == VALUE_ST_SEARCH) && (s->depth == 1) && (0 == jsdrv_json_strcmp("range", token))) {
                 s->state = VALUE_ST_RANGE_KEY;
-            } else if ((s->state == VALUE_ST_SEARCH) && (s->depth = 1) && (0 == jsdrv_json_strcmp("options", token))) {
+            } else if ((s->state == VALUE_ST_SEARCH) && (s->depth == 1) && (0 == jsdrv_json_strcmp("options", token))) {
                 s->state = VALUE_ST_OPTIONS;
             }
             break;

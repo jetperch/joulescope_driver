@@ -388,7 +388,7 @@ void jsdrv_log_finalize() {
         dprintf("ERROR: jsdrv_log_finalize but 0 == self->active_count");
         return;
     }
-    uint32_t do_finalize = 0;
+    int do_finalize = 0;
 
     LOCK_DISPATCH();
     if (self->active_count) {

@@ -25,6 +25,7 @@
 
 #include "jsdrv/cmacro_inc.h"
 #include "jsdrv/union.h"
+#include "jsdrv/time.h"
 #include <stdint.h>
 
 /**
@@ -124,7 +125,7 @@
 /// The maximum size for normal PubSub messages
 #define JSDRV_PAYLOAD_LENGTH_MAX        (1024U)
 /// The header size of jsdrv_stream_signal_s before the data field.
-#define JSDRV_STREAM_HEADER_SIZE        (24U)
+#define JSDRV_STREAM_HEADER_SIZE        (48U)
 /// The size of data in jsdrv_stream_signal_s.
 #define JSDRV_STREAM_DATA_SIZE          (1024 * 64)    // 64 kB max
 
@@ -178,7 +179,7 @@
 #define JSDRV_MSG_DEVICE_REMOVE         "@/!remove"     ///< Device removed: subscribe only (published automatically)
 #define JSDRV_MSG_DEVICE_LIST           "@/list"        ///< Device list: subscribe only comma-separated device list, updated with each add & remove
 #define JSDRV_MSG_INITIALIZE            "@/!init"       // CAUTION: internal use only
-#define JSDRV_MSG_FINALIZE              "@/!finalize"   // CAUTION: internal use only
+#define JSDRV_MSG_FINALIZE              "@/!final"      // CAUTION: internal use only
 #define JSDRV_MSG_VERSION               "@/version"     ///< Driver version: subscribe only JSDRV version (u32)
 
 
@@ -220,7 +221,9 @@ enum jsdrv_payload_type_e {
     JSDRV_PAYLOAD_TYPE_UNION        = 0,    // standard jsdrv_union including string, JSON, and raw binary.
     JSDRV_PAYLOAD_TYPE_STREAM       = 1,    // bin with jsdrv_stream_signal_s
     JSDRV_PAYLOAD_TYPE_STATISTICS   = 2,    // bin with jsdrv_statistics_s
-    //JSDRV_PAYLOAD_TYPE_STATUS,      // todo
+    JSDRV_PAYLOAD_TYPE_BUFFER_INFO  = 3,    // bin with jsdrv_buffer_info_s
+    JSDRV_PAYLOAD_TYPE_BUFFER_REQ   = 4,    // bin with jsdrv_buffer_request_s
+    JSDRV_PAYLOAD_TYPE_BUFFER_RSP   = 5,    // bin with jsdrv_buffer_response_s
 };
 
 /**
@@ -263,6 +266,7 @@ struct jsdrv_stream_signal_s {
     uint32_t element_count;                 ///< size of data in elements
     uint32_t sample_rate;                   ///< The frequency for sample_id.
     uint32_t decimate_factor;               ///< The decimation factor from sample_id to data samples.
+    struct jsdrv_time_map_s time_map;       ///< The time map between sample_id (before decimate_factor) and UTC.
     uint8_t data[JSDRV_STREAM_DATA_SIZE];   ///< The channel data.
 };
 
@@ -295,6 +299,166 @@ struct jsdrv_statistics_s {
     double energy_f64;           ///< The energy (integral of power) from accum_sample_id as a 64-bit float.
     uint64_t charge_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
     uint64_t energy_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
+    struct jsdrv_time_map_s time_map;  ///< The time map between sample_id and UTC.
+};
+
+/**
+ * @brief The time specification type.
+ */
+enum jsdrv_time_type_e {
+    JSDRV_TIME_UTC = 0,        ///< Time in i64 34Q30 UTC.  See jsdrv/time.h.
+    JSDRV_TIME_SAMPLES = 1,    ///< Time in sample_ids for the corresponding channel.
+};
+
+/**
+ * @brief A UTC-defined time range.
+ *
+ * Times are int64 34Q30 in UTC from the epoch.  See jsdrv/time.h.
+ */
+struct jsdrv_time_range_utc_s {
+    int64_t start;                   ///< The time for data[0] (inclusive).
+    int64_t end;                     ///< The time for data[-1] (inclusive).
+    uint64_t length;                 ///< The number of evenly-spaced entries.
+};
+
+/**
+ * @brief A sample_id-defined time range.
+ *
+ * Times are in uint64_t sample_ids for the corresponding channel.
+ */
+struct jsdrv_time_range_samples_s {
+    uint64_t start;                   ///< The time for data[0] (inclusive).
+    uint64_t end;                     ///< The time for data[-1] (inclusive).
+    uint64_t length;                  ///< The number of evenly-spaced entries.
+};
+
+/**
+ * @brief The signal buffer information.
+ *
+ * This structure contains both the size and range.  The size is
+ * populated immediately, even if the buffer is still empty.
+ * As the buffer contents grows, the buffer range will approach
+ * the buffer size.  When the buffer is full, the range will be
+ * close to the size.  The range when full is not required to be the
+ * entire size to allow for buffering optimizations.
+ */
+struct jsdrv_buffer_info_s {
+    uint8_t version;                        ///< The response format version == 1.
+    uint8_t rsv1_u8;                        ///< Reserved, set to 0.
+    uint8_t rsv2_u8;                        ///< Reserved, set to 0.
+    uint8_t rsv3_u8;                        ///< Reserved, set to 0.
+    uint8_t field_id;                       ///< jsdrv_field_e
+    uint8_t index;                          ///< The channel index within the field.
+    uint8_t element_type;                   ///< jsdrv_element_type_e
+    uint8_t element_size_bits;              ///< The element size in bits
+    char topic[JSDRV_TOPIC_LENGTH_MAX];     ///< The source topic that provides jsdrv_stream_signal_s.
+    int64_t size_in_utc;                    ///< The total buffer size in UTC time.
+    uint64_t size_in_samples;               ///< The total buffer size in samples.
+    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time.
+    struct jsdrv_time_range_samples_s time_range_samples;  ///< In sample time.
+    struct jsdrv_time_map_s time_map;       ///< The map between samples and utc time.
+};
+
+/**
+ * @brief The time range union for buffer requests
+ */
+union jsdrv_buffer_request_time_range_u {
+    struct jsdrv_time_range_utc_s utc;
+    struct jsdrv_time_range_samples_s samples;
+};
+
+/**
+ * @brief Request data from the streaming sample buffer.
+ *
+ * To make a sample request that returns jsdrv_buffer_sample_response_s,
+ * only specify end or length.  Set the unused value to zero.
+ *
+ * If both end and length are specified, then the request may return
+ * jsdrv_buffer_summary_response_s.  However, if the specified increment
+ * is less than or equal to one sample duration, then the request
+ * will return jsdrv_buffer_sample_response_s.
+ *
+ * For JSDRV_TIME_UTC with end and length > 1,
+ * the time increment between samples is:
+ *       time_incr = (time_end - time_start) / (length - 1)
+ *
+ * Using python, the x-axis time is then:
+ *      x = np.linspace(time_start, time_end, length, dtype=np.int64)
+ *
+ * For JSDRV_TIME_SAMPLES with end and length > 1,
+ * the sample increment between samples is:
+ *       sample_id_incr = (sample_id_end - sample_id_start) / (length - 1)
+ *
+ * The buffer implementation may deduplicate requests using
+ * the combination rsp_topic and rsp_id.
+ */
+struct jsdrv_buffer_request_s {
+    uint8_t version;                     ///< The request format version == 1.
+    int8_t time_type;                    ///< jsdrv_time_type_e
+    uint8_t rsv1_u8;                     ///< Reserved, set to 0.
+    uint8_t rsv2_u8;                     ///< Reserved, set to 0.
+    uint32_t rsv3_u32;                   ///< Reserved, set to 0.
+    union jsdrv_buffer_request_time_range_u time;
+    char rsp_topic[JSDRV_TOPIC_LENGTH_MAX]; ///< The topic for this response.
+    int64_t rsp_id;                         ///< The additional identifier to include in the response.
+};
+
+/**
+ * @brief The buffer response type.
+ */
+enum jsdrv_buffer_response_type_e {
+    JSDRV_BUFFER_RESPONSE_SAMPLES = 1,   ///< Data contains samples.
+    JSDRV_BUFFER_RESPONSE_SUMMARY = 2,   ///< Data contains summary statistics.
+};
+
+/**
+ * @brief A single summary statistics entry.
+ */
+struct jsdrv_summary_entry_s {
+    float avg;                  ///< The average (mean) over the window.
+    float std;                  ///< The standard deviation over the window.
+    float min;                  ///< The maximum value over the window.
+    float max;                  ///< The minimum value over the window.
+};
+
+/**
+ * @brief The response to jsdrv_buffer_request_s produced by the memory buffer.
+ *
+ * The response populates both info.time_range_utc and info.time_range_samples.
+ * Both length values are equal, and specify the number of returned data samples.
+ * For response_type JSDRV_BUFFER_RESPONSE_SUMMARY, the data is
+ * jsdrv_summary_entry_s[info.time_range_utc.length].
+ * info.element_type is JSDRV_DATA_TYPE_UNDEFINED and
+ * info.element_size_bits is sizeof(jsdrv_summary_entry_s) * 8.
+ *
+ * For response_type JSDRV_BUFFER_RESPONSE_SAMPLES, the data type depends
+ * upon info.element_type and info.element_size_bits.
+ */
+struct jsdrv_buffer_response_s {
+    uint8_t version;                        ///< The response format version == 1.
+    uint8_t response_type;                  ///< jsdrv_buffer_response_type_e
+    uint8_t rsv1_u8;                        ///< Reserved, set to 0.
+    uint8_t rsv2_u8;                        ///< Reserved, set to 0.
+    uint32_t rsv3_u32;                      ///< Reserved, set to 0.
+    int64_t rsp_id;                         ///< The value provided to jsdrv_buffer_request_s.
+    struct jsdrv_buffer_info_s info;        ///< The response information.
+
+    /**
+     * @brief The response data.
+     *
+     * The data type for the response varies.
+     * Unfortunately, C does not support flexible arrays in union
+     * types.  Your code should cast the data to the appropriate type.
+     * Use info.time_range_samples.length for the number of data
+     * elements in this response data.
+     *
+     * For response_type JSDRV_BUFFER_RESPONSE_SUMMARY, the
+     * data is jsdrv_summary_entry_s[info.time_range_samples.length].
+     *
+     * For response_type JSDRV_BUFFER_RESPONSE_SAMPLES, the data
+     * is defined by info.element_type and info.element_size_bits.
+     */
+    uint64_t data[];
 };
 
 /// The subscriber flags for jsdrv_subscribe().

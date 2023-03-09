@@ -22,6 +22,15 @@ DEF JSDRV_STREAM_DATA_SIZE      = (1024 * 64)
 DEF JSDRV_STREAM_PAYLOAD_LENGTH_MAX = (JSDRV_STREAM_DATA_SIZE - 16)
 
 
+cdef extern from "jsdrv/time.h":
+    struct jsdrv_time_map_s:
+        int64_t offset_time
+        uint64_t offset_counter
+        double counter_rate
+    int64_t jsdrv_time_from_counter(jsdrv_time_map_s * self, uint64_t counter)
+    uint64_t jsdrv_time_to_counter(jsdrv_time_map_s * self, int64_t time64)
+
+
 cdef extern from "jsdrv/union.h":
     enum jsdrv_union_e:
         JSDRV_UNION_NULL = 0  # NULL value.  Also used to clear existing value.
@@ -77,6 +86,9 @@ cdef extern from "jsdrv.h":
         JSDRV_PAYLOAD_TYPE_UNION  = 0
         JSDRV_PAYLOAD_TYPE_STREAM = 1
         JSDRV_PAYLOAD_TYPE_STATISTICS = 2
+        JSDRV_PAYLOAD_TYPE_BUFFER_INFO = 3
+        JSDRV_PAYLOAD_TYPE_BUFFER_REQ = 4
+        JSDRV_PAYLOAD_TYPE_BUFFER_RSP = 5
     enum jsdrv_element_type_e:
         JSDRV_DATA_TYPE_UNDEFINED = 0
         JSDRV_DATA_TYPE_INT = 2
@@ -100,6 +112,7 @@ cdef extern from "jsdrv.h":
         uint32_t element_count
         uint32_t sample_rate
         uint32_t decimate_factor
+        jsdrv_time_map_s time_map
         uint8_t data[JSDRV_STREAM_PAYLOAD_LENGTH_MAX]
     struct jsdrv_statistics_s:
         uint8_t version
@@ -127,6 +140,62 @@ cdef extern from "jsdrv.h":
         double energy_f64
         uint64_t charge_i128[2]
         uint64_t energy_i128[2]
+        jsdrv_time_map_s time_map
+    enum jsdrv_time_type_e:
+        JSDRV_TIME_UTC = 0
+        JSDRV_TIME_SAMPLES = 1
+    struct jsdrv_time_range_utc_s:
+        int64_t start
+        int64_t end
+        uint64_t length
+    struct jsdrv_time_range_samples_s:
+        uint64_t start
+        uint64_t end
+        uint64_t length
+    struct jsdrv_buffer_info_s:
+        uint8_t version
+        uint8_t rsv1_u8
+        uint8_t rsv2_u8
+        uint8_t rsv3_u8
+        uint8_t field_id
+        uint8_t index
+        uint8_t element_type
+        uint8_t element_size_bits
+        char topic[JSDRV_TOPIC_LENGTH_MAX]
+        int64_t size_in_utc
+        uint64_t size_in_samples
+        jsdrv_time_range_utc_s time_range_utc
+        jsdrv_time_range_samples_s time_range_samples
+        jsdrv_time_map_s time_map
+    union jsdrv_buffer_request_time_range_u:
+        jsdrv_time_range_utc_s utc
+        jsdrv_time_range_samples_s samples
+    struct jsdrv_buffer_request_s:
+        uint8_t version
+        int8_t time_type
+        uint8_t rsv1_u8
+        uint8_t rsv2_u8
+        uint32_t rsv3_u32
+        jsdrv_buffer_request_time_range_u time
+        char rsp_topic[JSDRV_TOPIC_LENGTH_MAX]
+        int64_t rsp_id
+    enum jsdrv_buffer_response_type_e:
+        JSDRV_BUFFER_RESPONSE_SAMPLES = 1
+        JSDRV_BUFFER_RESPONSE_SUMMARY = 2
+    struct jsdrv_summary_entry_s:
+        float avg
+        float std
+        float min
+        float max
+    struct jsdrv_buffer_response_s:
+        uint8_t version
+        uint8_t response_type
+        uint8_t rsv1_u8
+        uint8_t rsv2_u8
+        uint32_t rsv3_u32
+        int64_t rsp_id
+        jsdrv_buffer_info_s info
+        uint64_t data[0]
     enum jsdrv_subscribe_flag_e:
         JSDRV_SFLAG_NONE = 0                    # No flags (always 0).
         JSDRV_SFLAG_RETAIN = (1 << 0)           # Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.

@@ -51,6 +51,18 @@
  * allow conversion to single precision floating point which has significantly
  * reduce resolution compared to the 34Q30 value.
  *
+ * Float64 only has 53 bits of precision, which can only represent up to
+ * 104 days with nanosecond precision.  While this duration and precision is
+ * often adequate for relative time, it is insufficient to store absolute time
+ * from the epoch.  In contrast, the int64 34Q30 time with nanosecond resolution
+ * can store ±272 years relative to its epoch.
+ *
+ * For applications that need floating-point time, store a
+ * separate offset in seconds relative to the starting time.
+ * This improves precision between intervals.  For example:
+ *
+ *      x = np.linspace(0, time_end - time_start, length, dtype=np.float64)
+ *
  * @{
  */
 
@@ -390,6 +402,39 @@ JSDRV_INLINE_FN int64_t jsdrv_time_max(int64_t a, int64_t b) {
  * @see https://stackoverflow.com/questions/7960318/math-to-convert-seconds-since-1970-into-date-and-vice-versa
  */
 int32_t jsdrv_time_to_str(int64_t t, char * str, size_t size);
+
+/**
+ * @brief Define a mapping between JSDRV time and a counter.
+ *
+ * This mapping is often used to convert between an
+ * increment sample identifier value and JSDRV time.
+ *
+ * The counter_rate is specified as a double which contains
+ * a 52-bit mantissa with fractional accuracy of 2e-16.
+ */
+struct jsdrv_time_map_s {
+    int64_t offset_time;        ///< The offset specified as JSDRV time i64.
+    uint64_t offset_counter;    ///< The offset specified as counter values u64.
+    double counter_rate;        ///< The counter increment rate (Hz).
+};
+
+/**
+ * @brief Convert time from a counter value to JSDRV time.
+ *
+ * @param self The time mapping instance.
+ * @param counter The counter value u64.
+ * @return The JSDRV time i64.
+ */
+int64_t jsdrv_time_from_counter(struct jsdrv_time_map_s * self, uint64_t counter);
+
+/**
+ * @brief Convert time from JSDRV time to a counter value.
+ *
+ * @param self The time mapping instance.
+ * @param time The JSDRV time i64.
+ * @return The counter value u64.
+ */
+uint64_t jsdrv_time_to_counter(struct jsdrv_time_map_s * self, int64_t time64);
 
 JSDRV_CPP_GUARD_END
 

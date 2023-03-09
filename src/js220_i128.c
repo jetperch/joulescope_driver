@@ -147,7 +147,7 @@ double js220_i128_to_f64(js220_i128 x, uint32_t q) {
     return f;
 }
 
-double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q) {
+double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint64_t n, uint32_t q) {
     double f;
     if (x1 < 0) {
         x1 = -x1;
@@ -177,7 +177,7 @@ double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint32_t n, uint32_t q)
     return f;
 }
 
-js220_i128 js220_i128_compute_integral(js220_i128 x, uint32_t n) {
+js220_i128 js220_i128_compute_integral(js220_i128 x, uint64_t n) {
     if (x.i64[1] < 0) {
         x = js220_i128_neg(x);
         x = js220_i128_udiv(x, n, NULL);

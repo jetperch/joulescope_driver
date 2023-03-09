@@ -228,6 +228,8 @@ struct dev_s {
     jsdrv_thread_t thread;
     uint8_t state;  // state_e
 
+    struct jsdrv_time_map_s time_map;
+
     struct sbuf_f32_s i_buf;
     struct sbuf_f32_s v_buf;
     struct sbuf_f32_s p_buf;
@@ -591,10 +593,22 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
 
     if (JSDRV_DEVICE_OPEN_MODE_RAW != opt) {  // normal operation
         JSDRV_RETURN_ON_ERROR(wait_for_connect(d));
+        JSDRV_LOGD1("query metadata");
         JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "$", &jsdrv_union_null()));
         JSDRV_RETURN_ON_ERROR(ping_wait(d, 1));
-        JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "?", &jsdrv_union_null()));
-        JSDRV_RETURN_ON_ERROR(ping_wait(d, 2));
+        if (JSDRV_DEVICE_OPEN_MODE_RESUME == opt) {
+            JSDRV_LOGD1("query values");
+            JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "?", &jsdrv_union_null()));
+            JSDRV_RETURN_ON_ERROR(ping_wait(d, 2));
+        } else if (JSDRV_DEVICE_OPEN_MODE_DEFAULTS == opt) {
+            // todo publish metadata defaults to device
+            // subscribe retained for self
+            // publish ping to PubSub
+            // publish retained to device
+            // on pong, unsubscribe
+        } else {
+            JSDRV_LOGW("invalid open mode: %d", opt);
+        }
     } else {
         send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
     }
@@ -933,6 +947,15 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
+static void time_map_update(struct dev_s * d, uint64_t sample_id, double counter_rate) {
+    if (0 == d->time_map.offset_time) {
+        // todo implement time sync on instrument and use device info.
+        d->time_map.offset_time = jsdrv_time_utc();
+        d->time_map.counter_rate = counter_rate;
+        d->time_map.offset_counter = sample_id;
+    }
+}
+
 static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * p_u32, uint16_t size) {
     struct field_def_s * field_def = &PORT_MAP[port_id & 0x0f];
     struct port_s * port = &d->ports[port_id & 0x0f];
@@ -1005,6 +1028,8 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         s->element_type = field_def->element_type;
         s->element_size_bits = field_def->element_size_bits;
         s->element_count = 0;
+        time_map_update(d, port->sample_id_next, (double) s->sample_rate);
+        s->time_map = d->time_map;
         m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
         m->value.size = JSDRV_STREAM_HEADER_SIZE;
         port->msg_in = m;
@@ -1078,6 +1103,10 @@ static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t si
     m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
     struct js220_statistics_raw_s * src = (struct js220_statistics_raw_s *) p_u32;
     if (0 == js220_stats_convert(src, dst)) {
+        time_map_update(d,
+                        dst->block_sample_id + dst->block_sample_count * dst->decimate_factor,
+                        (double) dst->sample_freq);
+        dst->time_map = d->time_map;
         jsdrvp_backend_send(d->context, m);
     }
 }
@@ -1360,7 +1389,8 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         d->in_frame_id = hdr.h.frame_id;
     }
     if ((d->stream_in_port_enable & (1U << hdr.h.port_id)) == 0U) {
-        JSDRV_LOGW("stream in ignore on inactive port %d", hdr.h.port_id);
+        // JSDRV_LOGW("stream in ignore on inactive port %d", hdr.h.port_id);
+        // todo keep statistics
     } else if (hdr.h.port_id >= 16U) {
         if (hdr.h.port_id == (16U + 13U)) {
             handle_uart_in(d, p_u32 + 1, hdr.h.length);

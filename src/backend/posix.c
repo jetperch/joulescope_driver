@@ -83,7 +83,7 @@ void jsdrv_os_mutex_unlock(jsdrv_os_mutex_t mutex) {
 }
 
 void jsdrv_fatal(const char * file, uint32_t line, const char * msg) {
-    printf("FATAL: %s:%d %s\n", file, line, msg);
+    printf("FATAL: %s:%u %s\n", file, line, msg);
     fflush(stdout);
     exit(1);
 }
@@ -145,7 +145,7 @@ int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
     return 0;
 }
 
-bool jsdrv_thread_is_current(jsdrv_thread_t * thread) {
+bool jsdrv_thread_is_current(jsdrv_thread_t const * thread) {
     return (*thread == pthread_self());
 }
 

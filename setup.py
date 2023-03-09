@@ -133,6 +133,8 @@ extensions = [
     setuptools.Extension('pyjoulescope_driver.binding',
                          sources=[
                                      'pyjoulescope_driver/binding' + ext,
+                                     'src/buffer.c',
+                                     'src/buffer_signal.c',
                                      'src/cstr.c',
                                      'src/devices.c',
                                      'src/downsample.c',
@@ -153,6 +155,8 @@ extensions = [
                                      'src/pubsub.c',
                                      'src/meta.c',
                                      'src/sample_buffer_f32.c',
+                                     'src/statistics.c',
+                                     'src/time.c',
                                      'src/topic.c',
                                      'src/union.c',
                                      'src/version.c',

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2022 Jetperch LLC
+ * Copyright 2014-2023 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -124,8 +124,9 @@ const struct command_s COMMANDS[] = {
         {"reset", on_reset, "Reset to target"},
         {"scan", on_scan, "List connected devices"},
         {"set",  on_set,  "Set parameters"},
-        {"threads", on_threads, "Demonstrate multi-thread access"},
         {"statistics",  on_statistics,  "Display statistics from all connected devices"},
+        {"stream_buffer",  on_stream_buffer,  "Demonstrate stream buffer"},
+        {"threads", on_threads, "Demonstrate multi-thread access"},
         {"version", on_version, "Display version and platform information"},
         {"help", on_help, "Display help"},
         {NULL, NULL, NULL}

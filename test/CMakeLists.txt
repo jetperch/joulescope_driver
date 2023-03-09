@@ -23,6 +23,14 @@ function (ADD_CMOCKA_TEST _testName)
     add_test(${_testName} ${CMAKE_CURRENT_BINARY_DIR}/${_testName})
 endfunction (ADD_CMOCKA_TEST)
 
+
+ADD_CMOCKA_TEST(buffer_signal_test)
+
+add_executable(buffer_test buffer_test.c ../src/buffer.c)
+add_dependencies(buffer_test jsdrv_support_objlib tinyprintf cmocka)
+target_link_libraries(buffer_test jsdrv_support_objlib tinyprintf cmocka)
+add_test(buffer_test ${CMAKE_CURRENT_BINARY_DIR}/buffer_test)
+
 ADD_CMOCKA_TEST(cstr_test)
 
 add_executable(dbc_test dbc_test.c)
@@ -38,6 +46,8 @@ ADD_CMOCKA_TEST(js220_stats_test)
 ADD_CMOCKA_TEST(json_test)
 ADD_CMOCKA_TEST(meta_test)
 ADD_CMOCKA_TEST(sample_buffer_f32_test)
+ADD_CMOCKA_TEST(statistics_test)
+ADD_CMOCKA_TEST(time_test)
 
 add_executable(topic_test topic_test.c ../src/topic.c)
 add_dependencies(topic_test cmocka)
@@ -52,6 +62,7 @@ target_link_libraries(pubsub_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(pubsub_test ${CMAKE_CURRENT_BINARY_DIR}/pubsub_test)
 
 add_executable(frontend_test frontend_test.c
+        ../src/buffer.c
         ../src/js110_usb.c
         ../src/js220_usb.c
         ../src/js220_params.c
@@ -75,6 +86,7 @@ add_executable(jsdrv_util
         jsdrv_util/scan.c
         jsdrv_util/set.c
         jsdrv_util/statistics.c
+        jsdrv_util/stream_buffer.c
         jsdrv_util/threads.c
         jsdrv_util/version.c
         )

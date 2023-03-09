@@ -440,6 +440,7 @@ struct js110_dev_s {
     struct js110_sp_s sample_processor;
     struct js110_stats_s stats;
     uint64_t sample_id;
+    struct jsdrv_time_map_s time_map;
 
     struct port_s ports[JSDRV_ARRAY_SIZE(FIELDS)];
 
@@ -1125,6 +1126,8 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
     uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * jsdrv_downsample_decimate_factor(p->downsample));
     if ((((s->element_count * s->element_size_bits) / 8) >= STREAM_PAYLOAD_FULL)
             || (s->element_count >= element_count_max)) {
+        s->time_map = d->time_map;
+        p->msg->value.size = JSDRV_STREAM_HEADER_SIZE + s->element_count * s->element_size_bits / 8;
         jsdrvp_backend_send(d->context, p->msg);
         p->msg = NULL;
     }
@@ -1210,6 +1213,7 @@ static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_ran
         tfp_snprintf(m->topic, sizeof(m->topic), "%s/s/stats/value", d->ll.prefix);
         struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
         *dst = *s;
+        dst->time_map = d->time_map;
         m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
         m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
         jsdrvp_backend_send(d->context, m);
@@ -1246,6 +1250,11 @@ static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
         //}
         // todo handle skips better.
         d->packet_index = pkt_index;
+    }
+    if (0 == d->time_map.offset_time) {
+        d->time_map.offset_time = jsdrv_time_utc();
+        d->time_map.counter_rate = 2000000.0;
+        d->time_map.offset_counter = d->sample_id;
     }
     for (uint32_t i = 2; i < (FRAME_SIZE_BYTES / 4); ++i) {
         handle_sample(d, p_u32[i], voltage_range);

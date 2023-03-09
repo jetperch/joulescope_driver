@@ -924,8 +924,9 @@ static DWORD WINAPI backend_thread(LPVOID lpParam) {
 }
 
 static void finalize(struct jsdrvbk_s * backend) {
-    char topic[2] = {backend->prefix, 0};
+    char topic[2] = {0, 0};
     if (backend) {
+        topic[0] = backend->prefix;
         struct backend_s * s = (struct backend_s *) backend;
         JSDRV_LOGI("finalize usb backend");
         device_change_notifier_finalize();
