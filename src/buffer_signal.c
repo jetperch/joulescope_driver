@@ -297,14 +297,15 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
             } else {
                 // fill integer types with zeros
                 uint64_t size = (k * s->element_size_bits + 7) / 8;
+                uint64_t head = (self->level0_head * self->hdr.element_size_bits) / 8;
                 uint8_t * data = (uint8_t *) self->level0_data;
                 if ((self->level0_head + size) > self->N) {
-                    uint64_t size1 = ((self->N - self->level0_head) * s->element_size_bits + 7) / 8;
+                    uint64_t size1 = (self->N * s->element_size_bits) / 8 - head;
                     uint64_t size2 = size - size1;
-                    memset(&data[self->level0_head], 0, size1);
+                    memset(&data[head], 0, size1);
                     memset(&data[0], 0, size2);
                 } else {
-                    memset(&data[self->level0_head], 0, size);
+                    memset(&data[head], 0, size);
                 }
             }
             uint64_t start_idx = self->level0_head;
