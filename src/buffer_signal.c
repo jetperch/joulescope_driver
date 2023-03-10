@@ -266,10 +266,10 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
     } else if (sample_id > sample_id_expect) {
         JSDRV_LOGW("bufsig_recv_data %s: skip rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
                    self->topic, sample_id, sample_id_end, sample_id_expect);
-        if ((sample_id - sample_id_expect) > self->N) {
+        uint64_t k = sample_id - sample_id_expect;
+        if (k > self->N) {
             clear(self, sample_id);
         } else {
-            uint64_t k = sample_id - sample_id_expect;
             if (s->element_type == JSDRV_DATA_TYPE_FLOAT) {
                 if (s->element_size_bits == 32) {
                     // fill float32 with NaN
@@ -298,14 +298,13 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
                 // fill integer types with zeros
                 uint64_t size = (k * s->element_size_bits + 7) / 8;
                 uint64_t head = (self->level0_head * self->hdr.element_size_bits) / 8;
-                uint8_t * data = (uint8_t *) self->level0_data;
                 if ((self->level0_head + size) > self->N) {
                     uint64_t size1 = (self->N * s->element_size_bits) / 8 - head;
                     uint64_t size2 = size - size1;
-                    memset(&data[head], 0, size1);
-                    memset(&data[0], 0, size2);
+                    memset(&f_dst[head], 0, size1);
+                    memset(&f_dst[0], 0, size2);
                 } else {
-                    memset(&data[head], 0, size);
+                    memset(&f_dst[head], 0, size);
                 }
             }
             uint64_t start_idx = self->level0_head;
