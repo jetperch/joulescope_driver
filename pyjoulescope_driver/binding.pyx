@@ -144,10 +144,10 @@ cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
             shape[0] = <np.npy_intp> length
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, <void *> &r[0].data[0])
         elif element_type == 'u1':
-            shape[0] = <np.npy_intp> (length // 8)
+            shape[0] = <np.npy_intp> ((length + 7) // 8)
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
         elif element_type == 'u4':
-            shape[0] = <np.npy_intp> (length // 2)
+            shape[0] = <np.npy_intp> ((length + 1) // 2)
             ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> &r[0].data[0])
         else:
             _log_c.error('unsupported sample format')

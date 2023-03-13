@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.2.1
+
+2023 Mar 13
+
+* Truncate memory buffer sample responses that are too long (segfault).
+* Fixed buffer signal shift correction overflowing buffer (segfault).
+* Fixed garbage data at end when shift required for u1 and u4 data types.
+
+
 ## 1.2.0
 
 2023 Mar 9

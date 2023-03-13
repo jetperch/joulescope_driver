@@ -27,9 +27,10 @@
 #include <math.h>
 #include <float.h>
 
-
-const uint64_t SUMMARY_LENGTH_MAX = (sizeof(struct jsdrv_stream_signal_s) - sizeof(struct jsdrv_buffer_response_s)) /
-        sizeof(struct jsdrv_summary_entry_s);
+#define DATA_SIZE_MAX (sizeof(struct jsdrv_stream_signal_s) \
+                       - sizeof(struct jsdrv_buffer_response_s) \
+                       - sizeof(uint64_t))
+const uint64_t SUMMARY_LENGTH_MAX = DATA_SIZE_MAX / sizeof(struct jsdrv_summary_entry_s);
 
 static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index, uint64_t incr, struct jsdrv_summary_entry_s * y);
 
@@ -371,6 +372,7 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     uint64_t sample_id = rsp->info.time_range_samples.start;
     uint64_t length = rsp->info.time_range_samples.length;
     uint64_t sample_id_tail = self->sample_id_head - self->level0_size;
+    uint64_t length_max = (DATA_SIZE_MAX * 8) / self->hdr.element_size_bits;
 
     if (self->level0_size == 0) {
         rsp_empty(rsp);
@@ -398,10 +400,23 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
         length = self->sample_id_head - sample_id;
         rsp->info.time_range_samples.end = self->sample_id_head - 1;
     }
+    if (length > length_max) {
+        JSDRV_LOGI("sample req too long, truncate %" PRIu64 " -> %" PRIu64, length, length_max);
+        length = length_max;
+        rsp->info.time_range_samples.length = length;
+        rsp->info.time_range_samples.end = sample_id + length - 1;
+    }
 
     uint8_t * data_rsp = (uint8_t *) rsp->data;
     uint8_t * data_buf = (uint8_t *) self->level0_data;
     uint64_t idx = (sample_id - sample_id_tail + level0_tail(self)) % self->N;
+
+    uint8_t shift = 0;
+    if (1 == self->hdr.element_size_bits) {
+        shift = idx & 7;
+    } else if (4 == self->hdr.element_size_bits) {
+        shift = (idx & 1) << 2;
+    }
 
     while (length) {
         uint64_t idx_next = idx + length;
@@ -410,28 +425,24 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
             k = self->N - idx;
             idx_next = 0;
         }
-        uint64_t copy_size = (k * self->hdr.element_size_bits) / 8;
+        uint64_t copy_size = (k * self->hdr.element_size_bits + shift + 7) / 8;
         memcpy(data_rsp, &data_buf[(idx * self->hdr.element_size_bits) / 8], copy_size);
         data_rsp += copy_size;
         length -= k;
         idx = idx_next;
     }
 
-    uint8_t shift = 0;
-    if (1 == self->hdr.element_size_bits) {
-        shift = idx & 7;
-    } else if (4 == self->hdr.element_size_bits) {
-        shift = (idx & 1) << 2;
-    }
     if (shift) {
+        uint64_t u64_length = (rsp->info.time_range_samples.length * self->hdr.element_size_bits + shift + 63) / 64;
         uint8_t shift_left = 64 - shift;
         uint64_t * p = (uint64_t *) rsp->data;
         uint64_t fwd = p[0];
-        for (uint64_t i = 1; i < rsp->info.time_range_samples.length; ++i) {
+        for (uint64_t i = 1; i < u64_length; ++i) {
             uint64_t z = p[i];
             p[i - 1] = (fwd >> shift) | (z << shift_left);
             fwd = z;
         }
+        p[u64_length - 1] = fwd >> shift;
     }
 
     samples_to_utc(self, &rsp->info.time_range_samples, &rsp->info.time_range_utc);
