@@ -1124,6 +1124,9 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
         return;
     }
     uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * jsdrv_downsample_decimate_factor(p->downsample));
+    if (element_count_max < 1) {
+        element_count_max = 1;
+    }
     if ((((s->element_count * s->element_size_bits) / 8) >= STREAM_PAYLOAD_FULL)
             || (s->element_count >= element_count_max)) {
         s->time_map = d->time_map;

@@ -386,12 +386,14 @@ static bool handle_cmd_q(struct buffer_s * self) {
                 JSDRV_LOGW("signal already active: %u", idx);
                 rc = JSDRV_ERROR_BUSY;
             } else {
+                JSDRV_LOGI("signal add %d", (int) msg->u32_a);
                 buffer_free(self);
                 b->active = true;
                 buf_publish_signal_list(self);
                 rc = 0;
             }
         } else if (0 == strcmp(s, "!remove")) {
+            JSDRV_LOGI("signal remove %d", (int) msg->u32_a);
             bufsig_unsub(b);
             b->active = false;
             buffer_free(self);
@@ -455,6 +457,10 @@ static bool handle_cmd_q(struct buffer_s * self) {
             jsdrv_union_to_bool(&msg->value, &bool_v);
             self->hold = bool_v ? 1 : 0;
             JSDRV_LOGI("hold %s", self->hold ? "on" : "off");
+            rc = 0;
+        } else if (0 == strcmp(s, "!clear")) {
+            JSDRV_LOGI("clear");
+            buffer_free(self);
             rc = 0;
         } else {
             // todo mode circular or single capture
@@ -541,7 +547,10 @@ static uint8_t _buffer_recv(void * user_data, struct jsdrvp_msg_s * msg) {
 static uint8_t _buffer_recv_data(void * user_data, struct jsdrvp_msg_s * msg) {
     // topic should be "m/xxx/..."
     struct bufsig_s * b = (struct bufsig_s *) user_data;
-    if (0 == b->parent->hold) {
+    struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) msg->value.value.bin;
+    if (signal->element_count == 0) {
+                JSDRV_LOGW("empty stream signal message");
+    } else if (0 == b->parent->hold) {
         struct jsdrvp_msg_s * m = jsdrvp_msg_clone(b->parent->context, msg);
         m->u32_a = b->idx;  // signal_id=0 (invalid), for main processing
         msg_queue_push(b->parent->cmd_q, m);

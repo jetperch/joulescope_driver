@@ -29,7 +29,7 @@
 
 #define DATA_SIZE_MAX (sizeof(struct jsdrv_stream_signal_s) \
                        - sizeof(struct jsdrv_buffer_response_s) \
-                       - sizeof(uint64_t))
+                       - sizeof(uint64_t) * 8)  // extra space for shift and overrun
 const uint64_t SUMMARY_LENGTH_MAX = DATA_SIZE_MAX / sizeof(struct jsdrv_summary_entry_s);
 
 static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index, uint64_t incr, struct jsdrv_summary_entry_s * y);

@@ -1065,6 +1065,9 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     // determine if need to send
     uint64_t sample_id_delta = port->sample_id_next - s->sample_id;
     uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * port->decimate_factor);
+    if (element_count_max < 1) {
+        element_count_max = 1;
+    }
     if ((((s->element_count * s->element_size_bits) / 8) >= STREAM_PAYLOAD_FULL)
             || (s->element_count >= element_count_max)) {
         JSDRV_LOGD1("stream_in_port: port_id=%d, sample_id_delta=%d, size=%d", (int) port_id, (int) sample_id_delta, (int) m->value.size);

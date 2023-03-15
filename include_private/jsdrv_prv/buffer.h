@@ -45,6 +45,7 @@ struct jsdrv_context_s;
 // topics per buffer: prefix is "m/BBB/" where BBB is the buffer_id
 #define JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD            "a/!add"          // u8 id
 #define JSDRV_BUFFER_MSG_ACTION_SIGNAL_REMOVE         "a/!remove"       // u8 id
+#define JSDRV_BUFFER_MSG_ACTION_CLEAR                 "g/!clear"        // Clear the buffer
 #define JSDRV_BUFFER_MSG_LIST                         "g/list"          // bin ro: u8[N] ids
 #define JSDRV_BUFFER_MSG_SIZE                         "g/size"          // u64 size in bytes
 #define JSDRV_BUFFER_MSG_HOLD                         "g/hold"          // u8: 0=run (default), 1=hold, clear on 1->0
@@ -61,7 +62,6 @@ JSDRV_CPP_GUARD_START
  * @return 0 or error code.
  */
 int32_t jsdrv_buffer_initialize(struct jsdrv_context_s * context);
-
 
 /**
  * @brief Finalize the singleton buffer manager.
