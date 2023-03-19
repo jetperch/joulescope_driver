@@ -91,8 +91,8 @@ bool msg_queue_is_empty(struct msg_queue_s* queue) {
 
 void msg_queue_push(struct msg_queue_s * queue, struct jsdrvp_msg_s * msg) {
     JSDRV_DBC_NOT_NULL(msg);
-    jsdrv_list_remove(&msg->item);  // remove from any existing list
     EnterCriticalSection(&queue->critical_section);
+    jsdrv_list_remove(&msg->item);  // remove from any existing list
     jsdrv_list_add_tail(&queue->items, &msg->item);
     LeaveCriticalSection(&queue->critical_section);
     SetEvent(queue->available_event);

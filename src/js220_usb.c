@@ -1111,6 +1111,8 @@ static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t si
                         (double) dst->sample_freq);
         dst->time_map = d->time_map;
         jsdrvp_backend_send(d->context, m);
+    } else {
+        jsdrvp_msg_free(d->context, m);
     }
 }
 
@@ -1479,6 +1481,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         msg = jsdrvp_msg_alloc_value(d->context, "", &jsdrv_union_json(p->meta));
         tfp_snprintf(msg->topic, sizeof(msg->topic), "%s/%s$", d->ll.prefix, p->topic);
         jsdrvp_backend_send(d->context, msg);
+        msg = NULL;
     }
 
     update_state(d, ST_CLOSED);

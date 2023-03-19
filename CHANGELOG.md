@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.2.2
+
+2023 Mar 19
+
+* Fixed intermittent timeout broken for API calls.
+
+
 ## 1.2.1
 
 2023 Mar 16

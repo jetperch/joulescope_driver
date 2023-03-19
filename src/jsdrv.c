@@ -766,6 +766,7 @@ static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m
     }
     JSDRV_LOGD1("api_cmd(%s) start", m->topic);
     msg_queue_push(context->msg_cmd, m);
+    m = NULL;  // we relinquished ownership of m, ensure we don't use it.
     if (timeout_ms) {
 #if _WIN32
         switch (WaitForSingleObject(timeout.ev, INFINITE)) {  // timeout performed in main jsdrv thread
@@ -790,10 +791,9 @@ static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m
             rc = timeout.return_code;
         }
 #endif
-        m->timeout = NULL;  // remove reference to stack variable
         jsdrv_os_event_free(timeout.ev);
     }
-    JSDRV_LOGD1("api_cmd(%s) done %lu", m->topic, rc);
+    JSDRV_LOGD1("api_cmd done %lu", rc);
     return rc;
 }
 
