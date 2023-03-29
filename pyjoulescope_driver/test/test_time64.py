@@ -37,3 +37,21 @@ class TestTime(unittest.TestCase):
         t = datetime.datetime(2023, 1, 1, tzinfo=datetime.timezone.utc)
         fname = time64.filename(extension='_hello.txt', t=t)
         self.assertEqual("20230101_000000_hello.txt", fname)
+
+    def test_duration_to_seconds(self):
+        with self.assertRaises(ValueError):
+            time64.duration_to_seconds(None)
+        with self.assertRaises(ValueError):
+            time64.duration_to_seconds('')
+        self.assertEqual(1.0, time64.duration_to_seconds(1))
+        self.assertEqual(1.0, time64.duration_to_seconds(1.0))
+        self.assertEqual(1.0, time64.duration_to_seconds('1'))
+        self.assertEqual(1.0, time64.duration_to_seconds('1s'))
+        self.assertEqual(1.5, time64.duration_to_seconds('1.5'))
+        self.assertEqual(1.5, time64.duration_to_seconds('1.5s'))
+        self.assertEqual(60.0, time64.duration_to_seconds('1m'))
+        self.assertEqual(90.0, time64.duration_to_seconds('1.5m'))
+        self.assertEqual(3600.0, time64.duration_to_seconds('1h'))
+        self.assertEqual(86400.0, time64.duration_to_seconds('1d'))
+        with self.assertRaises(ValueError):
+            time64.duration_to_seconds('hello')
