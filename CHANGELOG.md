@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.0
+
+2023 Mar 29 [in progress]
+
+* Added pyjoulescope_driver.time64 module (from UI).
+
+
 ## 1.2.2
 
 2023 Mar 19
