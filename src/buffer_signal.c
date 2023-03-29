@@ -251,7 +251,8 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
     uint64_t sample_id_end = sample_id + length - 1;
     uint64_t sample_id_expect = self->sample_id_head;
     if (self->sample_id_head == 0) {
-        JSDRV_LOGI("received initial sample, ignore skips, sample_rate=%d, decimate=%d", s->decimate_factor);
+        JSDRV_LOGI("received initial sample, ignore skips, sample_rate=%d, decimate=%d",
+                   s->sample_rate, s->decimate_factor);
         clear(self, sample_id);
     } else if (sample_id_end < sample_id_expect) {
         JSDRV_LOGW("bufsig_recv_data %s: duplicate rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
@@ -569,6 +570,15 @@ static uint64_t summary_level0_get(struct bufsig_s * self, uint64_t sample_id, u
     return summary_level0_get_by_idx(self, src_idx, incr, y);
 }
 
+static void rsp_clear(struct jsdrv_buffer_response_s * rsp) {
+    rsp->info.time_range_samples.start = 0;
+    rsp->info.time_range_samples.end = 0;
+    rsp->info.time_range_samples.length = 0;
+    rsp->info.time_range_utc.start = 0;
+    rsp->info.time_range_utc.end = 0;
+    rsp->info.time_range_utc.length = 0;
+}
+
 static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s * rsp) {
     rsp->response_type = JSDRV_BUFFER_RESPONSE_SUMMARY;
     uint64_t sample_id_tail = self->sample_id_head - self->level0_size;
@@ -584,17 +594,16 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
 
     if (self->level0_size == 0) {
         JSDRV_LOGI("summary request: buffer empty");
-        rsp->info.time_range_samples.length = 0;
-        rsp->info.time_range_utc.length = 0;
+        rsp_clear(rsp);
+        return;
     } else if (entries_length == 0) {
         JSDRV_LOGI("summary request: length == 0");
-        rsp->info.time_range_utc.length = 0;
+        rsp_clear(rsp);
         return;
     } else if (entries_length > SUMMARY_LENGTH_MAX) {
         JSDRV_LOGI("summary request: length too long: %" PRIu64 " > %" PRIu64,
                    entries_length, SUMMARY_LENGTH_MAX);
-        rsp->info.time_range_samples.length = 0;
-        rsp->info.time_range_utc.length = 0;
+        rsp_clear(rsp);
         return;
     }
 
