@@ -79,7 +79,7 @@ def run():
     if args.log_level is not None:
         log_level = args.log_level
     else:
-        log_level = os.environ.get('JOULESCOPE_DEV_LOG_LEVEL', 'WARNING')
+        log_level = os.environ.get('JOULESCOPE_DRIVER_LOG_LEVEL', 'WARNING')
     log_level = _LOG_LEVELS.get(log_level.upper(), logging.WARNING)
     logging.basicConfig(level=log_level,
                         format="%(levelname)s:%(asctime)s:%(filename)s:%(lineno)d:%(name)s:%(message)s")

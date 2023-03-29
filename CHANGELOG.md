@@ -10,6 +10,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 * Added pyjoulescope_driver.time64 module (from UI).
 * Fixed buffer_signal summary_get handling on zero size.
+* Added "record" module and entry point to record streaming samples.
 
 
 ## 1.2.2
