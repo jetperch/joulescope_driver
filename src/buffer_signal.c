@@ -792,8 +792,20 @@ int32_t jsdrv_bufsig_process_request(
     }
 
     if (JSDRV_TIME_SAMPLES == req->time_type) {
+        if (req->time.samples.end && (req->time.samples.end < req->time.samples.start)) {
+            JSDRV_LOGW("invalid time samples: %" PRIu64 ", %" PRIu64,
+                       req->time.samples.start, req->time.samples.end);
+            rsp_clear(rsp);
+            return JSDRV_ERROR_PARAMETER_INVALID;
+        }
         // no action needed
     } else if (JSDRV_TIME_UTC == req->time_type) {
+        if (req->time.utc.end && (req->time.utc.end < req->time.utc.start)) {
+            JSDRV_LOGW("invalid time utc: %" PRIi64 ", %" PRIi64,
+                       req->time.utc.start, req->time.utc.end);
+            rsp_clear(rsp);
+            return JSDRV_ERROR_PARAMETER_INVALID;
+        }
         utc_to_samples(self, &req->time.utc, &req->time.samples);
     } else {
         JSDRV_LOGW("invalid time_type: %d", (int) req->time_type);
