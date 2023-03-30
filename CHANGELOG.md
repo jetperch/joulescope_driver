@@ -6,11 +6,12 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.0
 
-2023 Mar 29 [in progress]
+2023 Mar 30 [in progress]
 
 * Added pyjoulescope_driver.time64 module (from UI).
 * Fixed buffer_signal summary_get handling on zero size.
 * Added "record" module and entry point to record streaming samples.
+* Fixed buffer_signal range advertisement when empty.
 
 
 ## 1.2.2

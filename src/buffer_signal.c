@@ -67,6 +67,8 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
     }
 
     double size_in_utc = ((double) N) / (self->hdr.sample_rate / self->hdr.decimate_factor);
+    self->time_map.offset_time = 0;
+    self->time_map.offset_counter = 0;
     self->time_map.counter_rate = ((double) self->hdr.sample_rate) / self->hdr.decimate_factor;
     self->size_in_utc = JSDRV_F64_TO_TIME(size_in_utc);
 
@@ -122,6 +124,7 @@ void jsdrv_bufsig_free(struct bufsig_s * self) {
     self->sample_id_head = 0;
     self->time_map.offset_time = 0;
     self->time_map.offset_counter = 0;
+    self->time_map.counter_rate = 0.0;
 }
 
 static void samples_to_utc(struct bufsig_s * self,
@@ -162,10 +165,19 @@ void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
     jsdrv_cstr_copy(info->topic, self->topic, sizeof(info->topic));
     info->size_in_utc = self->size_in_utc;
     info->size_in_samples = self->N;
-    info->time_range_samples.start = self->sample_id_head - self->level0_size;
-    info->time_range_samples.end = self->sample_id_head - 1;
-    info->time_range_samples.length = self->level0_size;
-    samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
+    if (self->level0_size == 0)  {
+        info->time_range_samples.start = 0;
+        info->time_range_samples.end = 0;
+        info->time_range_samples.length = 0;
+        info->time_range_utc.start = 0;
+        info->time_range_utc.end = 0;
+        info->time_range_utc.length = 0;
+    } else {
+        info->time_range_samples.start = self->sample_id_head - self->level0_size;
+        info->time_range_samples.end = self->sample_id_head - 1;
+        info->time_range_samples.length = self->level0_size;
+        samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
+    }
     info->time_map = self->time_map;
 }
 
@@ -251,8 +263,10 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
     uint64_t sample_id_end = sample_id + length - 1;
     uint64_t sample_id_expect = self->sample_id_head;
     if (self->sample_id_head == 0) {
-        JSDRV_LOGI("received initial sample, ignore skips, sample_rate=%d, decimate=%d",
-                   s->sample_rate, s->decimate_factor);
+        JSDRV_LOGI("received initial sample, ignore skips, "
+                   "sample_id=%" PRIu64 " | %" PRIu64
+                   ", sample_rate=%d, decimate=%d",
+                   s->sample_id, sample_id, s->sample_rate, s->decimate_factor);
         clear(self, sample_id);
     } else if (sample_id_end < sample_id_expect) {
         JSDRV_LOGW("bufsig_recv_data %s: duplicate rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
