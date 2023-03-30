@@ -970,37 +970,56 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     uint32_t sample_id_u32 = *p_u32++;
     uint64_t sample_id_u64 = (port->sample_id_next & 0xffffffff00000000LLU) | sample_id_u32;
     size -= sizeof(uint32_t);
+    uint32_t sample_count = (size << 3) / field_def->element_size_bits;
 
+    if (sample_count == 0) {
+        JSDRV_LOGI("stream_in_port %d sample_id=%" PRIu64 " empty message",
+                   port_id, sample_id_u64);
+        return;
+    }
     if (port->sample_id_next == 0) {
         port->sample_id_next = sample_id_u64;  // todo correctly initialize u64
     }
 
-    switch (port_id) {
-        case PORT_ID_CURRENT:
-            sbuf_f32_add(&d->i_buf, port->sample_id_next, (float *) p_u32, size / sizeof(float));
-            break;
-        case PORT_ID_VOLTAGE:
-            sbuf_f32_add(&d->v_buf, port->sample_id_next, (float *) p_u32, size / sizeof(float));
-            break;
-        default:
-            break;
-    }
-
     // todo improve robustness around rollover events.
-    uint32_t sample_count = (size << 3) / field_def->element_size_bits;
     if (sample_id_u64 == port->sample_id_next) {
         // normal behavior
     } else if ((sample_id_u64 + sample_count) <= port->sample_id_next) {
         JSDRV_LOGI("stream_in_port %d sample_id dup: received=%" PRIu64 " expected=%" PRIu64,
                    port_id, sample_id_u64, port->sample_id_next);
+        return;
+    } else if (sample_id_u64 < port->sample_id_next) {
+        JSDRV_LOGI("stream_in_port %d sample_id overlap: received=%" PRIu64 " expected=%" PRIu64,
+                   port_id, sample_id_u64, port->sample_id_next);
+        uint32_t skip = (uint32_t) (port->sample_id_next - sample_id_u64);
+        uint16_t skip_size = (uint16_t) ((skip * field_def->element_size_bits) / 8);
+        size -= skip_size;
+        sample_count -= skip;
+        p_u32 += skip_size / sizeof(uint32_t);
     } else {
+        JSDRV_LOGI("stream_in_port %d sample_id skip: received=%" PRIu64 " expected=%" PRIu64,
+                   port_id, sample_id_u64, port->sample_id_next);
         if (m) {
-            JSDRV_LOGI("stream_in_port %d sample_id skip: received=%" PRIu64 " expected=%" PRIu64,
-                       port_id, sample_id_u64, port->sample_id_next);
+            s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+            JSDRV_LOGI("stream_in_port %d early send %" PRIu32 " bytes, %" PRIu32 " elements",
+                       port_id, m->value.size, s->element_count);
+            port->msg_in = NULL;
             jsdrvp_backend_send(d->context, m);
             m = NULL;
+            s = NULL;
         }
         port->sample_id_next = sample_id_u64;
+    }
+
+    switch (port_id) {
+        case PORT_ID_CURRENT:
+            sbuf_f32_add(&d->i_buf, port->sample_id_next, (float *) p_u32, sample_count);
+            break;
+        case PORT_ID_VOLTAGE:
+            sbuf_f32_add(&d->v_buf, port->sample_id_next, (float *) p_u32, sample_count);
+            break;
+        default:
+            break;
     }
 
     if (m && ((m->value.size + size) >= sizeof(struct jsdrv_stream_signal_s))) {

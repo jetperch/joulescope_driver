@@ -58,6 +58,8 @@ def on_cmd(args):
             print(f'Selecting {device_paths[0]}')
         device_path = device_paths[0]
 
+        if args.verbose:
+            print(f'Open device: {device_path}')
         d.open(device_path, 'restore')
         try:  # configure the device
             fs = args.frequency
@@ -77,14 +79,22 @@ def on_cmd(args):
             return 1
 
         wr = Record(d, device_path, args.signals)
+        if args.verbose:
+            print(f'Record to file: {args.filename}')
         print('Start recording.  Press CTRL-C to stop.')
         wr.open(args.filename)
         t_stop = None if args.duration is None else time.time() + args.duration
         try:
             while t_stop is None or t_stop > time.time():
                 time.sleep(0.010)
+            if args.verbose:
+                print(f'Record complete due to duration')
         except KeyboardInterrupt:
-            pass
+            if args.verbose:
+                print(f'Record complete due to user CTRL-C')
         finally:
             wr.close()
             d.close(device_path)
+    if args.verbose:
+        print(f'Record complete')
+    return 0

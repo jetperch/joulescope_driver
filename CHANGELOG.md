@@ -12,6 +12,7 @@ This file contains the list of changes made to the Joulescope driver.
 * Fixed buffer_signal summary_get handling on zero size.
 * Added "record" module and entry point to record streaming samples.
 * Fixed buffer_signal range advertisement when empty.
+* Improved skipped / duplicate sample handling for JS220.
 
 
 ## 1.2.2
