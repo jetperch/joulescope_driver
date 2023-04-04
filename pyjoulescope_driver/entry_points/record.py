@@ -65,6 +65,8 @@ def on_cmd(args):
             fs = args.frequency
             if fs is None:
                 fs = 2_000_000 if 'js110' in device_path else 1_000_000
+            else:
+                fs = int(fs)
             d.publish(f'{device_path}/h/fs', fs)
             if 'js110' in device_path:
                 d.publish(f'{device_path}/s/i/range/select', 'auto')

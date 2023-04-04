@@ -612,8 +612,10 @@ static int32_t wait_for_sensor_command(struct js110_dev_s * d) {
             return rv;
         }
         if ((jsdrv_time_ms_u32() - t_start) > SENSOR_COMMAND_TIMEOUT_MS) {
+            JSDRV_LOGW("wait_for_sensor_command timed out");
             return JSDRV_ERROR_TIMED_OUT;
         }
+        jsdrv_thread_sleep_ms(2);
     }
 }
 
@@ -624,7 +626,8 @@ static bool is_streaming(struct js110_dev_s * d) {
             | d->param_values[PARAM_P_CTRL].value.u8
             | d->param_values[PARAM_I_RANGE_CTRL].value.u8
             | d->param_values[PARAM_GPI_0_CTRL].value.u8
-            | d->param_values[PARAM_GPI_1_CTRL].value.u8;
+            | d->param_values[PARAM_GPI_1_CTRL].value.u8
+            | d->param_values[PARAM_STATS_CTRL].value.u8;  // host-side statistics
     return (0 != stream_en) ? true : false;
 }
 
@@ -844,7 +847,8 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
     bool s1 = is_streaming(d);
     d->param_values[param] = *value;
     if (s1 != is_streaming(d)) {
-        JSDRV_LOGI("on_update_ctrl %d (stream change) %s", param, s1 ? "on" : "off");
+        const char * stream_str =  s1 ? "on" : "off";
+        JSDRV_LOGI("on_update_ctrl %d (stream change) %s", param, stream_str);
         if (!s1) {  // enabling streaming
             js110_sp_reset(&d->sample_processor);
             js110_stats_clear(&d->stats);
@@ -864,7 +868,7 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
             d->sample_id = 0;
         }
         stream_settings_send(d);
-        JSDRV_LOGI("on_update_ctrl %d (stream change complete)", param);
+        JSDRV_LOGI("on_update_ctrl %d (stream change complete) %s", param, stream_str);
     } else {
         JSDRV_LOGI("on_update_ctrl %d (no stream change)", param);
     }
