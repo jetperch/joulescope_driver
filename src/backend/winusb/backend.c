@@ -1016,6 +1016,10 @@ int32_t jsdrv_usb_backend_factory(struct jsdrv_context_s * context, struct jsdrv
         finalize(&s->backend);
         return JSDRV_ERROR_UNSPECIFIED;
     }
+
+    if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
+        WINDOWS_LOGE("Could not raise process priority using %s", "SetPriorityClass");
+    }
     if (!SetThreadPriority(s->thread, THREAD_PRIORITY_ABOVE_NORMAL)) {
         WINDOWS_LOGE("%s", "SetThreadPriority");
     }

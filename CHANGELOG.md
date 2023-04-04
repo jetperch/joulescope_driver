@@ -6,10 +6,11 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.1
 
-2023 Apr 4 [in progress]
+2023 Apr 4
 
 * Decreased JS110 status polling interval to reduce USB message spamming.
 * Added JS110 streaming when only statistics requested (uses host-side stats).
+* Increased process priority and backend thread priority.
 
 
 ## 1.3.0
