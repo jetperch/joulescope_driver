@@ -20,6 +20,8 @@ Record streaming sample data to a JLS v2 file.
 import copy
 import numpy as np
 from pyjoulescope_driver import time64
+import logging
+
 
 try:
     from pyjls import Writer, SignalType, DataType
@@ -130,6 +132,7 @@ class Record:
             raise RuntimeError('pyjls package not found.  Install using:\n' +
                                '  pip3 install -U pyjls')
         self._utc_interval = time64.MINUTE
+        self._log = logging.getLogger(__name__)
         self._wr = None
         self._data_map = {}
         self._driver = driver
@@ -189,19 +192,26 @@ class Record:
 
         return self
 
-    def _publish(self, topic, value):
-        self._driver.publish(f'{self._device_path}/{topic}', value)
+    def _publish(self, topic, value, timeout=None):
+        self._driver.publish(f'{self._device_path}/{topic}', value, timeout=timeout)
 
     def close(self):
-        for signal in self._signals.values():
-            if signal['utc'] is not None:
-                self._wr.utc(signal['signal_id'], *signal['utc'])
-            ctrl_topic = signal['ctrl_topic']
-            self._publish(ctrl_topic, 0)
-        for signal in self._signals.values():
-            self._driver.unsubscribe(signal['data_topic_abs'], self._on_data_fn)
-        self._wr.close()
-        self._wr = None
+        try:
+            for signal in self._signals.values():
+                if signal['utc'] is not None:
+                    self._wr.utc(signal['signal_id'], *signal['utc'])
+                ctrl_topic = signal['ctrl_topic']
+                try:
+                    self._publish(ctrl_topic, 0, timeout=0.25)
+                except TimeoutError:
+                    self._log.warning('Timed out in publish: %s <= 0', ctrl_topic)
+                except Exception:
+                    self._log.exception('Exception in publish: %s <= 0', ctrl_topic)
+            for signal in self._signals.values():
+                self._driver.unsubscribe(signal['data_topic_abs'], self._on_data_fn)
+        finally:
+            self._wr.close()
+            self._wr = None
 
     def _on_data(self, topic, value):
         signal = self._data_map[topic]

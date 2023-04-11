@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.2
+
+2023 Apr 11 [in progress]
+
+* Improved record close error handling.
+
+
 ## 1.3.1
 
 2023 Apr 4
