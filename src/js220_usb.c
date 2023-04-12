@@ -1416,7 +1416,9 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         // JSDRV_LOGW("stream in ignore on inactive port %d", hdr.h.port_id);
         // todo keep statistics
     } else if (hdr.h.port_id >= 16U) {
-        if (hdr.h.port_id == (16U + 13U)) {
+        if (d->state != ST_OPEN) {
+            JSDRV_LOGI("rcv port %d but discard, device not open", (int) hdr.h.port_id);
+        } else if (hdr.h.port_id == (16U + 13U)) {
             handle_uart_in(d, p_u32 + 1, hdr.h.length);
         } else if (hdr.h.port_id == (16U + 14U)) {
             handle_statistics_in(d, p_u32 + 1, hdr.h.length);

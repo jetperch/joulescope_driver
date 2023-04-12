@@ -6,9 +6,10 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.2
 
-2023 Apr 11 [in progress]
+2023 Apr 12 [in progress]
 
 * Improved record close error handling.
+* Added JS220 streaming data ignore when device not open.
 
 
 ## 1.3.1
