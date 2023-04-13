@@ -28,8 +28,16 @@ def parser_config(p):
     p.add_argument('--frequency', '-f',
                    type=int,
                    help='The sampling frequency in Hz.')
+    p.add_argument('--open', '-o',
+                   choices=['defaults', 'restore'],
+                   default='defaults',
+                   help='The device open mode.  Defaults to "defaults".')
     p.add_argument('--serial_number',
                    help='The serial number of the Joulescope for this capture.')
+    p.add_argument('--set',
+                   default=[],
+                   action='append',
+                   help='Set a parameter using "topic=value"')
     p.add_argument('--signals',
                    default='current,voltage',
                    help='The comma-separated list of signals to capture which include '
@@ -60,7 +68,19 @@ def on_cmd(args):
 
         if args.verbose:
             print(f'Open device: {device_path}')
-        d.open(device_path, 'restore')
+        d.open(device_path, mode=args.open)
+        if args.open == 'defaults':
+            if 'js110' in device_path:
+                pre_args = [
+                    's/i/range/select=auto',
+                    's/v/range/select=15 V'
+                ]
+            else:
+                pre_args = [
+                    's/i/range/mode=auto',
+                    's/v/range/select=15 V',
+                    's/v/range/mode=manual',  # as of 2023-03-24, auto not working well
+                ]
         try:  # configure the device
             fs = args.frequency
             if fs is None:
@@ -68,17 +88,18 @@ def on_cmd(args):
             else:
                 fs = int(fs)
             d.publish(f'{device_path}/h/fs', fs)
-            if 'js110' in device_path:
-                d.publish(f'{device_path}/s/i/range/select', 'auto')
-                d.publish(f'{device_path}/s/v/range/select', '15 V')
-            else:
-                d.publish(f'{device_path}/s/i/range/mode', 'auto')
-                d.publish(f'{device_path}/s/v/range/select', '15 V')
-                d.publish(f'{device_path}/s/v/range/mode', 'manual')  # as of 2023-03-24, auto not working well
         except Exception:
             print('failed to configure device')
             d.close(device_path)
             return 1
+
+        for set_arg in pre_args + args.set:
+            try:
+                topic, value = set_arg.split('=')
+                d.publish(f'{device_path}/{topic}', value)
+            except Exception:
+                print(f'Parameter set failed for {set_arg}')
+                raise
 
         wr = Record(d, device_path, args.signals)
         if args.verbose:
