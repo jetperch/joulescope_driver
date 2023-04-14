@@ -83,7 +83,7 @@ static void subscribe_cmd_fn(void * user_data, const char * topic, const struct 
     m->value = *value;
     JSDRV_ASSERT(value->type < 16);
     jsdrv_union_value_to_str(value, value_str, sizeof(value_str), 1);
-    printf("subscribe_cmd_fn(%s) %s", topic, value_str);
+    printf("subscribe_cmd_fn(%s) %s\n", topic, value_str);
     switch (value->type) {
         case JSDRV_UNION_JSON:  // intentional fall-through
         case JSDRV_UNION_STR:

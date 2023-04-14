@@ -94,7 +94,7 @@ struct jsdrv_log_header_s {
     /// The originating file line number number.
     uint32_t line;
     /// The Joulescope driver UTC time.
-    uint64_t timestamp;
+    int64_t timestamp;
 };
 
 /**

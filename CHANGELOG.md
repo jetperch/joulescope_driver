@@ -12,6 +12,9 @@ This file contains the list of changes made to the Joulescope driver.
 * Added api_timeout entry point test.
 * Improved thread entry point test.
 * Reordered unsubscribe to ensure callback validity.
+* Added malloc/free mutex for guaranteed thread safety.
+* Added runtime pyjls version check.
+* Improved logging robustness and thread safety.
 
 
 ## 1.3.2

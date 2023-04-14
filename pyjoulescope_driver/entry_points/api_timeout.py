@@ -20,11 +20,18 @@ import time
 _quit = False
 
 
+def _validate_timeout(v):
+    v = float(v)
+    if v == 0 or v >= 0.001:
+        return v
+    raise ValueError(f'Invalid timeout {v}')
+
+
 def parser_config(p):
     """Threading demonstration for the pyjoulescope_driver.
 
     For example:
-        python -m pyjoulescope_driver --log_level INFO --jsdrv_log_level info threads --threads 10 --duration 10 --timeout 0.1
+        python -m pyjoulescope_driver --log_level INFO --jsdrv_log_level info api_timeout --threads 10 --duration 10 --timeout 0.1
     """
     p.add_argument('--duration', '-d',
                    type=float,
@@ -35,7 +42,7 @@ def parser_config(p):
                    default=10,
                    help='The number of threads to run simultaneously for API timeout testing.')
     p.add_argument('--timeout', '-t',
-                   type=float,
+                   type=_validate_timeout,
                    default=0.25,
                    help='The API timeout in seconds.')
     return on_cmd
