@@ -46,6 +46,8 @@ static void log_cbk(void * user_data, struct jsdrv_log_header_s const * header,
     state->level[state->entries_head] = header->level;
     state->line[state->entries_head] = header->line;
     ++state->entries_head;
+    (void) filename;
+    (void) message;
 }
 
 #define CHECK(state, level_, line_) \
@@ -72,7 +74,12 @@ static void test_register_before_init(void **state) {
 
 static void test_basic(void **state) {
     (void) state;
-    struct state_s s = {0, 0};
+    struct state_s s = {
+            .entries_head=0,
+            .entries_tail=0,
+            .level={0},
+            .line={0},
+    };
     jsdrv_log_initialize();
     jsdrv_log_register(log_cbk, &s);
     jsdrv_log_publish(JSDRV_LOG_LEVEL_WARNING, "filename", 42, "%s %s", "hello", "world");

@@ -159,18 +159,26 @@ void jsdrv_thread_sleep_ms(uint32_t duration_ms) {
 static jsdrv_os_mutex_t heap_mutex = NULL;
 
 void jsdrv_free(void * ptr) {
-    jsdrv_os_mutex_lock(heap_mutex);
+    if (NULL != heap_mutex) {
+        jsdrv_os_mutex_lock(heap_mutex);
+    }
     free(ptr);
-    jsdrv_os_mutex_unlock(heap_mutex);
+    if (NULL != heap_mutex) {
+        jsdrv_os_mutex_unlock(heap_mutex);
+    }
 }
 
 void * jsdrv_alloc(size_t size_bytes) {
-    jsdrv_os_mutex_lock(heap_mutex);
+    if (NULL != heap_mutex) {
+        jsdrv_os_mutex_lock(heap_mutex);
+    }
     void * ptr = malloc(size_bytes);
     if (!ptr) {
         JSDRV_FATAL("out of memory");
     }
-    jsdrv_os_mutex_unlock(heap_mutex);
+    if (NULL != heap_mutex) {
+        jsdrv_os_mutex_unlock(heap_mutex);
+    }
     return ptr;
 }
 
