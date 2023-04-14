@@ -96,13 +96,14 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc(struct jsdrv_context_s * context) {
         jsdrv_list_initialize(&m->item);
     }
     m->inner_msg_type = JSDRV_MSG_TYPE_NORMAL;
-    m->topic[0] = 0;
     m->source = 0;
     m->u32_a = 0;
     m->u32_b = 0;
+    m->topic[0] = 0;
     memset(&m->value, 0, sizeof(m->value));
     m->payload.str[0] = 0;
     memset(&m->extra, 0, sizeof(m->extra));
+    m->timeout = NULL;
     return m;
 }
 
@@ -114,10 +115,13 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_data(struct jsdrv_context_s * context, co
         jsdrv_list_initialize(&m->item);
     }
     m->inner_msg_type = JSDRV_MSG_TYPE_DATA;
+    m->source = 0;
+    m->u32_a = 0;
+    m->u32_b = 0;
     jsdrv_cstr_copy(m->topic, topic, sizeof(m->topic));
     m->value = jsdrv_union_bin(&m->payload.bin[0], 0);
-    m->u32_a = 0;
     memset(&m->extra, 0, sizeof(m->extra));
+    m->timeout = NULL;
     return m;
 }
 
@@ -344,6 +348,11 @@ static bool handle_cmd_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
             JSDRV_LOGI("USB backend finalize");
             c->do_exit = true;
             return false;
+        } else if (0 == strcmp(JSDRV_MSG_TIMEOUT, msg->topic)) {
+            // ignore the message so it times out.
+            jsdrvp_msg_free(c, msg);
+            JSDRV_LOGI("%s request", JSDRV_MSG_TIMEOUT);
+            return true;
         }
     }
     jsdrv_pubsub_publish(c->pubsub, msg);  // msg ownership relinquished

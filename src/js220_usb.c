@@ -930,6 +930,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             send_return_code_to_frontend(d, topic, rc);
         } else if (0 == strcmp("h/timeout", topic)) {
             jsdrv_thread_sleep_ms(msg->value.value.u32);
+            JSDRV_LOGI("JS220 timeout done: %" PRIu32, msg->value.value.u32);
             send_return_code_to_frontend(d, topic, 0);
         } else if (0 == strcmp("h/fs", topic)) {
             rc = on_sampling_frequency(d, &msg->value);

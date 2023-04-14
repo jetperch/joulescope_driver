@@ -181,6 +181,7 @@
 #define JSDRV_MSG_INITIALIZE            "@/!init"       // CAUTION: internal use only
 #define JSDRV_MSG_FINALIZE              "@/!final"      // CAUTION: internal use only
 #define JSDRV_MSG_VERSION               "@/version"     ///< Driver version: subscribe only JSDRV version (u32)
+#define JSDRV_MSG_TIMEOUT               "@/timeout"     ///< UnhandledDriver version: subscribe only JSDRV version (u32)
 
 
 // device-specific commands in format {device}/{command}

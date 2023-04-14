@@ -17,6 +17,8 @@ Python binding for the native Joulescope driver implementation.
 """
 
 # See https://cython.readthedocs.io/en/latest/index.html
+# https://cython.readthedocs.io/en/latest/src/userguide/external_C_code.html#acquiring-and-releasing-the-gil
+
 
 # cython: boundscheck=True, wraparound=True, nonecheck=True, overflowcheck=True, cdivision=True, embedsignature=True
 
@@ -770,7 +772,7 @@ cdef class Driver:
             c_flags = <int32_t> int(flags)
         self._subscribers.add((topic, fn))
         with nogil:
-            rc = c_jsdrv.jsdrv_subscribe(self._context, <char *> &topic_str[0], c_flags, _on_cmd_publish1_cbk, fn_ptr, timeout_ms)
+            rc = c_jsdrv.jsdrv_subscribe(self._context, <char *> &topic_str[0], c_flags, _on_cmd_publish_cbk, fn_ptr, timeout_ms)
         _handle_rc(rc, 'jsdrv_subscribe', topic)
 
     def unsubscribe(self, topic, fn, timeout=None):
@@ -786,9 +788,9 @@ cdef class Driver:
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef void * fn_ptr = <void *> fn
 
-        self._subscribers.discard((topic, fn))
         with nogil:
-            rc = c_jsdrv.jsdrv_unsubscribe(self._context, <char *> &topic_str[0], _on_cmd_publish1_cbk, fn_ptr, timeout_ms)
+            rc = c_jsdrv.jsdrv_unsubscribe(self._context, <char *> &topic_str[0], _on_cmd_publish_cbk, fn_ptr, timeout_ms)
+        self._subscribers.discard((topic, fn))
         _handle_rc(rc, 'jsdrv_unsubscribe', topic)
 
     def unsubscribe_all(self, fn, timeout=None):
@@ -801,11 +803,11 @@ cdef class Driver:
         """
         cdef int32_t timeout_ms = _timeout_validate(timeout)
 
+        with nogil:
+            rc = c_jsdrv.jsdrv_unsubscribe_all(self._context, _on_cmd_publish_cbk, <void *> fn, timeout_ms)
         remove_list = [(t, f) for t, f in self._subscribers if f == fn]
         for item in remove_list:
             self._subscribers.discard(item)
-        with nogil:
-            rc = c_jsdrv.jsdrv_unsubscribe_all(self._context, _on_cmd_publish1_cbk, <void *> fn, timeout_ms)
         _handle_rc(rc, 'jsdrv_unsubscribe_all')
 
     def open(self, device_prefix, mode=None, timeout=None):
@@ -862,7 +864,7 @@ cdef class Driver:
         _handle_rc(rc, 'jsdrv_close', device_prefix)
 
 
-cdef void _on_cmd_publish2_cbk(void * user_data, const char * topic, const c_jsdrv.jsdrv_union_s * value) with gil:
+cdef void _on_cmd_publish_cbk(void * user_data, const char * topic, const c_jsdrv.jsdrv_union_s * value) with gil:
     cdef object fn = <object> user_data
     topic_str = topic.decode('utf-8')
     v = _jsdrv_union_to_py(value)
@@ -870,16 +872,11 @@ cdef void _on_cmd_publish2_cbk(void * user_data, const char * topic, const c_jsd
     fn(topic_str, v)
 
 
-cdef void _on_cmd_publish1_cbk(void * user_data, const char * topic, const c_jsdrv.jsdrv_union_s * value) nogil:
-    _on_cmd_publish2_cbk(user_data, topic, value)
-
-# https://cython.readthedocs.io/en/latest/src/userguide/external_C_code.html#acquiring-and-releasing-the-gil
 cdef void _on_log_recv(void * user_data, const c_jsdrv.jsdrv_log_header_s * header,
-                       const char * filename, const char * message) nogil:
-    with gil:
-        fname = filename.decode('utf-8')
-        msg = message.decode('utf-8')
-        lvl = _log_level_c_to_py[header[0].level]
-        if _log_c.isEnabledFor(lvl):
-            record = _log_c.makeRecord(_log_c_name, lvl, fname, header[0].line, msg, [], None)
-            _log_c.handle(record)
+                       const char * filename, const char * message) with gil:
+    fname = filename.decode('utf-8')
+    msg = message.decode('utf-8')
+    lvl = _log_level_c_to_py[header[0].level]
+    if _log_c.isEnabledFor(lvl):
+        record = _log_c.makeRecord(_log_c_name, lvl, fname, header[0].line, msg, [], None)
+        _log_c.handle(record)
