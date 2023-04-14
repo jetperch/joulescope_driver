@@ -23,8 +23,12 @@ from pyjoulescope_driver import time64
 import logging
 
 
+_PYJLS_VERSION_MIN = (0, 5, 0)  # inclusive
+_PYJLS_VERSION_MAX = (1, 0, 0)  # exclusive
+
+
 try:
-    from pyjls import Writer, SignalType, DataType
+    from pyjls import Writer, SignalType, DataType, __version__
     _DTYPE_MAP = {
         'f32': DataType.F32,
         'u8': DataType.U8,
@@ -131,6 +135,11 @@ class Record:
         if Writer is None:
             raise RuntimeError('pyjls package not found.  Install using:\n' +
                                '  pip3 install -U pyjls')
+        pyjls_version = [int(x) for x in __version__.split('.')]
+        if pyjls_version < _PYJLS_VERSION_MIN or pyjls_version >= _PYJLS_VERSION_MAX:
+            raise ImportError(f'Unsupported pyjls version {__version__}\n' +
+                              f'  Require {_PYJLS_VERSION_MIN} <= pyjls version < {_PYJLS_VERSION_MAX}\n' +
+                              '  pip3 install -U pyjls')
         self._utc_interval = time64.MINUTE
         self._log = logging.getLogger(__name__)
         self._wr = None
