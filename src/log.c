@@ -201,7 +201,7 @@ void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, cons
             jsdrv_cstr_copy(msg->filename, __FILENAME__, sizeof(msg->filename));
             jsdrv_cstr_copy(msg->message, "log drop due to overflow\n   ... missing messages ...", sizeof(msg->message));
             jsdrv_list_add_tail(&log_instance_.msg_pend, &msg->item);
-            thread_notify(&log_instance_);
+            thread_notify();
         } else {
             ++log_instance_.msg_pend_count;
             msg->header.version = JSDRV_LOG_VERSION;
@@ -213,7 +213,7 @@ void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, cons
             jsdrv_cstr_copy(msg->filename, filename, sizeof(msg->filename));
             vsnprintf(msg->message, sizeof(msg->message), format, args);
             jsdrv_list_add_tail(&log_instance_.msg_pend, &msg->item);
-            thread_notify(&log_instance_);
+            thread_notify();
         }
     }
     UNLOCK_MSG();
@@ -221,7 +221,6 @@ void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, cons
 }
 
 int32_t jsdrv_log_register(jsdrv_log_recv fn, void * user_data) {
-    dprintf("jsdrv_log_register %p", fn);
     struct dispatch_s * dispatch = jsdrv_alloc(sizeof(struct dispatch_s));
     jsdrv_list_initialize(&dispatch->item);
     dispatch->fn = fn;
@@ -231,7 +230,6 @@ int32_t jsdrv_log_register(jsdrv_log_recv fn, void * user_data) {
         jsdrv_list_initialize(&log_instance_.dispatch_list);
     }
     jsdrv_list_add_tail(&log_instance_.dispatch_list, &dispatch->item);
-    dprintf("jsdrv_log_register %zu", jsdrv_list_length(&log_instance_.dispatch_list));
     UNLOCK_DISPATCH();
     return 0;
 }
@@ -242,7 +240,6 @@ int32_t jsdrv_log_unregister(jsdrv_log_recv fn, void * user_data) {
     }
     struct jsdrv_list_s * item;
     struct dispatch_s * dispatch;
-    dprintf("jsdrv_log_unregister %p", fn);
     LOCK_DISPATCH();
     jsdrv_list_foreach(&log_instance_.dispatch_list, item) {
         dispatch = JSDRV_CONTAINER_OF(item, struct dispatch_s, item);
@@ -281,13 +278,10 @@ static void process(struct log_s * self) {
             continue;
         }
         LOCK_DISPATCH();
-        dprintf("dispatch list start %p %zu %p", &self->dispatch_list, jsdrv_list_length(&self->dispatch_list), self->dispatch_list.next);
         jsdrv_list_foreach(&self->dispatch_list, item) {
             dispatch = JSDRV_CONTAINER_OF(item, struct dispatch_s, item);
-            dprintf("dispatch %p", dispatch->fn);
             dispatch->fn(dispatch->user_data, &msg->header, msg->filename, msg->message);
         }
-        dprintf("dispatch list done %p %zu %p", &self->dispatch_list, jsdrv_list_length(&self->dispatch_list), self->dispatch_list.next);
         UNLOCK_DISPATCH();
     }
 }
@@ -491,7 +485,7 @@ void jsdrv_log_finalize() {
     dprintf("jsdrv_log_finalize do_finalize=%d, dispatch_len=%zu",
             do_finalize, jsdrv_list_length(&log_instance_.dispatch_list));
     if (do_finalize) {
-        thread_stop(&log_instance_);
+        thread_stop();
         LOCK_DISPATCH();
         list_free(&log_instance_.dispatch_list);
         LOCK_MSG();
