@@ -135,6 +135,8 @@ static struct log_s log_instance_ = {
         .dispatch_list={NULL, NULL},
         .msg_free={NULL, NULL},
         .msg_pend={NULL, NULL},
+        .dispatch_mutex=NULL,
+        .msg_mutex=NULL,
 #if _WIN32
         .event=NULL,
         .thread=NULL,

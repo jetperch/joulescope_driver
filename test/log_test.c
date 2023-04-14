@@ -59,7 +59,12 @@ static void log_cbk(void * user_data, struct jsdrv_log_header_s const * header,
 
 static void test_register_before_init(void **state) {
     (void) state;
-    struct state_s s = {0, 0};
+    struct state_s s = {
+            .entries_head=0,
+            .entries_tail=0,
+            .level={0},
+            .line={0},
+    };
     jsdrv_log_register(log_cbk, &s);
     assert_int_equal(JSDRV_LOG_LEVEL_OFF, jsdrv_log_level_get());
     jsdrv_log_initialize();

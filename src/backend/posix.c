@@ -60,25 +60,31 @@ jsdrv_os_mutex_t jsdrv_os_mutex_alloc(const char * name) {
 }
 
 void jsdrv_os_mutex_free(jsdrv_os_mutex_t mutex) {
-    pthread_mutex_destroy(&mutex->mutex);
-    jsdrv_free(mutex);
+    if (NULL != mutex) {
+        pthread_mutex_destroy(&mutex->mutex);
+        jsdrv_free(mutex);
+    }
 }
 
 void jsdrv_os_mutex_lock(jsdrv_os_mutex_t mutex) {
     char msg[128];
-    int rc = pthread_mutex_lock(&mutex->mutex);
-    if (rc) {
-        snprintf(msg, sizeof(msg), "mutex lock '%s' failed %d", mutex->name, rc);
-        JSDRV_FATAL(msg);
+    if (NULL != mutex) {
+        int rc = pthread_mutex_lock(&mutex->mutex);
+        if (rc) {
+            snprintf(msg, sizeof(msg), "mutex lock '%s' failed %d", mutex->name, rc);
+            JSDRV_FATAL(msg);
+        }
     }
 }
 
 void jsdrv_os_mutex_unlock(jsdrv_os_mutex_t mutex) {
     char msg[128];
-    int rc = pthread_mutex_unlock(&mutex->mutex);
-    if (rc) {
-        snprintf(msg, sizeof(msg), "mutex unlock '%s' failed %d", mutex->name, rc);
-        JSDRV_FATAL(msg);
+    if (NULL != mutex) {
+        int rc = pthread_mutex_unlock(&mutex->mutex);
+        if (rc) {
+            snprintf(msg, sizeof(msg), "mutex unlock '%s' failed %d", mutex->name, rc);
+            JSDRV_FATAL(msg);
+        }
     }
 }
 
@@ -159,26 +165,18 @@ void jsdrv_thread_sleep_ms(uint32_t duration_ms) {
 static jsdrv_os_mutex_t heap_mutex = NULL;
 
 void jsdrv_free(void * ptr) {
-    if (NULL != heap_mutex) {
-        jsdrv_os_mutex_lock(heap_mutex);
-    }
+    jsdrv_os_mutex_lock(heap_mutex);
     free(ptr);
-    if (NULL != heap_mutex) {
-        jsdrv_os_mutex_unlock(heap_mutex);
-    }
+    jsdrv_os_mutex_unlock(heap_mutex);
 }
 
 void * jsdrv_alloc(size_t size_bytes) {
-    if (NULL != heap_mutex) {
-        jsdrv_os_mutex_lock(heap_mutex);
-    }
+    jsdrv_os_mutex_lock(heap_mutex);
     void * ptr = malloc(size_bytes);
     if (!ptr) {
         JSDRV_FATAL("out of memory");
     }
-    if (NULL != heap_mutex) {
-        jsdrv_os_mutex_unlock(heap_mutex);
-    }
+    jsdrv_os_mutex_unlock(heap_mutex);
     return ptr;
 }
 

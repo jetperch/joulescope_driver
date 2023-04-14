@@ -90,7 +90,7 @@ jsdrv_os_mutex_t jsdrv_os_mutex_alloc(const char * name) {
 }
 
 void jsdrv_os_mutex_free(jsdrv_os_mutex_t mutex) {
-    if (mutex) {
+    if (NULL != mutex) {
         CloseHandle(mutex->mutex);
         jsdrv_free(mutex);
     }
@@ -98,7 +98,7 @@ void jsdrv_os_mutex_free(jsdrv_os_mutex_t mutex) {
 
 void jsdrv_os_mutex_lock(jsdrv_os_mutex_t mutex) {
     char msg[128];
-    if (mutex && mutex->mutex) {
+    if ((NULL != mutex) && mutex->mutex) {
         DWORD rc = WaitForSingleObject(mutex->mutex, JSDRV_CONFIG_OS_MUTEX_LOCK_TIMEOUT_MS);
         if (WAIT_OBJECT_0 != rc) {
             _snprintf_s(msg, sizeof(msg), sizeof(msg), "mutex lock '%s' failed", mutex->name);
@@ -111,7 +111,7 @@ void jsdrv_os_mutex_lock(jsdrv_os_mutex_t mutex) {
 
 void jsdrv_os_mutex_unlock(jsdrv_os_mutex_t mutex) {
     char msg[128];
-    if (mutex && mutex->mutex) {
+    if ((NULL != mutex) && mutex->mutex) {
         if (!ReleaseMutex(mutex->mutex)) {
             _snprintf_s(msg, sizeof(msg), sizeof(msg), "mutex unlock '%s' failed", mutex->name);
             JSDRV_FATAL(msg);
