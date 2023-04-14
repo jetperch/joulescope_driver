@@ -99,9 +99,7 @@ JSDRV_INLINE_FN void jsdrv_memcpy(void * destination, void const * source, size_
  *
  * \param ptr The pointer to the memory to free.
  */
-JSDRV_INLINE_FN void jsdrv_free(void * ptr) {
-    free(ptr);
-}
+void jsdrv_free(void * ptr);
 
 /**
  * @brief Allocate memory from the heap.
@@ -113,13 +111,7 @@ JSDRV_INLINE_FN void jsdrv_free(void * ptr) {
  * For platforms that support freeing memory, use jsdrv_free() to return the
  * memory to the heap.
  */
-JSDRV_COMPILER_ALLOC(jsdrv_free) JSDRV_INLINE_FN void * jsdrv_alloc(size_t size_bytes) {
-    void * ptr = malloc(size_bytes);
-    if (!ptr) {
-        JSDRV_FATAL("out of memory");
-    }
-    return ptr;
-}
+JSDRV_COMPILER_ALLOC(jsdrv_free) void * jsdrv_alloc(size_t size_bytes);
 
 /**
  * @brief Allocate memory from the heap and clear to 0.
