@@ -121,7 +121,7 @@ static const struct param_s PARAMS[] = {
         "{"
             "\"dtype\": \"u8\","
             "\"brief\": \"The current range selection.\","
-            "\"default\": 0,"
+            "\"default\": 128,"
             "\"options\": ["
                 "[128, \"auto\"],"
                 "[1, \"10 A\"],"
@@ -707,6 +707,36 @@ static int32_t stream_settings_send(struct js110_dev_s * d) {
     return 0;
 }
 
+static int32_t stream_settings_sync(struct js110_dev_s * d) {
+    struct js110_host_packet_s pkt;
+    memset(&pkt, 0, sizeof(pkt));
+
+    usb_setup_t setup = { .s = {
+            .bmRequestType = USB_REQUEST_TYPE(IN, VENDOR, DEVICE),
+            .bRequest = JS110_HOST_USB_REQUEST_SETTINGS,
+            .wValue = 0,
+            .wIndex = 0,
+            .wLength = 16,
+    }};
+    uint32_t size = 0;
+    if (jsdrvb_ctrl_in(d, setup, &pkt, &size)) {
+        JSDRV_LOGW("stream_settings_sync failed");
+        return JSDRV_ERROR_IO;
+    } else if ((size != 16)
+                || (pkt.header.version != JS110_HOST_API_VERSION)
+                || (pkt.header.type != JS110_HOST_PACKET_TYPE_SETTINGS)) {
+        JSDRV_LOGW("stream_settings_sync unexpected response: size=%d, ver=%d, type=%d",
+                   (int) size, (int) pkt.header.version, (int) pkt.header.type);
+        return JSDRV_ERROR_IO;
+    } else {
+        d->param_values[PARAM_I_RANGE_SELECT].value.u8 = pkt.payload.settings.select;
+        d->param_values[PARAM_V_RANGE_SELECT].value.u8 = (pkt.payload.settings.options >> 1) & 1;
+        send_to_frontend(d, "s/i/range/select", &d->param_values[PARAM_I_RANGE_SELECT]);
+        send_to_frontend(d, "s/v/range/select", &d->param_values[PARAM_V_RANGE_SELECT]);
+    }
+    return 0;
+}
+
 static int32_t extio_settings_send(struct js110_dev_s * d) {
     struct js110_host_packet_s pkt;
     memset(&pkt, 0, sizeof(pkt));
@@ -735,6 +765,43 @@ static int32_t extio_settings_send(struct js110_dev_s * d) {
     if (wait_for_sensor_command(d)) {
         JSDRV_LOGW("extio_settings_send did not work");
         return JSDRV_ERROR_IO;
+    }
+    return 0;
+}
+
+static int32_t extio_settings_sync(struct js110_dev_s * d) {
+    struct js110_host_packet_s pkt;
+    memset(&pkt, 0, sizeof(pkt));
+
+    usb_setup_t setup = { .s = {
+            .bmRequestType = USB_REQUEST_TYPE(IN, VENDOR, DEVICE),
+            .bRequest = JS110_HOST_USB_REQUEST_EXTIO,
+            .wValue = 0,
+            .wIndex = 0,
+            .wLength = 24,
+    }};
+    uint32_t size = 0;
+    if (jsdrvb_ctrl_in(d, setup, &pkt, &size)) {
+        JSDRV_LOGW("extio_settings_sync failed");
+        return JSDRV_ERROR_IO;
+    } else if ((size != 24)
+               || (pkt.header.version != JS110_HOST_API_VERSION)
+               || (pkt.header.type != JS110_HOST_PACKET_TYPE_EXTIO)) {
+        JSDRV_LOGW("extio_settings_sync unexpected response: size=%d, ver=%d, type=%d",
+                   (int) size, (int) pkt.header.version, (int) pkt.header.type);
+        return JSDRV_ERROR_IO;
+    } else {
+        d->param_values[PARAM_I_LSB_SOURCE].value.u8 = pkt.payload.extio.current_gpi;
+        d->param_values[PARAM_V_LSB_SOURCE].value.u8 = pkt.payload.extio.voltage_gpi;
+        d->param_values[PARAM_GPO0_VALUE].value.u8 = pkt.payload.extio.gpo0;
+        d->param_values[PARAM_GPO1_VALUE].value.u8 = pkt.payload.extio.gpo1;
+        d->param_values[PARAM_EXTIO_VOLTAGE].value.u32 = pkt.payload.extio.io_voltage_mv;
+
+        send_to_frontend(d, "s/i/lsb_src", &d->param_values[PARAM_I_LSB_SOURCE]);
+        send_to_frontend(d, "s/v/lsb_src", &d->param_values[PARAM_V_LSB_SOURCE]);
+        send_to_frontend(d, "s/gpo/0/value", &d->param_values[PARAM_GPO0_VALUE]);
+        send_to_frontend(d, "s/gpo/1/value", &d->param_values[PARAM_GPO1_VALUE]);
+        send_to_frontend(d, "s/extio/voltage", &d->param_values[PARAM_EXTIO_VOLTAGE]);
     }
     return 0;
 }
@@ -908,9 +975,9 @@ static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * v
     on_update_ctrl(d, value, PARAM_STATS_CTRL);
 }
 
-static int32_t d_open_ll(struct js110_dev_s * d) {
+static int32_t d_open_ll(struct js110_dev_s * d, int32_t opt) {
     JSDRV_LOGI("open_ll");
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(0));
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(opt & 1));
     msg_queue_push(d->ll.cmd_q, m);
     m = ll_await_topic(d, JSDRV_MSG_OPEN, TIMEOUT_MS);
     if (!m) {
@@ -927,7 +994,7 @@ static int32_t d_open_ll(struct js110_dev_s * d) {
     return 0;
 }
 
-static int32_t d_open(struct js110_dev_s * d) {
+static int32_t d_open(struct js110_dev_s * d, int32_t opt) {
     JSDRV_LOGI("open");
     usb_setup_t setup = { .s = {
             .bmRequestType = USB_REQUEST_TYPE(OUT, VENDOR, DEVICE),
@@ -953,9 +1020,6 @@ static int32_t d_open(struct js110_dev_s * d) {
         JSDRV_LOGE("loopback failed");
     }
 
-    ROE(stream_settings_send(d));
-    ROE(calibration_get(d));
-
     // Publish topic metadata
     for (int i = 0; NULL != PARAMS[i].topic; ++i) {
         const struct param_s * p = &PARAMS[i];
@@ -964,6 +1028,13 @@ static int32_t d_open(struct js110_dev_s * d) {
         jsdrv_topic_suffix_add(&topic, JSDRV_TOPIC_SUFFIX_METADATA_RSP);
         send_to_frontend(d, topic.topic, &jsdrv_union_cjson_r(p->meta));
     }
+
+    ROE(calibration_get(d));
+    if (opt != JSDRV_DEVICE_OPEN_MODE_DEFAULTS) {
+        ROE(stream_settings_sync(d));
+        ROE(extio_settings_sync(d));
+    }
+    ROE(stream_settings_send(d));
 
     // todo info_get(d) -> version, jsdrvb_ctrl_in JS110_HOST_USB_REQUEST_INFO
 
@@ -1054,9 +1125,13 @@ static bool handle_cmd(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGE("handle_cmd mismatch %s, %s", msg->topic, d->ll.prefix);
     } else if (topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
         if (0 == strcmp(JSDRV_MSG_OPEN, topic)) {
-            status = d_open_ll(d);
+            int32_t opt = 0;
+            if ((msg->value.type == JSDRV_UNION_U32) || (msg->value.type == JSDRV_UNION_I32)) {
+                opt = msg->value.value.i32;
+            }
+            status = d_open_ll(d, opt);
             if (0 == status) {
-                status = d_open(d);
+                status = d_open(d, opt);
                 if (status) {
                     d_close(d);
                 }

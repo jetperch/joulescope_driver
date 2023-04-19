@@ -15,6 +15,8 @@ This file contains the list of changes made to the Joulescope driver.
 * Added malloc/free mutex for guaranteed thread safety.
 * Added runtime pyjls version check.
 * Improved logging robustness and thread safety.
+* Fixed JS110 open causing IN+ to OUT+ disconnect.
+* Added JS110 open modes: defaults, resume.
 
 
 ## 1.3.2
