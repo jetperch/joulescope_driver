@@ -6,7 +6,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.3
 
-2023 Apr 14 [in progress]
+2023 Apr 19
 
 * Cleared all message fields at allocation.
 * Added api_timeout entry point test.
