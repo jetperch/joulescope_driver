@@ -960,7 +960,7 @@ static void time_map_update(struct dev_s * d, uint64_t sample_id, double counter
 static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * p_u32, uint16_t size) {
     struct field_def_s * field_def = &PORT_MAP[port_id & 0x0f];
     struct port_s * port = &d->ports[port_id & 0x0f];
-    struct jsdrv_stream_signal_s * s;
+    struct jsdrv_stream_signal_s * s = NULL;
     struct jsdrvp_msg_s * m = port->msg_in;
     if (!field_def->data_topic || !field_def->data_topic[0]) {
         return;
@@ -998,17 +998,20 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         sample_count -= skip;
         p_u32 += skip_size / sizeof(uint32_t);
     } else {
-        JSDRV_LOGI("stream_in_port %d sample_id skip: received=%" PRIu64 " expected=%" PRIu64,
-                   port_id, sample_id_u64, port->sample_id_next);
+        uint32_t element_count = 0;
         if (m) {
             s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
-            JSDRV_LOGI("stream_in_port %d early send %" PRIu32 " bytes, %" PRIu32 " elements",
-                       port_id, m->value.size, s->element_count);
+            element_count = s->element_count;
             port->msg_in = NULL;
             jsdrvp_backend_send(d->context, m);
             m = NULL;
             s = NULL;
         }
+        JSDRV_LOGI("stream_in_port %d sample_id skip: received=%" PRIu64 " expected=%" PRIu64
+                   " d=%" PRIu64 ", %" PRIu32 " elements sent",
+                   port_id, sample_id_u64, port->sample_id_next,
+                   sample_id_u64 - port->sample_id_next,
+                   element_count);
         port->sample_id_next = sample_id_u64;
     }
 

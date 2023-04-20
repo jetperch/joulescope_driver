@@ -269,18 +269,18 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
                    s->sample_id, sample_id, s->sample_rate, s->decimate_factor);
         clear(self, sample_id);
     } else if (sample_id_end < sample_id_expect) {
-        JSDRV_LOGW("bufsig_recv_data %s: duplicate rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
+        JSDRV_LOGI("bufsig_recv_data %s: duplicate rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
                    self->topic, sample_id, sample_id_end, sample_id_expect);
         if ((sample_id_expect - sample_id_end) < self->N) {
             clear(self, sample_id);
         }
         return;
     } else if (sample_id < sample_id_expect) {
-        JSDRV_LOGW("bufsig_recv_data %s: overlap rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
+        JSDRV_LOGI("bufsig_recv_data %s: overlap rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
                    self->topic, sample_id, sample_id_end, sample_id_expect);
         return;
     } else if (sample_id > sample_id_expect) {
-        JSDRV_LOGW("bufsig_recv_data %s: skip rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
+        JSDRV_LOGI("bufsig_recv_data %s: skip rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
                    self->topic, sample_id, sample_id_end, sample_id_expect);
         uint64_t k = sample_id - sample_id_expect;
         if (k > self->N) {
