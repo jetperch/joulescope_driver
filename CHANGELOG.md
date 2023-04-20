@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.4
+
+2023 Apr 20 [in progress]
+
+* Fixed record jls version check.
+
+
 ## 1.3.3
 
 2023 Apr 19

@@ -135,7 +135,7 @@ class Record:
         if Writer is None:
             raise RuntimeError('pyjls package not found.  Install using:\n' +
                                '  pip3 install -U pyjls')
-        pyjls_version = [int(x) for x in __version__.split('.')]
+        pyjls_version = tuple([int(x) for x in __version__.split('.')])
         if pyjls_version < _PYJLS_VERSION_MIN or pyjls_version >= _PYJLS_VERSION_MAX:
             raise ImportError(f'Unsupported pyjls version {__version__}\n' +
                               f'  Require {_PYJLS_VERSION_MIN} <= pyjls version < {_PYJLS_VERSION_MAX}\n' +
