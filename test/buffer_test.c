@@ -462,6 +462,8 @@ static void test_one_signal(void **state) {
     publish(context, msg);
     expect_unsubscribe("u/js220/0123456/s/i/!data");
     msg_send_process_next(context, TIMEOUT_MS);
+    expect_rsp_any("m/003/s/005/info");
+    msg_send_process_next(context, TIMEOUT_MS);
     expect_sig_list(ex_list_sig0, sizeof(ex_list_sig0));
     msg_send_process_next(context, TIMEOUT_MS);
 
