@@ -179,12 +179,13 @@ static bool await_check(struct buffer_s * self) {
 static void bufsig_publish_info(struct bufsig_s * self) {
     struct jsdrv_context_s * context = self->parent->context;
     struct jsdrv_buffer_info_s info;
-    jsdrv_bufsig_info(self, &info);
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(context, "",
-            &jsdrv_union_cbin_r((uint8_t *) &info, sizeof(info)));
-    tfp_snprintf(m->topic, sizeof(m->topic), "m/%03d/s/%03d/info", self->parent->idx, self->idx);
-    m->value.app = JSDRV_PAYLOAD_TYPE_BUFFER_INFO;
-    jsdrvp_backend_send(context, m);
+    if (jsdrv_bufsig_info(self, &info)) {
+        struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(context, "",
+                &jsdrv_union_cbin_r((uint8_t *) &info, sizeof(info)));
+        tfp_snprintf(m->topic, sizeof(m->topic), "m/%03d/s/%03d/info", self->parent->idx, self->idx);
+        m->value.app = JSDRV_PAYLOAD_TYPE_BUFFER_INFO;
+        jsdrvp_backend_send(context, m);
+    }
 }
 
 static void buffer_alloc(struct buffer_s * self) {
@@ -253,6 +254,8 @@ static void buffer_free(struct buffer_s * self) {
     }
     for (uint32_t idx = 0; idx < JSDRV_BUFSIG_COUNT_MAX; ++idx) {
         struct bufsig_s *b = &self->signals[idx];
+        jsdrv_bufsig_clear(b);
+        bufsig_publish_info(b);
         jsdrv_bufsig_free(b);
     }
 }

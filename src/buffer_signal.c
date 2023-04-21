@@ -153,8 +153,11 @@ static void utc_to_samples(struct bufsig_s * self,
     samples->length = length;
 }
 
-void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info) {
+bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info) {
     memset(info, 0, sizeof(*info));
+    if (0 == self->hdr.element_size_bits) {
+        return false;
+    }
     info->version = 1;
     info->field_id = self->hdr.field_id;
     info->index = self->hdr.index;
@@ -179,6 +182,7 @@ void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
         samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
     }
     info->time_map = self->time_map;
+    return true;
 }
 
 static void summarizeN(struct bufsig_s * self, uint8_t level, uint64_t start_idx, uint64_t length) {
@@ -240,6 +244,10 @@ static void clear(struct bufsig_s * self, uint64_t sample_id) {
     self->sample_id_head = sample_id;
     self->time_map.offset_counter = sample_id;
     self->time_map.offset_time = jsdrv_time_utc();
+}
+
+void jsdrv_bufsig_clear(struct bufsig_s * self) {
+    clear(self, 0);
 }
 
 void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s * s) {

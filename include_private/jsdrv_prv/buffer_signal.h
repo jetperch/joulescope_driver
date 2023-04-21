@@ -90,9 +90,11 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
 
 void jsdrv_bufsig_free(struct bufsig_s * self);
 
+void jsdrv_bufsig_clear(struct bufsig_s * self);
+
 void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s * s);
 
-void jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info);
+bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info);
 
 /**
  * @brief Process a request.

@@ -6,9 +6,10 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.4
 
-2023 Apr 20 [in progress]
+2023 Apr 21 [in progress]
 
 * Fixed record jls version check.
+* Send buffer signal clear on free.
 
 
 ## 1.3.3
