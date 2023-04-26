@@ -6,10 +6,12 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.4
 
-2023 Apr 21 [in progress]
+2023 Apr 26
 
 * Fixed record jls version check.
 * Send buffer signal clear on free.
+* Updated to pyjls 0.6.0.
+  * Fixed pyjoulescope_driver.record to not remove sample_id offset.  
 
 
 ## 1.3.3

@@ -23,7 +23,7 @@ from pyjoulescope_driver import time64
 import logging
 
 
-_PYJLS_VERSION_MIN = (0, 5, 0)  # inclusive
+_PYJLS_VERSION_MIN = (0, 6, 0)  # inclusive
 _PYJLS_VERSION_MAX = (1, 0, 0)  # exclusive
 
 
@@ -228,7 +228,6 @@ class Record:
         signal_id = signal['signal_id']
         sample_id = value['sample_id']
         if signal['utc_next'] is None:
-            signal['sample_id_offset'] = sample_id
             signal['sample_id_next'] = 0
             self._wr.signal_def(
                 signal_id=signal['signal_id'],
@@ -242,7 +241,7 @@ class Record:
             self._wr.utc(signal_id, 0, value['utc'])
             signal['utc_next'] = value['utc'] + self._utc_interval
 
-        sample_id = (sample_id - signal['sample_id_offset']) // decimate_factor
+        sample_id = sample_id // decimate_factor
         if value['utc'] >= signal['utc_next']:
             self._wr.utc(signal_id, sample_id, value['utc'])
             signal['utc_next'] += self._utc_interval
