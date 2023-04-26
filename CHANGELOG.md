@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.5
+
+2023 Apr 26
+
+* Added JS220 FW 1.0.7 and FPGA 1.0.4 as alpha & beta.
+
+
 ## 1.3.4
 
 2023 Apr 26
