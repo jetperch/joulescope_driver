@@ -919,6 +919,7 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
         if (!s1) {  // enabling streaming
             js110_sp_reset(&d->sample_processor);
             js110_stats_clear(&d->stats);
+            d->sample_id = 0;
             d->packet_index = 0;
         } else {    // disabling streaming
             for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(FIELDS); ++idx) {
@@ -1174,6 +1175,10 @@ static struct jsdrvp_msg_s * field_message_get(struct js110_dev_s * d, uint8_t f
     }
 
     if (NULL == p->msg) {
+        uint32_t decimate_factor = jsdrv_downsample_decimate_factor(p->downsample);
+        if (d->sample_id % decimate_factor) {
+            return NULL;
+        }
         m = jsdrvp_msg_alloc_data(d->context, "");
         tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s", d->ll.prefix, field_def->data_topic);
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
@@ -1183,7 +1188,7 @@ static struct jsdrvp_msg_s * field_message_get(struct js110_dev_s * d, uint8_t f
         s->element_type = field_def->element_type;
         s->element_size_bits = field_def->element_size_bits;
         s->sample_rate = SAMPLING_FREQUENCY;
-        s->decimate_factor = jsdrv_downsample_decimate_factor(p->downsample);
+        s->decimate_factor = decimate_factor;
         s->element_count = 0;
         m->u32_a = (uint32_t) d->sample_id;
         m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
@@ -1216,12 +1221,12 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
 }
 
 static void add_f32_field(struct js110_dev_s * d, uint8_t field_idx, float value) {
-    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
-    if (NULL == m) {
-        return;
-    }
     struct port_s * p = &d->ports[field_idx];
     if (NULL == p->downsample) {
+        return;
+    }
+    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
+    if (NULL == m) {
         return;
     }
     if (!jsdrv_downsample_add_f32(p->downsample, d->sample_processor.sample_count - 1, value, &value)) {
@@ -1235,14 +1240,15 @@ static void add_f32_field(struct js110_dev_s * d, uint8_t field_idx, float value
 
 static void add_u4_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t value) {
     struct jsdrv_stream_signal_s * s;
-    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
-    if (NULL == m) {
-        return;
-    }
     struct port_s * p = &d->ports[field_idx];
     if (NULL == p->downsample) {
         return;
     }
+    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
+    if (NULL == m) {
+        return;
+    }
+
     if (!jsdrv_downsample_add_u8(p->downsample, d->sample_processor.sample_count - 1, value, &value)) {
         return;
     }
@@ -1258,14 +1264,15 @@ static void add_u4_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t valu
 
 static void add_u1_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t value) {
     struct jsdrv_stream_signal_s * s;
-    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
-    if (NULL == m) {
-        return;
-    }
     struct port_s * p = &d->ports[field_idx];
     if (NULL == p->downsample) {
         return;
     }
+    struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
+    if (NULL == m) {
+        return;
+    }
+
     if (!jsdrv_downsample_add_u8(p->downsample, d->sample_processor.sample_count - 1, value, &value)) {
         return;
     }

@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.6
+
+2023 Apr 27
+
+* Fixed JS110 sample_id for downsampled 1-bit channels.
+* Updated to pyjls 0.6.1 for improved robustness.
+
+
 ## 1.3.5
 
 2023 Apr 26

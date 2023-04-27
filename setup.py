@@ -21,27 +21,19 @@ https://packaging.python.org/en/latest/distributing.html
 https://github.com/pypa/sampleproject
 """
 
+
 # Always prefer setuptools over distutils
 import setuptools
 import setuptools.dist
 import setuptools.command.build_py
 import distutils.cmd
 from distutils.errors import DistutilsExecError
+import numpy as np
 import os
-os.environ['pyjoulescope_driver_setup'] = '1'
-from pyjoulescope_driver.release import releases_get_from_network
-
 import platform
 import sys
-
-if platform.system() == 'Windows':
-    numpy_req = 'numpy>=1.23'
-else:
-    numpy_req = 'numpy>=1.20'
-
-setuptools.dist.Distribution().fetch_build_eggs(['Cython>=0.29.3', numpy_req])
-
-import numpy as np
+os.environ['pyjoulescope_driver_setup'] = '1'
+from pyjoulescope_driver.release import releases_get_from_network
 
 
 MYPATH = os.path.dirname(os.path.abspath(__file__))
@@ -281,7 +273,7 @@ setuptools.setup(
 
     # See https://packaging.python.org/en/latest/requirements.html
     install_requires=[
-        numpy_req,
+        'numpy>=1.23',
         "pywin32; platform_system=='Windows'",
         'requests',
     ],

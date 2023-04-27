@@ -18,8 +18,7 @@
 check-manifest>=0.37
 Cython                                  # C native build
 myst-parser                             # documentation
-numpy>=1.23; sys_platform == 'win32'
-numpy>=1.20; sys_platform != 'win32'
+numpy>=1.23
 pywin32; sys_platform == 'win32'
 requests                                # firmware image download
 sphinx                                  # documentation

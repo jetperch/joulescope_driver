@@ -23,7 +23,7 @@ from pyjoulescope_driver import time64
 import logging
 
 
-_PYJLS_VERSION_MIN = (0, 6, 0)  # inclusive
+_PYJLS_VERSION_MIN = (0, 6, 1)  # inclusive
 _PYJLS_VERSION_MAX = (1, 0, 0)  # exclusive
 
 
@@ -197,7 +197,7 @@ class Record:
 
         for signal in self._signals.values():
             ctrl_topic = signal['ctrl_topic']
-            self._publish(ctrl_topic, 1)
+            self._publish(ctrl_topic, 1, timeout=0)
 
         return self
 
