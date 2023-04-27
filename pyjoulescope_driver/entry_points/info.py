@@ -66,6 +66,8 @@ class Info:
                     s = "  \n".join(devices)
                     print(f'  {s}')
                     return 1
+                self._meta.clear()
+                self._values.clear()
                 d.open(device_path, mode=args.open)
                 fn = self._on_metadata  # use same bound method for unsubscribe
                 d.subscribe(device_path, 'metadata_rsp_retain', fn)

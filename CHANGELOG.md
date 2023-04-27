@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.7
+
+2023 Apr 28 [in progress]
+
+* Fixed info entry point to correclty display multiple Joulescopes.
+
+
 ## 1.3.6
 
 2023 Apr 27
