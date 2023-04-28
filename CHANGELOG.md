@@ -8,7 +8,8 @@ This file contains the list of changes made to the Joulescope driver.
 
 2023 Apr 28 [in progress]
 
-* Fixed info entry point to correclty display multiple Joulescopes.
+* Fixed "info" entry point to correctly display multiple Joulescopes.
+* Fixed "record" entry point to correctly add first UTC timestamp.
 
 
 ## 1.3.6
