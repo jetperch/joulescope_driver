@@ -12,16 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# See https://peps.python.org/pep-0518/
 # See https://toml.io/
 
+# A build-system independent format for source trees: https://peps.python.org/pep-0517/
+# Specifying Minimum Build System Requirements for Python Projects: https://peps.python.org/pep-0518/
 [build-system]
 # Minimum requirements for the build system to execute.
 requires = [
-    "Cython",
-    "numpy",
+    "Cython>=0.29",
+    "numpy>=1.23",
     "pywin32; sys_platform == 'win32'",
     "requests",
-    "setuptools",
+    "setuptools>=42",
     "wheel",
 ]
+build-backend = "setuptools.build_meta"

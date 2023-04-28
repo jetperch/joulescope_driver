@@ -24,14 +24,12 @@ https://github.com/pypa/sampleproject
 
 # Always prefer setuptools over distutils
 import setuptools
-import setuptools.dist
-import setuptools.command.build_py
-import distutils.cmd
-from distutils.errors import DistutilsExecError
+from setuptools import Command
+from setuptools.errors import ExecError
+from setuptools.command.build_py import build_py
 import numpy as np
 import os
 import platform
-import sys
 os.environ['pyjoulescope_driver_setup'] = '1'
 from pyjoulescope_driver.release import releases_get_from_network
 
@@ -171,15 +169,15 @@ with open(os.path.join(MYPATH, 'README.md'), 'r', encoding='utf-8') as f:
     long_description = f.read()
 
 
-class BuildPyCommand(setuptools.command.build_py.build_py):
+class BuildPyCommand(build_py):
     """Custom build command."""
 
     def run(self):
         releases_get_from_network(force_download=True, dist_save=True)
-        setuptools.command.build_py.build_py.run(self)
+        build_py.run(self)
 
 
-class CustomBuildDocs(distutils.cmd.Command):
+class CustomBuildDocs(Command):
     """Custom command to build docs locally."""
 
     description = 'Build docs.'
@@ -197,13 +195,13 @@ class CustomBuildDocs(distutils.cmd.Command):
         from sphinx.application import Sphinx
         from sphinx.util.console import nocolor, color_terminal
         nocolor()
-        source_dir = os.path.join(MYPATH, 'docs')
+        source_dir = os.path.join(MYPATH, 'doc', 'sphinx')
         target_dir = os.path.join(MYPATH, 'build', 'docs_html')
         doctree_dir = os.path.join(target_dir, '.doctree')
         app = Sphinx(source_dir, source_dir, target_dir, doctree_dir, 'html')
         app.build()
         if app.statuscode:
-            raise DistutilsExecError(
+            raise ExecError(
                 'caused by %s builder.' % app.builder.name)
 
 
