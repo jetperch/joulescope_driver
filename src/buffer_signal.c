@@ -424,7 +424,7 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
         rsp->info.time_range_samples.end = self->sample_id_head - 1;
     }
     if (length > length_max) {
-        JSDRV_LOGI("sample req too long, truncate %" PRIu64 " -> %" PRIu64, length, length_max);
+        JSDRV_LOGD3("sample req too long, truncate %" PRIu64 " -> %" PRIu64, length, length_max);
         length = length_max;
         rsp->info.time_range_samples.length = length;
         rsp->info.time_range_samples.end = sample_id + length - 1;
