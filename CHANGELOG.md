@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.8
+
+2023 May 9 [in progress]
+
+* Add sysinfo entry point.
+
+
 ## 1.3.7
 
 2023 Apr 28
