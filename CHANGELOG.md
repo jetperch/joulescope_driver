@@ -6,9 +6,10 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.8
 
-2023 May 9 [in progress]
+2023 May 11 [in progress]
 
-* Add sysinfo entry point.
+* Updated info entry point.
+* Added automatic include path for jsdrv static CMake builds.
 
 
 ## 1.3.7

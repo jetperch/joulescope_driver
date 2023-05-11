@@ -55,7 +55,7 @@ if (JSDRV_TOPLEVEL AND CMAKE_COMPILER_IS_GNUCC)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11")
 endif()
 remove_definitions(-D__cplusplus)
-if (WIN32 AND CMAKE_COMPILER_IS_GNUCC)
+if (JSDRV_TOPLEVEL AND WIN32 AND CMAKE_COMPILER_IS_GNUCC)
     # Ugh, mingw
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-format -std=gnu11")
 endif()
