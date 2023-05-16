@@ -23,6 +23,7 @@
 #ifndef JSDRV_VERSION_H_
 #define JSDRV_VERSION_H_
 
+#include "jsdrv/cmacro_inc.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -122,7 +123,7 @@
  *      bytes available to avoid truncation.
  * \param[in] size The number of bytes available in str.
  */
-void jsdrv_version_u32_to_str(uint32_t u32, char * str, size_t size);
+JSDRV_API void jsdrv_version_u32_to_str(uint32_t u32, char * str, size_t size);
 
 /** @} */
 

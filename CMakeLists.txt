@@ -41,6 +41,7 @@ endif()
 
 option(JSDRV_DOCS "Use Doxygen to create the HTML based Host API documentation" OFF)
 option(JSDRV_UNIT_TEST "Build the JSDRV unit tests" ON)
+option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
 
 function (SET_FILENAME _filename)
     get_filename_component(b ${_filename} NAME)

@@ -6,10 +6,12 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.8
 
-2023 May 11 [in progress]
+2023 May 16
 
 * Updated info entry point.
 * Added automatic include path for jsdrv static CMake builds.
+* Added support for building a shared library.
+  Initialize build subdir with "cmake -DBUILD_SHARED_LIBS=ON .."
 
 
 ## 1.3.7

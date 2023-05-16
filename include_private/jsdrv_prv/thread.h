@@ -62,10 +62,10 @@ typedef void * (*jsdrv_thread_fn)(void * arg);
 typedef pthread_t jsdrv_thread_t;
 #endif
 
-int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg);
-int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms);
-bool jsdrv_thread_is_current(jsdrv_thread_t const * thread);
-void jsdrv_thread_sleep_ms(uint32_t duration_ms);
+JSDRV_API int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg);
+JSDRV_API int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms);
+JSDRV_API bool jsdrv_thread_is_current(jsdrv_thread_t const * thread);
+JSDRV_API void jsdrv_thread_sleep_ms(uint32_t duration_ms);
 
 JSDRV_CPP_GUARD_END
 
