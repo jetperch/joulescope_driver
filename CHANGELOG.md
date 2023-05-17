@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.9
+
+2023 May 17
+
+* Fixed installation on Ubuntu #6.
+
+
 ## 1.3.8
 
 2023 May 16
