@@ -139,7 +139,7 @@ int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_
     // consider pthread_attr_setschedpolicy SCHED_RR
     // pthread_attr_setschedparam
 
-    rc = pthread_create(thread, &attr, fn, fn_arg);
+    rc = pthread_create(thread, NULL, fn, fn_arg);
     if (rc) {
         JSDRV_LOGE("pthread_create failed: %d", rc);
         return JSDRV_ERROR_UNSPECIFIED;
