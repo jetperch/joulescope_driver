@@ -82,7 +82,7 @@ if platform.system() == 'Windows':
         'src/backend/winusb/msg_queue.c',
         'src/backend/windows.c',
     ]
-    libraries = ['Setupapi', 'Winusb', 'user32']
+    libraries = ['Setupapi', 'Winusb', 'user32', 'winmm']
     extra_compile_args = []
 elif 'armv7' in platform.machine():
     sources = posix_sources

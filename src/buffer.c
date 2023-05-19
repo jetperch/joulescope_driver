@@ -33,6 +33,7 @@
 #include <inttypes.h>
 
 
+#define BUFFER_THREAD_WAIT_TIMEOUT_MS  (50)
 JSDRV_STATIC_ASSERT(16 == sizeof(struct jsdrv_summary_entry_s), entry_size_one);
 JSDRV_STATIC_ASSERT(32 == sizeof(struct jsdrv_summary_entry_s[2]), entry_size_two);
 JSDRV_STATIC_ASSERT(JSDRV_BUFSIG_COUNT_MAX <= 256, bufsig_fits_in_u8); // assumed for add/remove/list operations
@@ -268,6 +269,7 @@ static void req_post(struct buffer_s * self, uint32_t bufsig_idx, struct jsdrv_b
     jsdrv_list_foreach(&self->req_pending, item) {
         r = JSDRV_CONTAINER_OF(item, struct req_s, item);
         if ((r->signal_id == bufsig_idx) && (r->req.rsp_id == req->rsp_id) && (0 == strcmp(r->req.rsp_topic, req->rsp_topic))) {
+            JSDRV_LOGD1("dedup rsp_id %lld", req->rsp_id);
             // found existing request still pending; update request.
             r->req = *req;
             return;
@@ -279,6 +281,7 @@ static void req_post(struct buffer_s * self, uint32_t bufsig_idx, struct jsdrv_b
     if (NULL != item) {
         r = JSDRV_CONTAINER_OF(item, struct req_s, item);
     } else {
+        JSDRV_LOGD1("create request");
         r = calloc(1, sizeof(struct req_s));
         jsdrv_list_initialize(&r->item);
     }
@@ -500,9 +503,9 @@ static THREAD_RETURN_TYPE buffer_thread(THREAD_ARG_TYPE lpParam) {
 
     while (!self->do_exit) {
 #if _WIN32
-        WaitForMultipleObjects(handle_count, handles, false, 100);
+        WaitForMultipleObjects(handle_count, handles, false, BUFFER_THREAD_WAIT_TIMEOUT_MS);
 #else
-        poll(fds, 1, 100);
+        poll(fds, 1, BUFFER_THREAD_WAIT_TIMEOUT_MS);
 #endif
         JSDRV_LOGD2("buffer thread tick");
         do {
@@ -596,7 +599,7 @@ static uint8_t _buffer_add(void * user_data, struct jsdrvp_msg_s * msg) {
         s->topic[0] = 0;
     }
 
-    if (jsdrv_thread_create(&b->thread, buffer_thread, b)) {
+    if (jsdrv_thread_create(&b->thread, buffer_thread, b, -1)) {
         JSDRV_LOGE("buffer_id %u thread create failed", buffer_id);
         return send_return_code_to_frontend(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, JSDRV_ERROR_UNSPECIFIED, _buffer_add, self);
     }

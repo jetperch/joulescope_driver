@@ -148,7 +148,7 @@ void jsdrv_os_event_reset(jsdrv_os_event_t ev) {
     ResetEvent(ev);
 }
 
-int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg) {
+int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg, int priority) {
     thread->thread = CreateThread(
             NULL,                   // default security attributes
             0,                      // use default stack size
@@ -159,6 +159,22 @@ int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_
     if (thread->thread == NULL) {
         JSDRV_LOGE("CreateThread failed");
         return JSDRV_ERROR_UNSPECIFIED;
+    }
+    if (priority > 2) {
+        priority = 2;
+    } else if (priority < -2) {
+        priority = -2;
+    }
+    switch (priority) {
+        case -2: priority = THREAD_PRIORITY_LOWEST; break;
+        case -1: priority = THREAD_PRIORITY_BELOW_NORMAL; break;
+        case 0: priority = THREAD_PRIORITY_NORMAL; break;
+        case 1: priority = THREAD_PRIORITY_ABOVE_NORMAL; break;
+        case 2: priority = THREAD_PRIORITY_HIGHEST; break;
+        default: priority = 0;
+    }
+    if (!SetThreadPriority(thread->thread, priority)) {
+        WINDOWS_LOGE("%s", "SetThreadPriority");
     }
     return 0;
 }
@@ -203,5 +219,15 @@ void * jsdrv_alloc(size_t size_bytes) {
 
 int32_t jsdrv_platform_initialize(void) {
     heap_mutex = jsdrv_os_mutex_alloc("heap");
+
+    if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
+        WINDOWS_LOGE("Could not raise process priority using %s", "SetPriorityClass");
+    }
+
+    timeBeginPeriod(1);
     return 0;
+}
+
+void jsdrv_platform_finalize(void) {
+    timeEndPeriod(1);
 }

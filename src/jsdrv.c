@@ -900,7 +900,7 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
     jsdrv_pubsub_process(c->pubsub);
     JSDRV_RETURN_ON_ERROR(jsdrv_buffer_initialize(c));
 
-    int32_t rv = jsdrv_thread_create(&c->thread, frontend_thread, c);
+    int32_t rv = jsdrv_thread_create(&c->thread, frontend_thread, c, 1);
     if (rv) {
         jsdrv_finalize(c, 0);
         return rv;
@@ -935,6 +935,7 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         MSG_QUEUE_FREE(c->msg_free_data);
 
         jsdrv_free(c);
+        jsdrv_platform_finalize();
     }
 }
 

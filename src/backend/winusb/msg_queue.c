@@ -94,8 +94,8 @@ void msg_queue_push(struct msg_queue_s * queue, struct jsdrvp_msg_s * msg) {
     EnterCriticalSection(&queue->critical_section);
     jsdrv_list_remove(&msg->item);  // remove from any existing list
     jsdrv_list_add_tail(&queue->items, &msg->item);
-    LeaveCriticalSection(&queue->critical_section);
     SetEvent(queue->available_event);
+    LeaveCriticalSection(&queue->critical_section);
 }
 
 struct jsdrvp_msg_s * msg_queue_pop_immediate(struct msg_queue_s* queue) {

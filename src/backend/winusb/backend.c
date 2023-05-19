@@ -709,7 +709,7 @@ static int32_t device_thread_start(struct dev_s * d) {
         JSDRV_LOGE("CreateThread device failed");
         return JSDRV_ERROR_UNSPECIFIED;
     }
-    if (!SetThreadPriority(d->thread, THREAD_PRIORITY_ABOVE_NORMAL)) {
+    if (!SetThreadPriority(d->thread, THREAD_PRIORITY_HIGHEST)) {
         WINDOWS_LOGE("%s", "SetThreadPriority");
     }
     return 0;
@@ -1017,9 +1017,6 @@ int32_t jsdrv_usb_backend_factory(struct jsdrv_context_s * context, struct jsdrv
         return JSDRV_ERROR_UNSPECIFIED;
     }
 
-    if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
-        WINDOWS_LOGE("Could not raise process priority using %s", "SetPriorityClass");
-    }
     if (!SetThreadPriority(s->thread, THREAD_PRIORITY_ABOVE_NORMAL)) {
         WINDOWS_LOGE("%s", "SetThreadPriority");
     }

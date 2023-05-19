@@ -1563,14 +1563,9 @@ int32_t jsdrvp_ul_js220_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     d->ll = *ll;
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
-    if (jsdrv_thread_create(&d->thread, driver_thread, d)) {
+    if (jsdrv_thread_create(&d->thread, driver_thread, d, 1)) {
         return JSDRV_ERROR_UNSPECIFIED;
     }
-#if _WIN32
-    if (!SetThreadPriority(d->thread.thread, THREAD_PRIORITY_ABOVE_NORMAL)) {
-        WINDOWS_LOGE("%s", "SetThreadPriority");
-    }
-#endif
     *device = &d->ul;
     return 0;
 }

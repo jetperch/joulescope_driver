@@ -132,8 +132,14 @@ void jsdrv_os_event_reset(jsdrv_os_event_t ev) {
     }
 }
 
-int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg) {
-    int rc = pthread_create(thread, NULL, fn, fn_arg);
+int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg, int priority) {
+    int rc;
+
+    // may need permissions to change thread priority
+    // consider pthread_attr_setschedpolicy SCHED_RR
+    // pthread_attr_setschedparam
+
+    rc = pthread_create(thread, &attr, fn, fn_arg);
     if (rc) {
         JSDRV_LOGE("pthread_create failed: %d", rc);
         return JSDRV_ERROR_UNSPECIFIED;
@@ -194,4 +200,7 @@ int32_t jsdrv_platform_initialize(void) {
     limit.rlim_cur = 4096;
     setrlimit(RLIMIT_NOFILE, &limit);
     return 0;
+}
+
+void jsdrv_platform_finalize(void) {
 }

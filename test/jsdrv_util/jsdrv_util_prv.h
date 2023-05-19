@@ -49,6 +49,10 @@ struct app_s {
     char * filename;
     char devices[MAX_DEVICES_LENGTH];
     struct jsdrv_topic_s device;
+
+    // Convenience variables for use by subcommands.
+    uint32_t duration_ms;
+    uint32_t sleep_ms;
 };
 
 extern volatile bool quit_;

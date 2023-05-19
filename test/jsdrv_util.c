@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <signal.h>
 
 
 struct command_s {
@@ -43,8 +44,15 @@ struct command_s {
 
 struct app_s app_;
 
-void on_log_recv(void * user_data, struct jsdrv_log_header_s const * header,
-                 const char * filename, const char * message) {
+// cross-platform handler for CTRL-C to exit program
+static void signal_handler(int signal){
+    if ((signal == SIGABRT) || (signal == SIGINT)) {
+        quit_ = 1;
+    }
+}
+
+static void on_log_recv(void * user_data, struct jsdrv_log_header_s const * header,
+                        const char * filename, const char * message) {
     (void) user_data;
     char time_str[64];
     struct tm tm_utc;
@@ -220,6 +228,8 @@ int main(int argc, char * argv[]) {
     }
 
     ROE(app_initialize(self));
+    signal(SIGABRT, signal_handler);
+    signal(SIGINT, signal_handler);
 
     char * command_str = argv[0];
     ARG_CONSUME();

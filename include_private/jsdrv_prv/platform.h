@@ -165,6 +165,11 @@ JSDRV_API uint32_t jsdrv_time_ms_u32(void);
 int32_t jsdrv_platform_initialize(void);
 
 /**
+ * @brief Finalize any platform-specific features.
+ */
+void jsdrv_platform_finalize(void);
+
+/**
  * Additional functions to define:
  *
  * mutex.h

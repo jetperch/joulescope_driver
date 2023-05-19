@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.10
+
+2023 May 19
+
+* Improved threading and priorities on Windows.
+* Improved Windows timer resolution (timeBeginPeriod).
+
+
 ## 1.3.9
 
 2023 May 17

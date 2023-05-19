@@ -62,7 +62,23 @@ typedef void * (*jsdrv_thread_fn)(void * arg);
 typedef pthread_t jsdrv_thread_t;
 #endif
 
-JSDRV_API int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg);
+
+/**
+ * @brief Create a new thread.
+ *
+ * @param thread The thread instance.
+ * @param fn The function to call in the new thread context.
+ * @param fn_arg The argument to fn.
+ * @param priority The thread priority.
+ *      0 is default. 1 is above normal, 2 is highest.
+ *      -1 is below normal, -2 is lowest.
+ * @return
+ */
+
+JSDRV_API int32_t jsdrv_thread_create(jsdrv_thread_t * thread,
+                                      jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg,
+                                      int priority);
+
 JSDRV_API int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms);
 JSDRV_API bool jsdrv_thread_is_current(jsdrv_thread_t const * thread);
 JSDRV_API void jsdrv_thread_sleep_ms(uint32_t duration_ms);

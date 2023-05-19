@@ -97,7 +97,7 @@ int on_threads(struct app_s * self, int argc, char * argv[]) {
         struct thread_args_s * t = &threads[i];
         t->app = self;
         t->index = i;
-        ROE(jsdrv_thread_create(&t->thread, thread_fn, t));
+        ROE(jsdrv_thread_create(&t->thread, thread_fn, t, 0));
     }
 
     int64_t t_end = jsdrv_time_utc() + duration_ms * JSDRV_TIME_MILLISECOND;

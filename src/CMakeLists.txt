@@ -23,7 +23,7 @@ if (WIN32)
             backend/winusb/device_change_notifier.c
     )
     set(PLATFORM_DEPENDENCIES "")
-    set(PLATFORM_LIBS Setupapi Winusb)
+    set(PLATFORM_LIBS Setupapi Winusb winmm)
     set(PLATFORM_TARGET_LINK_DIRS "")
     if (BUILD_SHARED_LIBS)
         add_definitions(-DJSDRV_EXPORT=1)
