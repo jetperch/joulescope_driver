@@ -133,6 +133,7 @@ void jsdrv_os_event_reset(jsdrv_os_event_t ev) {
 }
 
 int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg, int priority) {
+    (void) priority;
     int rc;
 
     // may need permissions to change thread priority
