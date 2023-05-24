@@ -39,6 +39,7 @@
 
 JSDRV_CPP_GUARD_START
 
+js220_i128 js220_i128_init_i64(int64_t a);
 js220_i128 js220_i128_add(js220_i128 a, js220_i128 b);
 js220_i128 js220_i128_sub(js220_i128 a, js220_i128 b);
 js220_i128 js220_i128_square_i64(int64_t a);

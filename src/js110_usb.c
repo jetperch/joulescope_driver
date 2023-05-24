@@ -24,6 +24,7 @@
 #include "jsdrv_prv/js110_cal.h"
 #include "jsdrv_prv/js110_sample_processor.h"
 #include "jsdrv_prv/js110_stats.h"
+#include "jsdrv_prv/js220_i128.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/usb_spec.h"
 #include "jsdrv_prv/thread.h"
@@ -39,6 +40,7 @@
 
 
 #define TIMEOUT_MS                  (1000U)
+#define INTERVAL_MS                 (100U)
 #define SENSOR_COMMAND_TIMEOUT_MS   (3000U)
 #define FRAME_SIZE_BYTES            (512U)
 #define ROE JSDRV_RETURN_ON_ERROR
@@ -88,6 +90,7 @@ static void on_gpi_0_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * v
 static void on_gpi_1_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_stats_scnt(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
+static void on_sstats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value);
 
 enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
     PARAM_I_RANGE_SELECT,
@@ -111,6 +114,7 @@ enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
     PARAM_GPI_1_CTRL,
     PARAM_STATS_SCNT,
     PARAM_STATS_CTRL,
+    PARAM_SSTATS_CTRL,
     PARAM__COUNT,  // must be last
 };
 
@@ -313,7 +317,6 @@ static const struct param_s PARAMS[] = {
         "}",
         on_sampling_frequency,
     },
-    // on-instrument statistics
     {
         "s/i/ctrl",
         "{"
@@ -382,10 +385,19 @@ static const struct param_s PARAMS[] = {
         "s/stats/ctrl",
         "{"
             "\"dtype\": \"bool\","
-            "\"brief\": \"Enable stats input data stream (u8).\","
+            "\"brief\": \"Enable host-side stats input data stream (u8).\","
             "\"default\": 0"
         "}",
         on_stats_ctrl,
+    },
+    {
+            "s/sstats/ctrl",
+            "{"
+            "\"dtype\": \"bool\","
+            "\"brief\": \"Enable on-instrument stats input data stream (u8).\","
+            "\"default\": 1"
+            "}",
+            on_sstats_ctrl,
     },
     {NULL, NULL, NULL},  // MUST BE LAST
 };
@@ -441,6 +453,9 @@ struct js110_dev_s {
     struct js110_stats_s stats;
     uint64_t sample_id;
     struct jsdrv_time_map_s time_map;
+
+    int64_t sstats_samples_total_prev;
+    struct jsdrv_time_map_s sstats_time_map;
 
     struct port_s ports[JSDRV_ARRAY_SIZE(FIELDS)];
 
@@ -572,8 +587,73 @@ static int32_t jsdrvb_bulk_in_stream_open(struct js110_dev_s * d, uint8_t endpoi
     return rv;
 }
 
+static void statistics_fwd(struct js110_dev_s * d, struct js110_host_status_s const * s) {
+    if (
+            (0 == d->param_values[PARAM_SSTATS_CTRL].value.u8)
+            || (d->sstats_samples_total_prev == s->samples_total)
+            || (0 == s->samples_this)) {
+        return;
+    }
+
+    if (0 == d->sstats_time_map.offset_time) {
+        d->sstats_time_map.offset_time = jsdrv_time_utc();
+        d->sstats_time_map.counter_rate = 2000000.0;
+        d->sstats_time_map.offset_counter = s->samples_total + s->samples_this;  // plus communication delay
+    }
+
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
+    tfp_snprintf(m->topic, sizeof(m->topic), "%s/s/sstats/value", d->ll.prefix);
+    struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
+    m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
+    m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
+
+    dst->version = 1;
+    dst->rsv1_u8 = 0;
+    dst->rsv2_u8 = 0;
+    dst->decimate_factor = 1;
+    dst->block_sample_count = s->samples_this;
+    dst->sample_freq = s->samples_per_second;
+    dst->rsv3_u8 = 0;
+    dst->block_sample_id = s->samples_total;
+    dst->accum_sample_id = 0;
+
+    double i_scale = pow(2, -27);
+    double v_scale = pow(2, -17);
+    double pm_scale = pow(2, -34);
+    double p_scale = pow(2, -21);
+    double a_scale = pow(2, -27);
+
+    dst->i_avg = i_scale * (double) s->current_mean;
+    dst->i_std = 0.0;  // not computed
+    dst->i_min = i_scale * (double) s->current_min;
+    dst->i_max = i_scale * (double) s->current_max;
+
+    dst->v_avg = v_scale * (double) s->voltage_mean;
+    dst->v_std = 0.0;  // not computed;
+    dst->v_min = v_scale * (double) s->voltage_min;
+    dst->v_max = v_scale * (double) s->voltage_max;
+
+    dst->p_avg = pm_scale * (double) s->power_mean;
+    dst->p_std = 0.0;  // not computed;
+    dst->p_min = p_scale * (double) s->power_min;
+    dst->p_max = p_scale * (double) s->power_max;
+
+    dst->charge_f64 = a_scale * (double) s->charge;
+    dst->energy_f64 = a_scale * (double) s->energy;
+
+    js220_i128 charge = js220_i128_lshift(js220_i128_init_i64(s->charge), 4);
+    js220_i128 energy = js220_i128_lshift(js220_i128_init_i64(s->energy), 4);
+
+    dst->charge_i128[0] = charge.u64[0];
+    dst->charge_i128[1] = charge.u64[1];
+    dst->energy_i128[0] = energy.u64[0];
+    dst->energy_i128[1] = energy.u64[1];
+
+    dst->time_map = d->sstats_time_map;
+    jsdrvp_backend_send(d->context, m);
+}
+
 static int32_t d_status(struct js110_dev_s * d, struct js110_host_status_s * status) {
-    memset(status, 0, sizeof(*status));
     struct js110_host_packet_s pkt;
     usb_setup_t setup = { .s = {
             .bmRequestType = USB_REQUEST_TYPE(IN, VENDOR, DEVICE),
@@ -588,10 +668,17 @@ static int32_t d_status(struct js110_dev_s * d, struct js110_host_status_s * sta
         // do nothing
         JSDRV_LOGE("status returned %d", rv);
     } else if ((pkt.header.version == JS110_HOST_API_VERSION) && pkt.header.type == JS110_HOST_PACKET_TYPE_STATUS) {
-        memcpy(status, &pkt.payload.status, sizeof(pkt.payload.status));
+        if (NULL != status) {
+            memcpy(status, &pkt.payload.status, sizeof(pkt.payload.status));
+        }
     } else {
         JSDRV_LOGW("unexpected message");
         rv = JSDRV_ERROR_UNSPECIFIED;  // unexpected
+    }
+    if (0 == rv) {
+        statistics_fwd(d, &pkt.payload.status);
+    } else if (NULL != status) {
+        memset(status, 0, sizeof(*status));
     }
     return rv;
 }
@@ -974,6 +1061,10 @@ static void on_stats_scnt(struct js110_dev_s * d, const struct jsdrv_union_s * v
 
 static void on_stats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
     on_update_ctrl(d, value, PARAM_STATS_CTRL);
+}
+
+static void on_sstats_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
+    d->param_values[PARAM_SSTATS_CTRL] = *value;
 }
 
 static int32_t d_open_ll(struct js110_dev_s * d, int32_t opt) {
@@ -1384,6 +1475,9 @@ static bool handle_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
 }
 
 static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
+    uint32_t time_now_ms = jsdrv_time_ms_u32();
+    uint32_t time_prev_ms = time_now_ms;
+    uint32_t duration_ms = 0;
     struct js110_dev_s *d = (struct js110_dev_s *) lpParam;
     JSDRV_LOGI("JS110 USB upper-level thread started %s", d->ll.prefix);
 
@@ -1402,11 +1496,21 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
 #endif
 
     while (!d->do_exit) {
+        time_now_ms = jsdrv_time_ms_u32();
+        duration_ms = time_now_ms - time_prev_ms;
+        if (duration_ms >= INTERVAL_MS) {
+            time_prev_ms += INTERVAL_MS;
+            if ((d->state == ST_OPEN) && (d->param_values[PARAM_SSTATS_CTRL].value.u8)) {
+                d_status(d, NULL);  // poll status for on-instrument statistics
+            }
+        } else {
+            duration_ms = INTERVAL_MS - duration_ms;
 #if _WIN32
-        WaitForMultipleObjects(handle_count, handles, false, 5000);
+            WaitForMultipleObjects(handle_count, handles, false, duration_ms);
 #else
-        poll(fds, 2, 5000);
+            poll(fds, 2, duration_ms);
 #endif
+        }
         //JSDRV_LOGD3("ul thread");
         while (handle_cmd(d, msg_queue_pop_immediate(d->ul.cmd_q))) {
             ;

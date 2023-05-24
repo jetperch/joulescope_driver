@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.11
+
+2023 May 24
+
+* Added JS110 on-instrument (sensor) statistics option #3.
+
+
 ## 1.3.10
 
 2023 May 19

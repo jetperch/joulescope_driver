@@ -299,7 +299,7 @@ struct jsdrv_statistics_s {
     double charge_f64;           ///< The charge (integral of current) from accum_sample_id as a 64-bit float.
     double energy_f64;           ///< The energy (integral of power) from accum_sample_id as a 64-bit float.
     uint64_t charge_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
-    uint64_t energy_i128[2];     ///< The charge (integral of current) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
+    uint64_t energy_i128[2];     ///< The energy (integral of power) from accum_sample_id as a 128-bit signed integer with 2**-31 scale.
     struct jsdrv_time_map_s time_map;  ///< The time map between sample_id and UTC.
 };
 

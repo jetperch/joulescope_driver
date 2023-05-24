@@ -21,6 +21,9 @@ def parser_config(p):
     p.add_argument('--verbose', '-v',
                    action='store_true',
                    help='Display verbose information.')
+    p.add_argument('--js110_host',
+                   action='store_true',
+                   help='Use JS110 host-side statistics (on-instrument by default).')
     p.add_argument('device_path',
                    nargs='*',
                    help='The target device for this command.')
@@ -62,11 +65,18 @@ def on_cmd(args):
             d.open(device)
             if 'js110' in device:
                 d.publish(device + '/s/i/range/select', 'auto')
-                d.publish(device + '/s/i/ctrl', 'on')
+                if args.js110_host:
+                    d.publish(device + '/s/i/ctrl', 'on')
+                    d.publish(device + '/s/v/ctrl', 'on')
+                    d.publish(device + '/s/p/ctrl', 'on')
+                    d.publish(device + '/s/stats/ctrl', 'on')
+                    d.subscribe(device + '/s/stats/value', 'pub', _on_statistics_value)
+                else:
+                    d.subscribe(device + '/s/sstats/value', 'pub', _on_statistics_value)
             else:
                 d.publish(device + '/s/i/range/mode', 'auto')
-            d.publish(device + '/s/stats/ctrl', 1)
-            d.subscribe(device + '/s/stats/value', 'pub', _on_statistics_value)
+                d.publish(device + '/s/stats/ctrl', 1)
+                d.subscribe(device + '/s/stats/value', 'pub', _on_statistics_value)
         try:
             while True:
                 time.sleep(0.025)

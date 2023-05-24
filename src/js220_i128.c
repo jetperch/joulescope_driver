@@ -29,6 +29,13 @@
 
 static const uint64_t U64_SIGN_BIT = 0x8000000000000000LLU;
 
+js220_i128 js220_i128_init_i64(int64_t a) {
+    js220_i128 r;
+    r.i64[0] = a;
+    r.i64[1] = (a >= 0) ? 0 : -1;
+    return r;
+}
+
 #if defined(__clang__) || defined(__GNUC__)
 js220_i128 js220_i128_add(js220_i128 a, js220_i128 b) {
     a.i128 = a.i128 + b.i128;
