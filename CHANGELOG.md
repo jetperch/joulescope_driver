@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.12
+
+2023 May 31
+
+* Reduced libusb backend log level.  Was too active for JS110 statistics.
+
+
 ## 1.3.11
 
 2023 May 24

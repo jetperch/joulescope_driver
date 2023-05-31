@@ -306,7 +306,7 @@ static void bulk_out_send(struct dev_s * d, struct jsdrvp_msg_s * msg) {
 static void on_ctrl_in_done(struct libusb_transfer * transfer) {
     struct transfer_s *t = (struct transfer_s *) transfer->user_data;
     int32_t rc = 0;
-    JSDRV_LOGI("ctrl_in_done(%s) %d", t->device->ll_device.prefix, transfer->status);
+    JSDRV_LOGD3("ctrl_in_done(%s) %d", t->device->ll_device.prefix, transfer->status);
     if (transfer->status) {
         if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
             rc = JSDRV_ERROR_ABORTED;
@@ -324,7 +324,7 @@ static void on_ctrl_in_done(struct libusb_transfer * transfer) {
 static void ctrl_in_start(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     struct transfer_s * t = transfer_alloc(d);
     t->msg = msg;
-    JSDRV_LOGI("ctrl_in_start(%s)", d->ll_device.prefix);
+    JSDRV_LOGD3("ctrl_in_start(%s)", d->ll_device.prefix);
     uint64_t * setup = (uint64_t * ) t->buffer;
     *setup = msg->extra.bkusb_ctrl.setup.u64;
     libusb_fill_control_transfer(t->transfer, d->handle, t->buffer,
@@ -335,7 +335,7 @@ static void ctrl_in_start(struct dev_s * d, struct jsdrvp_msg_s * msg) {
 static void on_ctrl_out_done(struct libusb_transfer * transfer) {
     struct transfer_s *t = (struct transfer_s *) transfer->user_data;
     int32_t rc = 0;
-    JSDRV_LOGI("ctrl_out_done(%s) %d", t->device->ll_device.prefix, transfer->status);
+    JSDRV_LOGD3("ctrl_out_done(%s) %d", t->device->ll_device.prefix, transfer->status);
     if (transfer->status) {
         if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
             rc = JSDRV_ERROR_ABORTED;
@@ -350,7 +350,7 @@ static void on_ctrl_out_done(struct libusb_transfer * transfer) {
 static void ctrl_out_start(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     struct transfer_s * t = transfer_alloc(d);
     t->msg = msg;
-    JSDRV_LOGI("ctrl_out_start(%s) %d bytes", d->ll_device.prefix, (int) msg->value.size);
+    JSDRV_LOGD3("ctrl_out_start(%s) %d bytes", d->ll_device.prefix, (int) msg->value.size);
     uint64_t * setup = (uint64_t * ) t->buffer;
     *setup = msg->extra.bkusb_ctrl.setup.u64;
     libusb_fill_control_transfer(t->transfer, d->handle, t->buffer,
@@ -459,7 +459,7 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     }
 
     if (0 != strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
-        JSDRV_LOGI("device_handle_msg %s", msg->topic);
+        JSDRV_LOGD3("device_handle_msg %s", msg->topic);
     }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
         struct transfer_s * t;
