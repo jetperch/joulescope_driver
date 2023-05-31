@@ -9,6 +9,7 @@ This file contains the list of changes made to the Joulescope driver.
 2023 May 31
 
 * Reduced libusb backend log level.  Was too active for JS110 statistics.
+* Bumped JLS version to 0.7.0.
 
 
 ## 1.3.11
