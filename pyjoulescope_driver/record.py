@@ -205,6 +205,7 @@ class Record:
         self._driver.publish(f'{self._device_path}/{topic}', value, timeout=timeout)
 
     def close(self):
+        """Close the recording and release all resources."""
         try:
             for signal in self._signals.values():
                 if signal['utc'] is not None:

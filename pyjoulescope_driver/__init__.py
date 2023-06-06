@@ -15,12 +15,16 @@
 from .version import *
 from . import time64
 from .record import Record
-import os
-if os.environ.get('pyjoulescope_driver_setup', '0') != '1':
-    from .binding import Driver
+
+try:
+    from .binding import Driver, ElementType, Field, ErrorCode, LogLevel, SubscribeFlags
+except (ModuleNotFoundError, ImportError):
+    print('Could not import cython binding')
+
 
 __all__ = [
     'Driver', 'Record',
+    'ElementType', 'Field', 'ErrorCode', 'LogLevel', 'SubscribeFlags',
     'time64',
     '__version__', '__title__', '__description__', '__url__',
     '__author__', '__author_email__', '__license__',

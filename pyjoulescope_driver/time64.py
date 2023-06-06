@@ -118,6 +118,7 @@ def filename(extension=None, t=None):
 def duration_to_seconds(d):
     """Convert a duration to float seconds.
     :param d: The duration specification, which is one of:
+
         * A string formatted as fz where f is a valid floating-point value
           and z is either omitted, 's', 'm', 'h', 'd'.
         * An integer in seconds.

@@ -44,21 +44,23 @@ _log_c = logging.getLogger(_log_c_name)
 
 
 class ElementType:
-    UNDEFINED = 0
-    INT = 2
-    UINT = 3
-    FLOAT = 4
+    """The element type enumeration."""
+    UNDEFINED = 0       #: Undefined
+    INT = 2             #: signed integer
+    UINT = 3            #: unsigned integer
+    FLOAT = 4           #: floating point
 
 
 class Field:
-    UNDEFINED = 0
-    CURRENT   = 1
-    VOLTAGE   = 2
-    POWER     = 3
-    RANGE     = 4
-    GPI       = 5
-    UART      = 6
-    RAW       = 7
+    """The field enumeration."""
+    UNDEFINED = 0       #: undefined
+    CURRENT   = 1       #: current
+    VOLTAGE   = 2       #: voltage
+    POWER     = 3       #: power
+    RANGE     = 4       #: current or voltage range
+    GPI       = 5       #: general purpose input
+    UART      = 6       #: UART
+    RAW       = 7       #: raw ADC data
 
 
 _element_type_to_prefix = {
@@ -365,6 +367,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
 
 
 class ErrorCode:
+    """The error code enumeration."""
     # automatically maintained by error_code_update.py
     # ENUM_ERROR_CODE_START
     SUCCESS                     = 0
@@ -466,6 +469,7 @@ def error_code_to_str(ec):
 
 
 class LogLevel:
+    """The log level enumeration."""
     OFF         = -1
     EMERGENCY   = 0
     ALERT       = 1
@@ -528,14 +532,15 @@ def log_level_c_to_py(lvl):
 
 
 class SubscribeFlags:
-    NONE = 0                ## No flags (always 0).
-    RETAIN = (1 << 0)       ## Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.
-    PUB = (1 << 1)          ## Do not receive normal topic publish.
-    METADATA_REQ = (1 << 2) ## Subscribe to receive metadata requests like "%", "a/b/%", and "a/b/c%".
-    METADATA_RSP = (1 << 3) ## Subscribe to receive metadata responses like "a/b/c$.
-    QUERY_REQ = (1 << 4)    ## Subscribe to receive query requests like "&", "a/b/&", and "a/b/c&".
-    QUERY_RSP = (1 << 5)    ## Subscribe to receive query responses like "a/b/c?".
-    RETURN_CODE = (1 << 6)  ## Subscribe to receive return code messages like "a/b/c#".
+    """The available subscribe flags."""
+    NONE = 0                #: No flags (always 0).
+    RETAIN = (1 << 0)       #: Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.
+    PUB = (1 << 1)          #: Do not receive normal topic publish.
+    METADATA_REQ = (1 << 2) #: Subscribe to receive metadata requests like "%", "a/b/%", and "a/b/c%".
+    METADATA_RSP = (1 << 3) #: Subscribe to receive metadata responses like "a/b/c$.
+    QUERY_REQ = (1 << 4)    #: Subscribe to receive query requests like "&", "a/b/&", and "a/b/c&".
+    QUERY_RSP = (1 << 5)    #: Subscribe to receive query responses like "a/b/c?".
+    RETURN_CODE = (1 << 6)  #: Subscribe to receive return code messages like "a/b/c#".
 
 
 _SUBSCRIBE_FLAG_LOOKUP = {
@@ -589,6 +594,11 @@ def _handle_rc(rc, src, cause=None):
 
 
 cdef class Driver:
+    """The Joulescope driver class.
+
+    :param timeout: The optional timeout for open.
+        None (default) uses the default timeout.
+    """
     cdef c_jsdrv.jsdrv_context_s * _context
     cdef object _subscribers
 
@@ -614,7 +624,10 @@ cdef class Driver:
 
     @property
     def log_level(self):
-        """Get the current log level."""
+        """The current log level.
+
+        See :class:`LogLevel`.
+        """
         return c_jsdrv.jsdrv_log_level_get()
 
     @log_level.setter
