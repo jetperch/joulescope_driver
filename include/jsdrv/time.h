@@ -431,7 +431,7 @@ JSDRV_API int64_t jsdrv_time_from_counter(struct jsdrv_time_map_s * self, uint64
  * @brief Convert time from JSDRV time to a counter value.
  *
  * @param self The time mapping instance.
- * @param time The JSDRV time i64.
+ * @param time64 The JSDRV time i64.
  * @return The counter value u64.
  */
 JSDRV_API uint64_t jsdrv_time_to_counter(struct jsdrv_time_map_s * self, int64_t time64);

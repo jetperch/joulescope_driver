@@ -3,5 +3,10 @@
 Python API
 ==========
 
-.. automodule:: pyjoulescope_driver.binding.Driver
-    :members:
+.. toctree::
+    :maxdepth: 3
+
+    driver
+    record
+    time64
+

@@ -30,12 +30,6 @@ from setuptools.command.build_py import build_py
 import numpy as np
 import os
 import platform
-os.environ['pyjoulescope_driver_setup'] = '1'
-
-try:
-    from pyjoulescope_driver.release import releases_get_from_network
-except ImportError:
-    releases_get_from_network = None
 
 
 MYPATH = os.path.dirname(os.path.abspath(__file__))
@@ -177,8 +171,11 @@ class BuildPyCommand(build_py):
     """Custom build command."""
 
     def run(self):
-        if callable(releases_get_from_network):
+        try:
+            from pyjoulescope_driver.release import releases_get_from_network
             releases_get_from_network(force_download=True, dist_save=True)
+        except ImportError:
+            pass
         build_py.run(self)
 
 

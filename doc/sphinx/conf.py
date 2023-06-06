@@ -83,9 +83,7 @@ html_favicon = "_static/favicon.ico"
 
 # Breathe Configuration
 breathe_default_project = "jsdrv"
-
-if read_the_docs_build:
-    breathe_projects = {"jsdrv": os.path.join(PROJ_PATH, 'cmake-build', 'doc', 'doxygen', 'xml')}
+breathe_projects = {"jsdrv": os.path.join(PROJ_PATH, 'cmake-build', 'doc', 'doxygen', 'xml')}
 
 
 def setup(app):

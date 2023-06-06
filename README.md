@@ -1,5 +1,5 @@
 <!--
-# Copyright 2014-2022 Jetperch LLC
+# Copyright 2014-2023 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,6 +36,15 @@ with the first-generation python driver including:
    user interfaces and other complicated software packages.
 2. Improved portability for easier language bindings.
 3. Improved performance.
+
+For more information, see:
+
+* [source code](https://github.com/jetperch/joulescope_driver)
+* [documentation](https://joulescope-driver.readthedocs.io/en/latest/)
+* [pypi](https://pypi.org/project/pyjoulescope-driver/)
+* [Joulescope](https://www.joulescope.com/) (Joulescope web store)
+* [jls](https://github.com/jetperch/jls) (Joulescope file format)
+* [forum](https://forum.joulescope.com/)
 
 
 ## Building
@@ -88,12 +97,13 @@ You should then be able to build the native bindings:
 
 On Windows, you may be prompted to install the 
 [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+You may also need to use "python" rather than "python3" on some platforms.
 
-
-And run the Python development tools:
+And run the Python tools:
 
     python3 -m pyjoulescope_driver --help
     python3 -m pyjoulescope_driver scan
-    python3 -m pyjoulescope_driver ui
+    python3 -m pyjoulescope_driver info
+    python3 -m pyjoulescope_driver info * --verbose
 
 You may optionally choose to use a Python virtual environment.

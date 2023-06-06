@@ -60,7 +60,7 @@
  *
  * Changes in the patch version indicate bug fixes and improvements.
  */
-#define JSDRV_VERSION_PATCH 12
+#define JSDRV_VERSION_PATCH 14
 
 /**
  * \brief The maximum version string length.
