@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.15
+
+2023 Jun 8
+
+* Fixed JS220 firmware images omitted by 1.3.14 build process changes.
+* Changed firmware image download to script invoke, not import.
+
+
 ## 1.3.14
 
 2023 Jun 8

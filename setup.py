@@ -26,10 +26,12 @@ https://github.com/pypa/sampleproject
 import setuptools
 from setuptools import Command
 from setuptools.errors import ExecError
-from setuptools.command.build_py import build_py
+from setuptools.command.sdist import sdist
 import numpy as np
 import os
 import platform
+import subprocess
+import sys
 
 
 MYPATH = os.path.dirname(os.path.abspath(__file__))
@@ -167,16 +169,13 @@ with open(os.path.join(MYPATH, 'README.md'), 'r', encoding='utf-8') as f:
     long_description = f.read()
 
 
-class BuildPyCommand(build_py):
-    """Custom build command."""
+class BuildSdistCommand(sdist):
+    """Custom sdist build command."""
 
     def run(self):
-        try:
-            from pyjoulescope_driver.release import releases_get_from_network
-            releases_get_from_network(force_download=True, dist_save=True)
-        except ImportError:
-            pass
-        build_py.run(self)
+        cmd = os.path.join(MYPATH, 'pyjoulescope_driver', 'release.py')
+        subprocess.run([sys.executable, cmd])
+        sdist.run(self)
 
 
 class CustomBuildDocs(Command):
@@ -262,7 +261,7 @@ setuptools.setup(
     ext_modules=extensions,
     cmdclass={
         'docs': CustomBuildDocs,
-        'build_py': BuildPyCommand,
+        'sdist': BuildSdistCommand,
     },
     include_dirs=[],
     include_package_data=True,

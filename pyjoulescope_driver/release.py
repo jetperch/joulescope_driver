@@ -253,3 +253,7 @@ def release_to_available(img: bytes):
         name = value['name'].split('_')[1]
         r[name] = value['version']
     return r
+
+
+if __name__ == '__main__':
+    releases_get_from_network(force_download=True, dist_save=True)
