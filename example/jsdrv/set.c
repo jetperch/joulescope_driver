@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "jsdrv_util_prv.h"
+#include "jsdrv_prv.h"
 #include "jsdrv/topic.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/meta.h"

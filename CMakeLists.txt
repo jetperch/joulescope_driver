@@ -77,6 +77,7 @@ set(JSDRV_INCLUDE
 message(STATUS "INCLUDE: ${JSDRV_INCLUDE}")
 include_directories(${JSDRV_INCLUDE})
 add_subdirectory(src)
+add_subdirectory(example)
 
 if(JSDRV_UNIT_TEST AND JSDRV_TOPLEVEL AND NOT CMAKE_CROSSCOMPILING)
     enable_testing()

@@ -72,24 +72,3 @@ set_target_properties(frontend_test PROPERTIES COMPILE_DEFINITIONS "UNITTEST=1;"
 add_dependencies(frontend_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(frontend_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(frontend_test ${CMAKE_CURRENT_BINARY_DIR}/frontend_test)
-
-SET_FILENAME("jsdrv_util.c")
-add_executable(jsdrv_util
-        jsdrv_util.c
-        jsdrv_util/demo.c
-        jsdrv_util/dev.c
-        jsdrv_util/hotplug.c
-        jsdrv_util/info.c
-        jsdrv_util/mem_erase.c
-        jsdrv_util/mem_read.c
-        jsdrv_util/mem_write.c
-        jsdrv_util/reset.c
-        jsdrv_util/scan.c
-        jsdrv_util/set.c
-        jsdrv_util/statistics.c
-        jsdrv_util/stream_buffer.c
-        jsdrv_util/threads.c
-        jsdrv_util/version.c
-        )
-add_dependencies(jsdrv_util jsdrv)
-target_link_libraries(jsdrv_util jsdrv)

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "jsdrv_util_prv.h"
+#include "jsdrv_prv.h"
 #include "jsdrv_prv/thread.h"
 #include <stdio.h>
 #include <string.h>
