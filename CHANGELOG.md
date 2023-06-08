@@ -6,9 +6,12 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.14
 
-2023 Jun 6
+2023 Jun 8
 
 * Improved documentation.
+* Improved GitHub Actions build process.
+* Moved test/jsdrv_util to example/jsdrv.
+* Bumped minimum python version from 3.8 to 3.9.
 
 
 ## 1.3.12
