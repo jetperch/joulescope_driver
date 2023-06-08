@@ -77,7 +77,7 @@ jobs:
 
       - name: Install Ubuntu dependencies
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt install -y libudev-dev libusb-dev libusb-1.0-0-dev
+        run: sudo apt install -y libudev-dev libusb-1.0-0-dev
 
       - name: Display CMake version
         run: cmake --version
@@ -110,7 +110,7 @@ jobs:
           echo "runner.arch=$RUNNER_ARCH"
 
       - name: Install Ubuntu dependencies
-        run: sudo apt install -y libudev-dev libusb-dev libusb-1.0-0-dev
+        run: sudo apt install -y libudev-dev libusb-1.0-0-dev
 
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -178,6 +178,7 @@ jobs:
           # skip PyPy: Cython only supports CPython
           # skip musllinux: build takes too long with default os images.
           CIBW_SKIP: 'pp* *musllinux*'
+          CIBW_BEFORE_BUILD_LINUX: sudo apt install -y libudev-dev libusb-1.0-0-dev
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest --pyargs pyjoulescope_driver
         with:
