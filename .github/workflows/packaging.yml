@@ -178,7 +178,7 @@ jobs:
           # skip PyPy: Cython only supports CPython
           # skip musllinux: build takes too long with default os images.
           CIBW_SKIP: 'pp* *musllinux*'
-          CIBW_BEFORE_BUILD_LINUX: sudo apt install -y libudev-dev libusb-1.0-0-dev
+          CIBW_BEFORE_BUILD_LINUX: yum install -y libudev-devel libusb1-devel
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest --pyargs pyjoulescope_driver
         with:
