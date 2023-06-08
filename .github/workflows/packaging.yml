@@ -52,17 +52,22 @@ jobs:
           cmake -S . -B cmake_build_dyn -G "Visual Studio 17 2022" -DCMAKE_CONFIGURATION_TYPES=Release -DCMAKE_VERBOSE_MAKEFILE=ON -DBUILD_SHARED_LIBS=ON
           cmake --build cmake_build_dyn --config Release --target jsdrv
 
+      - name: Create artifacts directory
+        shell: bash
+        run: |
+          mkdir artifacts
+          cp cmake_build_static/example/Release/jsdrv.exe artifacts/jsdrv.exe
+
       - name: ZIP dynamic library
         shell: pwsh
-        run: Compress-Archive -Path cmake_build_dyn/src/Release/jsdrv.* -Destination jsdrv_dll.zip
+        run: Compress-Archive -Path cmake_build_dyn/src/Release/jsdrv.* -Destination artifacts/jsdrv_dll.zip
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: windows-latest
-          path: |
-            cmake_build_static/example/Release/jsdrv.exe
-            jsdrv_dll.zip
+          path: artifacts/*
+          if-no-files-found: error
 
   build_native_posix:
     name: Build native on ${{ matrix.os }}
@@ -94,8 +99,8 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}
-          path: |
-            cmake_build_static/example/jsdrv
+          path: cmake_build_static/example/jsdrv
+          if-no-files-found: error
 
   build_python_sdist:
     name: Build python sdist
