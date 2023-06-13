@@ -14,9 +14,7 @@
 # limitations under the License.
 -->
 
-[![Windows amd64](https://github.com/jetperch/joulescope_driver/actions/workflows/windows_amd64.yml/badge.svg)](https://github.com/jetperch/joulescope_driver/actions/workflows/windows_amd64.yml)
-[![macOS amd64](https://github.com/jetperch/joulescope_driver/actions/workflows/macos_amd64.yml/badge.svg)](https://github.com/jetperch/joulescope_driver/actions/workflows/macos_amd64.yml)
-[![Ubuntu Linux amd64](https://github.com/jetperch/joulescope_driver/actions/workflows/linux_amd64.yml/badge.svg)](https://github.com/jetperch/joulescope_driver/actions/workflows/linux_amd64.yml)
+[![packaging](https://github.com/jetperch/joulescope_driver/actions/workflows/packaging.yml/badge.svg)](https://github.com/jetperch/joulescope_driver/actions/workflows/packaging.yml)
 
 
 # Joulescope Driver
