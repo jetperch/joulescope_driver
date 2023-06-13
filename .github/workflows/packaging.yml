@@ -32,35 +32,41 @@ jobs:
   build_native_win:
     name: Build native on windows-latest
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shared: ["OFF", "ON"]
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Display CMake version
-        run: cmake --version
-
-      - name: Build static
+      - name: Build
         run: |
-          cmake -S . -B cmake_build_static -G "Visual Studio 17 2022" -DCMAKE_CONFIGURATION_TYPES=Release -DCMAKE_VERBOSE_MAKEFILE=ON
-          cmake --build cmake_build_static --config Release --target ALL_BUILD
+          cmake --version
+          cmake -S . -B cmake_build \
+            -G "Visual Studio 17 2022" \
+            -DCMAKE_CONFIGURATION_TYPES=Release \
+            -DCMAKE_VERBOSE_MAKEFILE=ON \
+            -DBUILD_SHARED_LIBS=${{matrix.shared}}
+          cmake --build cmake_build --config Release --target ALL_BUILD
 
       - name: Run tests
-        run: cmake --build cmake_build_static --config Release --target RUN_TESTS
-
-      - name: Build dynamic
-        run: |
-          cmake -S . -B cmake_build_dyn -G "Visual Studio 17 2022" -DCMAKE_CONFIGURATION_TYPES=Release -DCMAKE_VERBOSE_MAKEFILE=ON -DBUILD_SHARED_LIBS=ON
-          cmake --build cmake_build_dyn --config Release --target jsdrv
+        if: matrix.shared == 'OFF'
+        run: cmake --build cmake_build --config Release --target RUN_TESTS
 
       - name: Create artifacts directory
         shell: bash
-        run: |
-          mkdir artifacts
-          cp cmake_build_static/example/Release/jsdrv.exe artifacts/jsdrv.exe
+        run: mkdir artifacts
 
-      - name: ZIP dynamic library
+      - name: Save static
+        if: matrix.shared == 'OFF'
+        shell: bash
+        run: cp cmake_build/example/Release/jsdrv.exe artifacts/jsdrv.exe
+
+      - name: Save dynamic
+        if: matrix.shared == 'ON'
         shell: pwsh
-        run: Compress-Archive -Path cmake_build_dyn/src/Release/jsdrv.* -Destination artifacts/jsdrv_dll.zip
+        run: Compress-Archive -Path cmake_build/src/Release/jsdrv.* -Destination artifacts/jsdrv_dll.zip
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
@@ -174,7 +180,7 @@ jobs:
       contents: write
 
     steps:
-      - name: Download python sdist artifact
+      - name: Download python packages artifacts
         uses: actions/download-artifact@v3
         with:
           name: python_packages
