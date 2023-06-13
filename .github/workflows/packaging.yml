@@ -212,9 +212,6 @@ jobs:
         python_version: ["3.9", "3.10", "3.11"]
 
     steps:
-      - name: Install Ubuntu dependencies
-        run: sudo apt install -y libudev-dev
-
       - name: Checkout repo
         uses: actions/checkout@v3
 
