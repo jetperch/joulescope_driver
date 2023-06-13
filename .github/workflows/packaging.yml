@@ -35,7 +35,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shared: ["OFF", "ON"]
+        - {shared: OFF, target: ALL_BUILD}
+        - {shared: ON, target: jsdrv}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -44,7 +45,7 @@ jobs:
         run: |
           cmake --version
           cmake -S . -B cmake_build -G "Visual Studio 17 2022" -DCMAKE_CONFIGURATION_TYPES=Release -DCMAKE_VERBOSE_MAKEFILE=ON -DBUILD_SHARED_LIBS=${{matrix.shared}}
-          cmake --build cmake_build --config Release --target ALL_BUILD
+          cmake --build cmake_build --config Release --target ${{matrix.target}}
 
       - name: Run tests
         if: matrix.shared == 'OFF'
