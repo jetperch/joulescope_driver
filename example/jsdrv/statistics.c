@@ -122,7 +122,7 @@ int on_statistics(struct app_s * self, int argc, char * argv[]) {
            "p_avg,p_std,p_min,p_max,"
            "charge,energy\n");
 
-    while (1) {
+    while (!quit_) {
         jsdrv_thread_sleep_ms(1); // do nothing
     }
 

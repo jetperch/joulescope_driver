@@ -64,7 +64,7 @@ int on_hotplug(struct app_s * self, int argc, char * argv[]) {
     ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_REMOVE, JSDRV_SFLAG_PUB,
                         on_remove, self, JSDRV_TIMEOUT_MS_DEFAULT));
 
-    while (1) {
+    while (!quit_) {
         jsdrv_thread_sleep_ms(10);
     }
 
