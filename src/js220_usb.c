@@ -1128,8 +1128,9 @@ static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t si
     struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
     m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
     m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
-    struct js220_statistics_raw_s * src = (struct js220_statistics_raw_s *) p_u32;
-    if (0 == js220_stats_convert(src, dst)) {
+    struct js220_statistics_raw_s src;
+    memcpy(&src, p_u32, sizeof(src));
+    if (0 == js220_stats_convert(&src, dst)) {
         time_map_update(d,
                         dst->block_sample_id + dst->block_sample_count * dst->decimate_factor,
                         (double) dst->sample_freq);
