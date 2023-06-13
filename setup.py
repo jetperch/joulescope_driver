@@ -284,9 +284,9 @@ setuptools.setup(
     },
 
     project_urls={
-        'Bug Reports': 'https://github.com/jetperch/jls/issues',
+        'Bug Reports': 'https://github.com/jetperch/pyjoulescope_driver/issues',
         'Funding': 'https://www.joulescope.com',
         'Twitter': 'https://twitter.com/joulescope',
-        'Source': 'https://github.com/jetperch/jls/',
+        'Source': 'https://github.com/jetperch/pyjoulescope_driver/',
     },
 )
