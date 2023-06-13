@@ -35,8 +35,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        - {shared: OFF, target: ALL_BUILD}
-        - {shared: ON, target: jsdrv}
+        include:
+          - {shared: OFF, target: ALL_BUILD}
+          - {shared: ON, target: jsdrv}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
