@@ -82,7 +82,7 @@ jobs:
 
       - name: Install Ubuntu dependencies
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt install -y libudev-dev libusb-1.0-0-dev
+        run: sudo apt install -y libudev-dev
 
       - name: Display CMake version
         run: cmake --version
@@ -115,7 +115,7 @@ jobs:
           echo "runner.arch=$RUNNER_ARCH"
 
       - name: Install Ubuntu dependencies
-        run: sudo apt install -y libudev-dev libusb-1.0-0-dev
+        run: sudo apt install -y libudev-dev
 
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -196,12 +196,65 @@ jobs:
           path: wheelhouse/*.whl
           if-no-files-found: error
 
+  build_python_wheels_macos:
+    # As of 2023-06-13, cibuildwheel segfaults in statistics processing on x86_64
+    # CIBW_SKIP="cp39* cp310* pp*" CIBW_ARCHS="x86_64" CIBW_BUILD_VERBOSITY=3 CIBW_REPAIR_WHEEL_COMMAND="" python3 -m cibuildwheel --platform macos > cibuildwheel.txt 2>&1
+    # Could not find the cause of the cibuildwheel segfault which happens in relatively innocuous code
+    # Instead, use "build" for macOS
+    name: Build on macOS
+    needs:
+      - build_native_posix
+      - build_python_sdist
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.9", "3.10", "3.11"]
+
+    steps:
+      - name: Install Ubuntu dependencies
+        run: sudo apt install -y libudev-dev
+
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Display version
+        run: python -VV
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build wheel pytest
+
+      - name: Build wheeels
+        run: python -m build
+
+      - name: Install the wheel
+        run: python -m pip install -f dist pyjoulescope_driver
+
+      - name: Run python unit tests
+        run: pytest
+        working-directory: pyjoulescope_driver/test
+
+      - name: Upload python wheel
+        uses: actions/upload-artifact@v3
+        with:
+          name: python_wheel_macos
+          path: dist/*.whl
+          if-no-files-found: error
+
   publish_python:
     name: Publish python packages to PyPi
     if: github.event_name == 'push' && startswith(github.ref, 'refs/tags/v')
     needs:
       - build_python_sdist
       - build_python_wheels
+      - build_python_wheels_macos
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -218,6 +271,12 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: python_wheels
+          path: dist/
+
+      - name: Download macOS python wheel artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: python_wheels_macos
           path: dist/
 
       - name: Download windows binary artifacts

@@ -1124,6 +1124,7 @@ static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t si
     }
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
     tfp_snprintf(m->topic, sizeof(m->topic), "%s/s/stats/value", d->ll.prefix);
+    JSDRV_ASSERT(sizeof(m->payload.bin) >= sizeof(struct jsdrv_statistics_s));
     struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
     m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
     m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
