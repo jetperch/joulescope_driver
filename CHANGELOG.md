@@ -12,6 +12,7 @@ This file contains the list of changes made to the Joulescope driver.
 * Fixed JS220 statistics for macOS.  1.3.15 was segfaulting on unaligned accesses.
 * Added args parameter to pyjoulescope_driver.__main__.run().
 * Added quit_ handling to jsdrv.exe examples.
+* Bumped pyjls version check from 0.7.0 to 0.7.2.
 
 
 ## 1.3.15
