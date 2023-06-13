@@ -73,9 +73,15 @@ def get_parser():
     return parser
 
 
-def run():
+def run(args=None):
+    """Run a command.
+
+    :param args: A list of string arguments or None (default) to use sys.argv.
+    :return: The command return code.
+    :raise: On any exception.
+    """
     parser = get_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(args=args)
     if args.log_level is not None:
         log_level = args.log_level
     else:
@@ -83,8 +89,6 @@ def run():
     log_level = _LOG_LEVELS.get(log_level.upper(), logging.WARNING)
     logging.basicConfig(level=log_level,
                         format="%(levelname)s:%(asctime)s:%(filename)s:%(lineno)d:%(name)s:%(message)s")
-    parser = get_parser()
-    args = parser.parse_args()
     if args.subparser_name is None or args.subparser_name.lower() in ['help']:
         parser.print_help()
         parser.exit()
