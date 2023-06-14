@@ -136,7 +136,7 @@ jobs:
           python -m pip install --upgrade wheel setuptools build
 
       - name: Build sdist
-        run: python -m build --no-isolation --sdist
+        run: python -m build --sdist
 
       - name: Upload python source package
         uses: actions/upload-artifact@v3
