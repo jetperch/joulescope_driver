@@ -45,6 +45,28 @@ For more information, see:
 * [forum](https://forum.joulescope.com/)
 
 
+## Python Installation
+
+The python bindings work with Python 3.9 and later.
+To use the python bindings, ensure that you have a compatible version
+of python installed on your host computer.  Then:
+
+    python -m pip install pyjoulescope_driver
+
+For Ubuntu, you will also need to [install the udev rules](#ubuntu-2204-lts).
+
+You can then run the pyjoulescope_driver python entry points:
+
+    python -m pyjoulescope_driver --help
+    python -m pyjoulescope_driver scan
+    python -m pyjoulescope_driver info
+    python -m pyjoulescope_driver info * --verbose
+
+Note that you may need to change "python" to "python3" or the full path.  
+You can also use a python
+[virtual environment](https://docs.python.org/3/tutorial/venv.html).
+
+
 ## Building
 
 Ensure that your computer has a development environment including CMake.  
@@ -66,7 +88,14 @@ For macOS, install homebrew, then:
 
 For Ubuntu:
 
-    sudo apt install cmake build-essential ninja-build
+    sudo apt install cmake build-essential ninja-build libudev-dev
+
+You will also need to install the udev rules:
+
+    $ wget https://raw.githubusercontent.com/jetperch/joulescope_driver/main/99-joulescope.rules
+    $ sudo cp 99-joulescope.rules /etc/udev/rules.d/
+    $ sudo udevadm control --reload-rules
+
 
 ### Common
 
@@ -75,33 +104,30 @@ For Ubuntu:
     cmake ..
     cmake --build . && ctest .
 
-This package includes a command-line tool, jsdrv_util:
+This package includes a command-line tool, jsdrv:
 
-    jsdrv_util --help
-    jsdrv_util scan
+    jsdrv --help
+    jsdrv scan
 
 
-## Python bindings
+### Build python bindings
 
-The python bindings are made to work with Python 3.9 and later.  To install
-the dependencies:
+Install a compatible version of Python 3.9 or later.  To install
+the pyjoulescope_driver dependencies:
 
     cd {your/repos/joulescope_driver}
-    pip3 install -U requirements.txt
+    python -m pip install -U requirements.txt
 
 You should then be able to build the native bindings:
 
-    python3 setup.py build_ext --inplace
+    python setup.py build_ext --inplace
+
+You can build the package using isolation:
+
+    python -m build
+
+Depending upon your system configuration, you may need to replace
+"python" with "python3" or the full path to your desired python installation.
 
 On Windows, you may be prompted to install the 
 [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
-You may also need to use "python" rather than "python3" on some platforms.
-
-And run the Python tools:
-
-    python3 -m pyjoulescope_driver --help
-    python3 -m pyjoulescope_driver scan
-    python3 -m pyjoulescope_driver info
-    python3 -m pyjoulescope_driver info * --verbose
-
-You may optionally choose to use a Python virtual environment.

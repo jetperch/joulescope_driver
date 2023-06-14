@@ -6,7 +6,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.16
 
-2023 Jun 13
+2023 Jun 14
 
 * Parallelized GitHub Actions build.  Removed cibuildwheel.
 * Fixed JS220 statistics for macOS.  1.3.15 was segfaulting on unaligned accesses.
