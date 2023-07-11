@@ -217,6 +217,7 @@ struct dev_s {
     struct jsdrv_context_s * context;
     uint16_t out_frame_id;
     uint16_t in_frame_id;
+    uint64_t in_frame_count;
     uint32_t stream_in_port_enable;
 
     struct port_s ports[PORTS_LENGTH]; // one for each port
@@ -646,9 +647,16 @@ static int32_t d_close(struct dev_s * d) {
 }
 
 static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool enable) {
+    bool was_enabled;
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
         if (PORT_MAP[i].ctrl_topic && (0 == strcmp(PORT_MAP[i].ctrl_topic, topic))) {
             uint32_t mask = (0x00010000 << i);
+            was_enabled = (0 != (d->stream_in_port_enable & mask));
+            if (enable == was_enabled) {
+                JSDRV_LOGD1("stream_in_port_enable duplicate port %s %s",
+                            topic, (enable ? "on" : "off"));
+                return true;
+            }
             struct port_s * p = &d->ports[i];
             if (NULL != p->msg_in) {
                 jsdrvp_msg_free(d->context, p->msg_in);
@@ -663,7 +671,8 @@ static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
             } else {
                 d->stream_in_port_enable &= ~mask;
             }
-            JSDRV_LOGD1("stream_in_port_enable port %s => 0x%08lx", topic, d->stream_in_port_enable);
+            JSDRV_LOGD1("stream_in_port_enable port %s %s => 0x%08lx",
+                        topic, (enable ? "on" : "off"), d->stream_in_port_enable);
             if (PORT_MAP[i].field_id == JSDRV_FIELD_CURRENT) {
                 sbuf_f32_clear(&d->i_buf);
             } else if (PORT_MAP[i].field_id == JSDRV_FIELD_VOLTAGE) {
@@ -682,7 +691,7 @@ static bool handle_cmd_ctrl(struct dev_s * d, const char * topic, const struct j
     bool v = false;
     if (jsdrv_cstr_ends_with(topic, "/ctrl")) {
         jsdrv_union_to_bool(value, &v);
-        if (stream_in_port_enable(d, topic, value)) {
+        if (stream_in_port_enable(d, topic, v)) {
             bulk_out_publish(d, topic, value);
         } else {
             struct jsdrv_topic_s t;
@@ -1414,8 +1423,10 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
     union js220_frame_hdr_u hdr;
     hdr.u32 = p_u32[0];
     if (d->in_frame_id != (uint16_t) hdr.h.frame_id) {
-        JSDRV_LOGW("in frame_id mismatch %d != %d", (int) d->in_frame_id, (int) hdr.h.frame_id);
-        // todo keep statistics
+        if (0 != d->in_frame_count) {
+            JSDRV_LOGW("in frame_id mismatch %d != %d", (int) d->in_frame_id, (int) hdr.h.frame_id);
+            // todo keep statistics
+        }
         d->in_frame_id = hdr.h.frame_id;
     }
     if ((d->stream_in_port_enable & (1U << hdr.h.port_id)) == 0U) {
@@ -1446,6 +1457,7 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         }
     }
     ++d->in_frame_id;
+    ++d->in_frame_count;
 }
 
 static void handle_stream_in(struct dev_s * d, struct jsdrvp_msg_s * msg) {

@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.17
+
+2023 Jul 11
+
+* Fixed "in frame_id mismatch" warning log message on first frame.
+* Fixed JS220 signal "s/X/ctrl" 0 not correctly closing signal.
+* Added Record "auto" parameter to optionally bypass automatic signal enable/disable.
+
+
 ## 1.3.16
 
 2023 Jun 14

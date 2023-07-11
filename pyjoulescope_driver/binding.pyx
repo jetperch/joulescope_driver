@@ -887,9 +887,9 @@ cdef void _on_cmd_publish_cbk(void * user_data, const char * topic, const c_jsdr
 
 cdef void _on_log_recv(void * user_data, const c_jsdrv.jsdrv_log_header_s * header,
                        const char * filename, const char * message) with gil:
-    fname = filename.decode('utf-8')
-    msg = message.decode('utf-8')
     lvl = _log_level_c_to_py[header[0].level]
     if _log_c.isEnabledFor(lvl):
+        fname = filename.decode('utf-8')
+        msg = message.decode('utf-8')
         record = _log_c.makeRecord(_log_c_name, lvl, fname, header[0].line, msg, [], None)
         _log_c.handle(record)

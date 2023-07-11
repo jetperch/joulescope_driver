@@ -127,11 +127,16 @@ class Record:
     :param driver: The active driver instance.
     :param device_path: The device prefix path.
     :param signals: The list of signals to record.  None=['current', 'voltage']
+    :param auto: Configure automatic operation.
+        Provide the list of automatic operations to perform, which can be:
+        * signal_enable
+        * signal_disable
+        None (default) is equivalent to ['signal_enable', 'signal_disable']
 
     Call :meth:`open` to start recording and :meth:`close` to stop.
     """
 
-    def __init__(self, driver, device_path, signals=None):
+    def __init__(self, driver, device_path, signals=None, auto=None):
         if Writer is None:
             raise RuntimeError('pyjls package not found.  Install using:\n' +
                                '  pip3 install -U pyjls')
@@ -153,6 +158,11 @@ class Record:
             signals = [s.strip() for s in signals.split(',')]
         m = _signal_name_map()
         signals = [m[s] for s in signals]
+        if auto is None:
+            auto = ['signal_enable', 'signal_disable']
+        if isinstance(auto, str):
+            auto = [auto]
+        self._auto = auto
 
         signal_id = 0
         self._signals = {}
@@ -195,9 +205,10 @@ class Record:
             self._data_map[data_topic] = signal
             self._driver.subscribe(data_topic, ['pub'], self._on_data_fn)
 
-        for signal in self._signals.values():
-            ctrl_topic = signal['ctrl_topic']
-            self._publish(ctrl_topic, 1, timeout=0)
+        if 'signal_enable' in self._auto:
+            for signal in self._signals.values():
+                ctrl_topic = signal['ctrl_topic']
+                self._publish(ctrl_topic, 1, timeout=0)
 
         return self
 
@@ -208,29 +219,31 @@ class Record:
         """Close the recording and release all resources."""
         try:
             for signal in self._signals.values():
+                self._driver.unsubscribe(signal['data_topic_abs'], self._on_data_fn)
+            for signal in self._signals.values():
                 if signal['utc'] is not None:
                     self._wr.utc(signal['signal_id'], *signal['utc'])
-                ctrl_topic = signal['ctrl_topic']
-                try:
-                    self._publish(ctrl_topic, 0, timeout=0.25)
-                except TimeoutError:
-                    self._log.warning('Timed out in publish: %s <= 0', ctrl_topic)
-                except Exception:
-                    self._log.exception('Exception in publish: %s <= 0', ctrl_topic)
-            for signal in self._signals.values():
-                self._driver.unsubscribe(signal['data_topic_abs'], self._on_data_fn)
+                if 'signal_disable' in self._auto:
+                    ctrl_topic = signal['ctrl_topic']
+                    try:
+                        self._publish(ctrl_topic, 0, timeout=0.25)
+                    except TimeoutError:
+                        self._log.warning('Timed out in publish: %s <= 0', ctrl_topic)
+                    except Exception:
+                        self._log.exception('Exception in publish: %s <= 0', ctrl_topic)
         finally:
             self._wr.close()
             self._wr = None
 
     def _on_data(self, topic, value):
+        if self._wr is None:
+            return
         signal = self._data_map[topic]
         decimate_factor = value['decimate_factor']
         signal_id = signal['signal_id']
         sample_id = value['sample_id']
         sample_id = sample_id // decimate_factor
         if signal['utc_next'] is None:
-            signal['sample_id_next'] = 0
             self._wr.signal_def(
                 signal_id=signal['signal_id'],
                 source_id=1,
@@ -254,4 +267,3 @@ class Record:
         if len(x):
             x = np.ascontiguousarray(x)
             self._wr.fsr_f32(signal_id, sample_id, x)
-        signal['sample_id_next'] += len(x)
