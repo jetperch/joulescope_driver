@@ -200,9 +200,9 @@ static void summarizeN(struct bufsig_s * self, uint8_t level, uint64_t start_idx
     struct jsdrv_summary_entry_s * src;
     struct jsdrv_summary_entry_s * dst;
     struct jsdrv_statistics_accum_s s_accum;
-    jsdrv_statistics_reset(&s_accum);
     struct jsdrv_statistics_accum_s s_tmp;
     while (length >= lvl_up->samples_per_entry) {
+        jsdrv_statistics_reset(&s_accum);
         for (uint64_t i = 0; i < lvl_up->r; ++i) {
             src = level_entry(self, level, lvl_dn_idx + i);
             jsdrv_statistics_from_entry(&s_tmp, src, 1);  // unweighted, all entries equal

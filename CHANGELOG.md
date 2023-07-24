@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.3.18
+
+2023 Jul 24
+
+* Fixed buffer_signal summaryN incorrect when computing multiple values
+  in a single call.
+
+
 ## 1.3.17
 
 2023 Jul 11

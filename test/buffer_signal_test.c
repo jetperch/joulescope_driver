@@ -109,6 +109,27 @@ static void check_samples(struct jsdrv_buffer_response_s * rsp, uint64_t sample_
     assert_int_equal(rsp->info.time_range_samples.length, rsp->info.time_range_utc.length);
 }
 
+static void insert_const_samples(struct bufsig_s * b, uint64_t sample_id_start, uint32_t length, float value) {
+    struct jsdrv_stream_signal_s s;
+    memset(&s, 0, sizeof(s));
+    s.sample_id = sample_id_start;
+    s.field_id = JSDRV_FIELD_CURRENT;
+    s.index = 7;
+    s.element_type = JSDRV_DATA_TYPE_FLOAT;
+    s.element_size_bits = 32;
+    s.element_count = length;
+    s.sample_rate = 1000000;
+    s.decimate_factor = 1;
+    s.time_map.offset_time = JSDRV_TIME_HOUR;
+    s.time_map.counter_rate = s.sample_rate;
+    s.time_map.offset_counter = 0;
+    float * f32 = (float *) s.data;
+    for (uint32_t i = 0; i < s.element_count; ++i) {
+        f32[i] = value;
+    }
+    jsdrv_bufsig_recv_data(b, &s);
+}
+
 static void test_samples_start_length(void **state) {
     initialize();
     insert_samples(&b, 1000, 1000);
@@ -213,6 +234,26 @@ static void test_summary_simple(void **state) {
     jsdrv_bufsig_free(&b);
 }
 
+static void test_summary_level1(void **state) {
+    initialize();
+    insert_const_samples(&b, 0, 99, 1.0f);
+    insert_const_samples(&b, 99, 101, 0.0f);
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = 100;
+    req.time.samples.end = 200;
+    req.time.samples.length = 1;
+    uint64_t rsp_u64[1 << 12];
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
+    jsdrv_bufsig_process_request(&b, &req, rsp);
+    assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
+    struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
+    assert_float_equal(0.0, entries[0].avg, 1e-9);
+    jsdrv_bufsig_free(&b);
+}
+
 static void test_summary_nan_on_out_of_range(void **state) {
     initialize();
     insert_samples(&b, 1000, 1000);
@@ -283,6 +324,7 @@ int main(void) {
             cmocka_unit_test(test_samples_all),
             cmocka_unit_test(test_samples_wrap),
             cmocka_unit_test(test_summary_simple),
+            cmocka_unit_test(test_summary_level1),
             cmocka_unit_test(test_summary_nan_on_out_of_range),
             cmocka_unit_test(test_summary_wrap),
     };
