@@ -231,8 +231,8 @@ cdef extern from "jsdrv/log.h":
         uint64_t timestamp
 
     ctypedef void (*jsdrv_log_recv)(void * user_data, const jsdrv_log_header_s * header,
-                                    const char * filename, const char * message) nogil
-    void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, const char * format, ...) nogil
+                                    const char * filename, const char * message) noexcept nogil
+    void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, const char * format, ...) noexcept nogil
     int32_t jsdrv_log_register(jsdrv_log_recv fn, void * user_data) nogil
     int32_t jsdrv_log_unregister(jsdrv_log_recv fn, void * user_data) nogil
     void jsdrv_log_level_set(int8_t level) nogil

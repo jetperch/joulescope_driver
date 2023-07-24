@@ -10,6 +10,8 @@ This file contains the list of changes made to the Joulescope driver.
 
 * Fixed buffer_signal summaryN incorrect when computing multiple values
   in a single call.
+* Added "noexcept" to python callbacks. 
+  Cython 3.0 deprecates implicit noexcept.
 
 
 ## 1.3.17

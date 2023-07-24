@@ -877,7 +877,8 @@ cdef class Driver:
         _handle_rc(rc, 'jsdrv_close', device_prefix)
 
 
-cdef void _on_cmd_publish_cbk(void * user_data, const char * topic, const c_jsdrv.jsdrv_union_s * value) with gil:
+cdef void _on_cmd_publish_cbk(void * user_data, const char * topic,
+                              const c_jsdrv.jsdrv_union_s * value) noexcept with gil:
     cdef object fn = <object> user_data
     topic_str = topic.decode('utf-8')
     v = _jsdrv_union_to_py(value)
@@ -886,7 +887,7 @@ cdef void _on_cmd_publish_cbk(void * user_data, const char * topic, const c_jsdr
 
 
 cdef void _on_log_recv(void * user_data, const c_jsdrv.jsdrv_log_header_s * header,
-                       const char * filename, const char * message) with gil:
+                       const char * filename, const char * message) noexcept with gil:
     lvl = _log_level_c_to_py[header[0].level]
     if _log_c.isEnabledFor(lvl):
         fname = filename.decode('utf-8')
