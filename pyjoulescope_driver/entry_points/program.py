@@ -19,7 +19,7 @@ import sys
 
 
 def parser_config(p):
-    """Joulescope info."""
+    """Program the Joulescope JS220 firmware and gateware."""
     p.add_argument('--maturity', '-m',
                    default='stable',
                    help='Maturity target to program which is one of alpha, beta, stable.')

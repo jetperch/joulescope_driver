@@ -86,7 +86,9 @@ jobs:
 
       - name: Install Ubuntu dependencies
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt install -y libudev-dev
+        run: |
+          sudo apt update
+          sudo apt install -y libudev-dev
 
       - name: Display CMake version
         run: cmake --version
@@ -119,7 +121,9 @@ jobs:
           echo "runner.arch=$RUNNER_ARCH"
 
       - name: Install Ubuntu dependencies
-        run: sudo apt install -y libudev-dev
+        run: |
+          sudo apt update
+          sudo apt install -y libudev-dev
 
       - name: Checkout repo
         uses: actions/checkout@v3

@@ -3,6 +3,12 @@
 
 This file contains the list of changes made to the Joulescope driver.
 
+## 1.3.19
+
+2023 Oct 5 [in progress]
+
+* Fixed help text for "program" entry point.
+
 
 ## 1.3.18
 
