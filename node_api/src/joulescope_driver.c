@@ -44,6 +44,24 @@ static napi_value finalize(napi_env env, napi_callback_info info) {
 }
 
 
+#if 0
+JSDRV_API int32_t jsdrv_publish(struct jsdrv_context_s * context,
+        const char * topic, const struct jsdrv_union_s * value,
+        uint32_t timeout_ms);
+JSDRV_API int32_t jsdrv_query(struct jsdrv_context_s * context,
+                              const char * topic, struct jsdrv_union_s * value,
+                              uint32_t timeout_ms);
+JSDRV_API int32_t jsdrv_subscribe(struct jsdrv_context_s * context, const char * topic, uint8_t flags,
+        jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,
+        uint32_t timeout_ms);
+JSDRV_API int32_t jsdrv_unsubscribe(struct jsdrv_context_s * context, const char * topic,
+        jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,
+        uint32_t timeout_ms);
+JSDRV_API int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
+                                        jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,
+                                        uint32_t timeout_ms);
+#endif
+
 
 #define DECLARE_NAPI_METHOD(name, func)                                        \
   { name, 0, func, 0, 0, 0, napi_default, 0 }
@@ -52,8 +70,9 @@ static napi_value Init(napi_env env, napi_value exports) {
     napi_status status;
     napi_property_descriptor desc[] = {
             DECLARE_NAPI_METHOD("initialize", initialize),
+            DECLARE_NAPI_METHOD("finalize", finalize)
     };
-    status = napi_define_properties(env, exports, sizeof(desc) / sizeof(*desc), desc);
+    status = napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     assert(status == napi_ok);
     return exports;
 }

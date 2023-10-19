@@ -21,7 +21,13 @@
 
 Install node.js and npm.  See [instructions](https://nodejs.github.io/node-addon-examples/getting-started/tools).
 
+```
+npm install
+npm test
+```
 
-https://nodejs.github.io/node-addon-examples/
-https://github.com/nodejs/node-addon-examples
-https://nodejs.org/api/n-api.html
+## References
+
+* https://nodejs.github.io/node-addon-examples/
+* https://github.com/nodejs/node-addon-examples
+* https://nodejs.org/api/n-api.html
