@@ -5,9 +5,12 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.3.19
 
-2023 Oct 5 [in progress]
+2023 Oct 25
 
 * Fixed help text for "program" entry point.
+* Build for Python 3.12.
+* Upgraded to FW & FPGA 1.1.0 stable releases.
+* Upgraded record entry point to pyjls 0.8.2 to 1.0.0.
 
 
 ## 1.3.18
