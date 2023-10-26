@@ -3,6 +3,13 @@
 
 This file contains the list of changes made to the Joulescope driver.
 
+## 1.3.20
+
+2023 Oct 26
+
+* Updated to FPGA 1.1.0 for beta release (was mistakenly left at 1.0.4).
+
+
 ## 1.3.19
 
 2023 Oct 25
