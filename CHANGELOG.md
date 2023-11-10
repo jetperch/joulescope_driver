@@ -3,6 +3,15 @@
 
 This file contains the list of changes made to the Joulescope driver.
 
+
+## 1.3.21
+
+2023 Nov 10
+
+* Updated to FW 1.1.1.
+* Added measure entry point to pyjoulescope_driver.
+
+
 ## 1.3.20
 
 2023 Oct 26

@@ -548,7 +548,7 @@ static int32_t wait_for_connect(struct dev_s * d) {
 }
 
 static int32_t d_open_ll(struct dev_s * d, int32_t opt) {
-    JSDRV_LOGI("open_ll");
+    JSDRV_LOGI("open_ll(opt=%d)", opt);
     int32_t rc;
     d->ll_await_break_on = BREAK_NONE;
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(opt & 1));
@@ -573,7 +573,7 @@ static int32_t d_open_ll(struct dev_s * d, int32_t opt) {
 }
 
 static int32_t d_open(struct dev_s * d, int32_t opt) {
-    JSDRV_LOGI("open");
+    JSDRV_LOGI("open(opt=%d)", opt);
     int32_t rc;
     rc = d_ctrl_req(d, JS220_CTRL_OP_DISCONNECT);
     if (rc) {

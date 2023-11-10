@@ -119,7 +119,7 @@ class Programmer:
         path = self._path_app if subtype == SUBTYPE_CTRL_APP else self._path_updater
         self._device_await(path)
         self._running_subtype = subtype
-        self._driver.open(self._path)
+        self._driver.open(self._path, mode='restore')
 
     def segment_program(self, segment, progress, progress_msg, p1, p2):
         subtype = segment['subtype']
