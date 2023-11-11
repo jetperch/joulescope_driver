@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.0
+
+2023 Nov 11
+
+* Added jsdrv_calibration_hash and pyjoulescope_driver.calibration_hash.
+
+
 ## 1.3.21
 
 2023 Nov 10

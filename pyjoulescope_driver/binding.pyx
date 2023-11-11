@@ -37,7 +37,7 @@ cimport numpy as np
 from . cimport c_jsdrv
 
 
-__all__ = ['Driver']
+__all__ = ['Driver', 'calibration_hash']
 np.import_array()                           # initialize numpy before use
 _log_c_name = 'jsdrv'
 _log_c = logging.getLogger(_log_c_name)
@@ -894,3 +894,20 @@ cdef void _on_log_recv(void * user_data, const c_jsdrv.jsdrv_log_header_s * head
         msg = message.decode('utf-8')
         record = _log_c.makeRecord(_log_c_name, lvl, fname, header[0].line, msg, [], None)
         _log_c.handle(record)
+
+
+def calibration_hash(msg):
+    cdef const uint32_t[:] msg_u32
+    cdef uint32_t[:] hash_u32
+
+    if (len(msg) % 32) != 0:
+        raise ValueError('msg length must be multiple of 32 bytes')
+
+    msg_np = np.empty(len(msg) // 4, dtype=np.uint32)
+    msg_np.view(dtype=np.uint8)[:] = msg
+    msg_u32 = msg_np
+
+    hash = np.zeros(16, dtype=np.uint32)
+    hash_u32 = hash
+    c_jsdrv.jsdrv_calibration_hash(&msg_u32[0], len(msg), &hash_u32[0])
+    return hash

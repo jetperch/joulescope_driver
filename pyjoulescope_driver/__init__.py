@@ -17,7 +17,7 @@ from . import time64
 from .record import Record
 
 try:
-    from .binding import Driver, ElementType, Field, ErrorCode, LogLevel, SubscribeFlags
+    from .binding import Driver, ElementType, Field, ErrorCode, LogLevel, SubscribeFlags, calibration_hash
 except (ModuleNotFoundError, ImportError):
     print('Could not import cython binding')
 
@@ -25,6 +25,7 @@ except (ModuleNotFoundError, ImportError):
 __all__ = [
     'Driver', 'Record',
     'ElementType', 'Field', 'ErrorCode', 'LogLevel', 'SubscribeFlags',
+    'calibration_hash',
     'time64',
     '__version__', '__title__', '__description__', '__url__',
     '__author__', '__author_email__', '__license__',

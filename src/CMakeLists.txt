@@ -45,6 +45,7 @@ endif()
 set(SUPPORT_SOURCES
         buffer_signal.c
         error_code.c
+        calibration_hash.c
         cstr.c
         devices.c
         downsample.c
