@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.1
+
+2023 Nov 16 [in progress]
+
+* Fixed JS220 h/fs restore.
+
+
 ## 1.4.0
 
 2023 Nov 11

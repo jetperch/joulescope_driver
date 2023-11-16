@@ -420,10 +420,51 @@ static void device_removed_responder(struct jsdrv_context_s * c, const char * pr
 }
 
 static uint8_t device_subscriber(void * user_data, struct jsdrvp_msg_s * msg) {
+    JSDRV_LOGD2("device_subscriber %s", msg->topic);
     struct frontend_dev_s * d = (struct frontend_dev_s *) user_data;
     struct jsdrvp_msg_s * m = jsdrvp_msg_clone(d->context, msg);
     msg_queue_push(d->device->cmd_q, m);
     return 0;
+}
+
+void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_topic,
+                             const char * topic, uint8_t flags) {
+    struct frontend_dev_s * dev = device_lookup(context, dev_topic);
+    if (NULL == dev) {
+        JSDRV_LOGE("jsdrvp_ul_device_subscribe but device not found: %s", dev_topic);
+    }
+    JSDRV_LOGD1("jsdrvp_device_subscribe %s : %s", dev_topic, topic);
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(context);
+    jsdrv_cstr_copy(m->topic, JSDRV_PUBSUB_SUBSCRIBE, sizeof(m->topic));
+    m->value.type = JSDRV_UNION_BIN;
+    m->value.value.bin = m->payload.bin;
+    m->value.app = JSDRV_PAYLOAD_TYPE_SUB;
+    jsdrv_cstr_copy(m->payload.sub.topic, topic, sizeof(m->payload.sub.topic));
+    m->payload.sub.subscriber.internal_fn = device_subscriber;
+    m->payload.sub.subscriber.user_data = dev;
+    m->payload.sub.subscriber.is_internal = 1;
+    m->payload.sub.subscriber.flags = flags;
+    jsdrvp_backend_send(context, m);
+}
+
+void jsdrvp_device_unsubscribe(struct jsdrv_context_s * context, const char * dev_topic,
+                               const char * topic, uint8_t flags) {
+    struct frontend_dev_s * dev = device_lookup(context, dev_topic);
+    if (NULL == dev) {
+        JSDRV_LOGE("jsdrvp_ul_device_unsubscribe but device not found: %s", dev_topic);
+    }
+    JSDRV_LOGD1("jsdrvp_device_unsubscribe %s : %s", dev_topic, topic);
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(context);
+    jsdrv_cstr_copy(m->topic, JSDRV_PUBSUB_UNSUBSCRIBE, sizeof(m->topic));
+    m->value.type = JSDRV_UNION_BIN;
+    m->value.value.bin = m->payload.bin;
+    m->value.app = JSDRV_PAYLOAD_TYPE_SUB;
+    jsdrv_cstr_copy(m->payload.sub.topic, topic, sizeof(m->payload.sub.topic));
+    m->payload.sub.subscriber.internal_fn = device_subscriber;
+    m->payload.sub.subscriber.user_data = dev;
+    m->payload.sub.subscriber.is_internal = 1;
+    m->payload.sub.subscriber.flags = flags;
+    jsdrvp_backend_send(context, m);
 }
 
 static void device_sub(struct frontend_dev_s * d, const char * op) {

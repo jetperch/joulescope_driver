@@ -598,9 +598,16 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "$", &jsdrv_union_null()));
         JSDRV_RETURN_ON_ERROR(ping_wait(d, 1));
         if (JSDRV_DEVICE_OPEN_MODE_RESUME == opt) {
+            struct jsdrv_topic_s topic;
+            jsdrv_topic_set(&topic, d->ll.prefix);
+            jsdrv_topic_append(&topic, "h");
+
             JSDRV_LOGD1("query values");
             JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "?", &jsdrv_union_null()));
             JSDRV_RETURN_ON_ERROR(ping_wait(d, 2));
+            send_to_frontend(d, "h/fs$", &jsdrv_union_cjson_r(sampling_frequency_meta));
+            jsdrvp_device_subscribe(d->context, d->ll.prefix, topic.topic, JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
+            jsdrvp_device_unsubscribe(d->context, d->ll.prefix, topic.topic, JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
         } else if (JSDRV_DEVICE_OPEN_MODE_DEFAULTS == opt) {
             // todo publish metadata defaults to device
             // subscribe retained for self
@@ -944,6 +951,8 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         } else if (0 == strcmp("h/fs", topic)) {
             rc = on_sampling_frequency(d, &msg->value);
             send_return_code_to_frontend(d, topic, rc);
+        } else if (0 == strcmp("h/state", topic)) {
+            // ignore
         } else {
             JSDRV_LOGE("topic invalid: %s", msg->topic);
             send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
