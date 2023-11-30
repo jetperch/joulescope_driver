@@ -158,21 +158,21 @@ struct field_def_s {
     uint8_t index;
     uint8_t element_type;               // jsdrv_data_type_e
     uint8_t element_size_bits;
-    uint8_t downsample_min;
+    uint8_t decimate_min;
 };
 
-#define FIELD(ctrl_topic_, data_topic_, field_, index_, type_, size_, downsample_) {    \
+#define FIELD(ctrl_topic_, data_topic_, field_, index_, type_, size_, decimate_min_) {  \
     .ctrl_topic = (ctrl_topic_),                                                        \
     .data_topic = (data_topic_),                                                        \
     .field_id=JSDRV_FIELD_##field_,                                                     \
     .index=(index_),                                                                    \
     .element_type=JSDRV_DATA_TYPE_##type_,                                              \
     .element_size_bits=(size_),                                                         \
-    .downsample_min=(downsample_),                                                      \
+    .decimate_min=(decimate_min_),                                                      \
 }
 
 struct field_def_s PORT_MAP[] = {
-        //   (ctrl field,       data field, jsdrv_field_e,  index, type, el_size_bits, downsample_min)
+        //   (ctrl field,       data field, jsdrv_field_e,  index, type, el_size_bits, decimate_min)
         FIELD("s/adc/0/ctrl",   "s/adc/0/!data",   RAW,         0, INT,   16, 1),  // 0 + 16
         FIELD("s/adc/1/ctrl",   "s/adc/1/!data",   RAW,         1, INT,   16, 1),  // 1
         FIELD("s/adc/2/ctrl",   "s/adc/2/!data",   RAW,         2, INT,   16, 1),  // 2
@@ -206,7 +206,7 @@ enum break_e {
 
 struct port_s {
     struct jsdrv_downsample_s * downsample;
-    uint32_t decimate_factor;
+    uint32_t decimate_factor;      // on-instrument decimation performed, excluding host downsampling
     uint64_t sample_id_next;
     struct jsdrvp_msg_s * msg_in;  // one for each port
 };
@@ -581,6 +581,7 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         // ok, just continue on.
     }
 
+    d->time_map.offset_time = 0;
     d->out_frame_id = 0;
     d->stream_in_port_enable = 0x000f;  // always enable ports 0, 1, 2, 3
     rc = jsdrvb_bulk_in_stream_open(d);
@@ -602,10 +603,11 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
             jsdrv_topic_set(&topic, d->ll.prefix);
             jsdrv_topic_append(&topic, "h");
 
-            JSDRV_LOGD1("query values");
+            JSDRV_LOGD1("query values from instrument");
             JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "?", &jsdrv_union_null()));
             JSDRV_RETURN_ON_ERROR(ping_wait(d, 2));
-            send_to_frontend(d, "h/fs$", &jsdrv_union_cjson_r(sampling_frequency_meta));
+
+            JSDRV_LOGD1("query host-side values from pubsub");
             jsdrvp_device_subscribe(d->context, d->ll.prefix, topic.topic, JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
             jsdrvp_device_unsubscribe(d->context, d->ll.prefix, topic.topic, JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
         } else if (JSDRV_DEVICE_OPEN_MODE_DEFAULTS == opt) {
@@ -876,19 +878,18 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
             jsdrvp_msg_free(d->context, p->msg_in);
             p->msg_in = NULL;
         }
+        p->decimate_factor = PORT_MAP[idx].decimate_min;
+        fs_in = SAMPLING_FREQUENCY / p->decimate_factor;
         if (PORT_MAP[idx].element_type != JSDRV_DATA_TYPE_FLOAT) {
-            p->decimate_factor = 1;
             continue;
         }
-        fs_in = SAMPLING_FREQUENCY / PORT_MAP[idx].downsample_min;
-        if (fs > fs_in) {
-            fs = fs_in;
+        if (fs >= fs_in) {
+            continue;
         }
         p->downsample = jsdrv_downsample_alloc(fs_in, fs);
         if (NULL == p->downsample) {
             JSDRV_LOGW("jsdrv_downsample_alloc failed");
         }
-        p->decimate_factor = SAMPLING_FREQUENCY / fs;
     }
     return 0;
 }
@@ -966,10 +967,11 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
-static void time_map_update(struct dev_s * d, uint64_t sample_id, double counter_rate) {
-    if (0 == d->time_map.offset_time) {
-        // todo implement time sync on instrument and use device info.
-        d->time_map.offset_time = jsdrv_time_utc();
+static void time_map_update(struct dev_s * d, uint64_t sample_id, double counter_rate, bool force) {
+    if (force || (0 == d->time_map.offset_time)) {
+        int64_t t_now = jsdrv_time_utc();
+        JSDRV_LOGI("time_map_update: now=%" PRIi64 " counter=%" PRIi64, t_now, sample_id);
+        d->time_map.offset_time = t_now;
         d->time_map.counter_rate = counter_rate;
         d->time_map.offset_counter = sample_id;
     }
@@ -984,53 +986,90 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         return;
     }
 
-    // header is u32 sample_id, consume and skip to payload
-    // sample_id is always for 2 Msps, regardless of this port's sample rate
-    uint32_t sample_id_u32 = *p_u32++;
-    uint64_t sample_id_u64 = (port->sample_id_next & 0xffffffff00000000LLU) | sample_id_u32;
+    // sample_count is number of _decimated_ samples in message (port->decimate_factor)
     size -= sizeof(uint32_t);
     uint32_t sample_count = (size << 3) / field_def->element_size_bits;
-
     if (sample_count == 0) {
-        JSDRV_LOGI("stream_in_port %d sample_id=%" PRIu64 " empty message",
-                   port_id, sample_id_u64);
+        JSDRV_LOGI("stream_in_port %d empty message", port_id);
         return;
-    }
-    if (port->sample_id_next == 0) {
-        port->sample_id_next = sample_id_u64;  // todo correctly initialize u64
     }
 
-    // todo improve robustness around rollover events.
-    if (sample_id_u64 == port->sample_id_next) {
-        // normal behavior
-    } else if ((sample_id_u64 + sample_count) <= port->sample_id_next) {
-        JSDRV_LOGI("stream_in_port %d sample_id dup: received=%" PRIu64 " expected=%" PRIu64,
-                   port_id, sample_id_u64, port->sample_id_next);
-        return;
-    } else if (sample_id_u64 < port->sample_id_next) {
-        JSDRV_LOGI("stream_in_port %d sample_id overlap: received=%" PRIu64 " expected=%" PRIu64,
-                   port_id, sample_id_u64, port->sample_id_next);
-        uint32_t skip = (uint32_t) (port->sample_id_next - sample_id_u64);
-        uint16_t skip_size = (uint16_t) ((skip * field_def->element_size_bits) / 8);
-        size -= skip_size;
-        sample_count -= skip;
-        p_u32 += skip_size / sizeof(uint32_t);
-    } else {
-        uint32_t element_count = 0;
+    // downsample_factor is the total rate reduction which combines:
+    // - instrument decimation (port->decimate_factor)
+    // - host-side downsampling including anti-alias filtering.
+    uint32_t downsample_factor = port->decimate_factor * jsdrv_downsample_decimate_factor(port->downsample);
+
+    // header is u32 sample_id, consume and skip to payload
+    // sample_id is always for 2 Msps, regardless of this port's sample rate
+    // Use 32-bit sample_id (not unwrapped 64-bit) to determine skips & duplicates
+    uint32_t sample_id_u32 = *p_u32++;
+    uint32_t sample_id_next_u32 = (uint32_t) (port->sample_id_next & 0xffffffffLLU);
+    uint32_t skip = sample_id_u32 - sample_id_next_u32;
+    uint32_t dup = sample_id_next_u32 - sample_id_u32;
+    bool resync = false;
+    const uint32_t quarter_range_u32 = 0x40000000LU;  // 536 seconds = 8.9 minutes @ 2 Msps
+
+    if (port->sample_id_next == 0) {
+        JSDRV_LOGI("stream_in_port %d initial synchronization: u32=0x%" PRIx32 ", u64=0x%" PRIx64,
+                   port_id, sample_id_u32, d->time_map.offset_counter);
+        resync = true;
+    } else if ((skip >= quarter_range_u32) && (dup >= quarter_range_u32)) {
+        JSDRV_LOGW("stream_in_port %d lost sync", port_id);
+        resync = true;
+    } else if (skip >= quarter_range_u32) {
+        skip = 0;  // is duplicate
+    } else if (dup >= quarter_range_u32) {
+        dup = 0;   // is skip
+    }
+
+    if (resync) {
+        if (d->time_map.offset_time <= 0) {
+            JSDRV_LOGD1("stream_in_port %d timemap not yet available, drop", port_id);
+            return;
+        }
+        // caution: assumes d->time_map.offset_counter was updated in last 8.9 minutes.
+        uint32_t lower = (uint32_t) (d->time_map.offset_counter & 0xffffffffLLU);
+        uint32_t fwd = sample_id_u32 - lower;
+        uint32_t bwd = lower - sample_id_u32;
+        if (fwd < quarter_range_u32) {
+            port->sample_id_next = d->time_map.offset_counter + fwd;
+        } else if (bwd < quarter_range_u32) {
+            port->sample_id_next = d->time_map.offset_counter - bwd;
+        } else {
+            JSDRV_LOGW("stream_in_port %d sync failed, drop", port_id);
+            return;
+        }
+        skip = 0;
+        dup = 0;
+    }
+
+    if ((dup == 0) && (skip == 0)) {
+        // normal operation, ready to process sample_id_next.
+    } else if ((sample_count * port->decimate_factor) < dup) {
+        JSDRV_LOGI("stream_in_port %d dup %" PRIu32 " : received=0x%" PRIx32 " expected=0x%" PRIu32,
+                   port_id, dup, sample_id_u32, sample_id_next_u32);
+        return;  // no new data present, still awaiting sample_id_next.
+    } else if (dup) {
+        JSDRV_LOGI("stream_in_port %d overlap %" PRIu32 " : received=0x%" PRIx32 " expected=0x%" PRIu32,
+                   port_id, dup, sample_id_u32, sample_id_next_u32);
+        uint32_t overlap = dup / port->decimate_factor;
+        uint16_t overlap_size = (uint16_t) ((overlap * field_def->element_size_bits) / 8);
+        size -= overlap_size;
+        sample_count -= overlap;
+        p_u32 += overlap_size / sizeof(uint32_t);
+        // ready to process starting from sample_id_next.
+    } else if (skip) {
+        JSDRV_LOGI("stream_in_port %d skip %" PRIu32 " : received=0x%" PRIx32 " expected=0x%" PRIx32,
+                   port_id, skip, sample_id_u32, sample_id_next_u32);
         if (m) {
-            s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
-            element_count = s->element_count;
+            JSDRV_LOGD1("stream_in_port: port_id=%d send partial message", (int) port_id);
             port->msg_in = NULL;
             jsdrvp_backend_send(d->context, m);
             m = NULL;
             s = NULL;
         }
-        JSDRV_LOGI("stream_in_port %d sample_id skip: received=%" PRIu64 " expected=%" PRIu64
-                   " d=%" PRIu64 ", %" PRIu32 " elements sent",
-                   port_id, sample_id_u64, port->sample_id_next,
-                   sample_id_u64 - port->sample_id_next,
-                   element_count);
-        port->sample_id_next = sample_id_u64;
+        // sample_id_next not available, update based upon skip
+        port->sample_id_next += skip;
     }
 
     switch (port_id) {
@@ -1045,10 +1084,12 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     }
 
     if (m && ((m->value.size + size) >= sizeof(struct jsdrv_stream_signal_s))) {
-        JSDRV_LOGD1("stream_in_port: port_id=%d", (int) port_id);
+        // should never happen (see jsdrvp_backend_send towards end), but just in case
+        JSDRV_LOGD1("stream_in_port: port_id=%d send complete message", (int) port_id);
         port->msg_in = NULL;
         jsdrvp_backend_send(d->context, m);
         m = NULL;
+        s = NULL;
     }
 
     if (m) {
@@ -1059,17 +1100,13 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
         s->sample_id = port->sample_id_next;
         s->sample_rate = SAMPLING_FREQUENCY;
-        if (field_def->element_type == JSDRV_DATA_TYPE_FLOAT) {
-            s->decimate_factor = port->decimate_factor;
-        } else {
-            s->decimate_factor = 1;
-        }
+        s->decimate_factor = downsample_factor;
         s->index = field_def->index;
         s->field_id = field_def->field_id;
         s->element_type = field_def->element_type;
         s->element_size_bits = field_def->element_size_bits;
         s->element_count = 0;
-        time_map_update(d, port->sample_id_next, (double) s->sample_rate);
+        time_map_update(d, port->sample_id_next, (double) s->sample_rate, false);
         s->time_map = d->time_map;
         m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
         m->value.size = JSDRV_STREAM_HEADER_SIZE;
@@ -1084,8 +1121,9 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     if ((port->downsample != NULL) && (s->element_type == JSDRV_DATA_TYPE_FLOAT)) {
         float * x = (float *) p_u32;
         float * y = (float *) p;
+        uint64_t sample_id_u64 = port->sample_id_next;
         for (uint32_t idx = 0; idx < sample_count; ++idx) {
-            if (jsdrv_downsample_add_f32(port->downsample, sample_id_u64 >> 1, x[idx], y)) {
+            if (jsdrv_downsample_add_f32(port->downsample, sample_id_u64 / port->decimate_factor, x[idx], y)) {
                 ++y;
                 if (s->element_count == 0) {
                     s->sample_id = sample_id_u64;
@@ -1093,25 +1131,25 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
                 ++s->element_count;
                 m->value.size += sizeof(float);
             }
-            sample_id_u64 += 2;
+            sample_id_u64 += port->decimate_factor;
         }
-        port->sample_id_next = sample_id_u64;
     } else {
         m->value.size += size;
         memcpy(p, p_u32, size);
         s->element_count += sample_count;
-        port->sample_id_next += sample_count;
     }
+    port->sample_id_next += sample_count * port->decimate_factor;
 
     // determine if need to send
     uint64_t sample_id_delta = port->sample_id_next - s->sample_id;
-    uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * port->decimate_factor);
+    uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * downsample_factor);
     if (element_count_max < 1) {
         element_count_max = 1;
     }
     if ((((s->element_count * s->element_size_bits) / 8) >= STREAM_PAYLOAD_FULL)
             || (s->element_count >= element_count_max)) {
-        JSDRV_LOGD1("stream_in_port: port_id=%d, sample_id_delta=%d, size=%d", (int) port_id, (int) sample_id_delta, (int) m->value.size);
+        JSDRV_LOGD3("stream_in_port: port_id=%d, sampled_id=%" PRIu32 ", sample_id_delta=%" PRIu32 ", size=%" PRIu32,
+                    (int) port_id, s->sample_id, sample_id_delta, m->value.size);
         port->msg_in = NULL;
         jsdrvp_backend_send(d->context, m);
     }
@@ -1151,7 +1189,8 @@ static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t si
     if (0 == js220_stats_convert(&src, dst)) {
         time_map_update(d,
                         dst->block_sample_id + dst->block_sample_count * dst->decimate_factor,
-                        (double) dst->sample_freq);
+                        (double) dst->sample_freq,
+                        false);
         dst->time_map = d->time_map;
         jsdrvp_backend_send(d->context, m);
     } else {
@@ -1213,19 +1252,30 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
             break;
 
         case JS220_PORT0_OP_TIMESYNC: {
-            JSDRV_LOGD3("port 0 timesync req");
+            int64_t t_utc = jsdrv_time_utc();
             uint16_t length = sizeof(struct js220_port0_header_s) + sizeof(struct js220_port0_timesync_s);
             struct jsdrvp_msg_s * m = bulk_out_factory(d, 0, length);
             struct js220_port0_msg_s * p0 = (struct js220_port0_msg_s *) m->payload.bin;
             p0->port0_hdr.op = JS220_PORT0_OP_TIMESYNC;
             p0->port0_hdr.status = 0;
             p0->port0_hdr.arg = 0;
-            p0->payload.timesync.rsv_i64 = p->timesync.rsv_i64;
+            p0->payload.timesync.rsv0_u64 = p->timesync.rsv0_u64;
             p0->payload.timesync.start_count = p->timesync.start_count;
-            p0->payload.timesync.utc_recv = jsdrv_time_utc();
-            p0->payload.timesync.utc_send = p0->payload.timesync.utc_recv;
+            p0->payload.timesync.utc_recv = t_utc;
+            p0->payload.timesync.utc_send = jsdrv_time_utc();
             p0->payload.timesync.end_count = 0;
             msg_queue_push(d->ll.cmd_q, m);
+            JSDRV_LOGD2("port 0 timesync utc==%" PRIi64 " counter=%" PRIi64,
+                        t_utc, p->timesync.start_count);
+            break;
+        }
+
+        case JS220_PORT0_OP_TIMEMAP: {
+            JSDRV_LOGD2("port 0 timemap utc=%" PRIi64 " counter=%" PRIi64,
+                        p->timemap.utc, p->timemap.counter);
+            d->time_map.offset_time = p->timemap.utc;
+            d->time_map.offset_counter = p->timemap.counter;
+            d->time_map.counter_rate = p->timemap.counter_rate / ((double) (1ULL << 32));
             break;
         }
 

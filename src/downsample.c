@@ -152,7 +152,11 @@ void jsdrv_downsample_free(struct jsdrv_downsample_s * self) {
 }
 
 uint32_t jsdrv_downsample_decimate_factor(struct jsdrv_downsample_s * self) {
-    return self->decimate_factor;
+    if (NULL == self) {
+        return 1;
+    } else {
+        return self->decimate_factor;
+    }
 }
 
 static bool jsdrv_downsample_add_i64q30(struct jsdrv_downsample_s * self, uint64_t sample_id, int64_t x_in, int64_t * x_out) {

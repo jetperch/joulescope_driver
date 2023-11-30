@@ -6,9 +6,11 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.4.1
 
-2023 Nov 16 [in progress]
+2023 Nov 30
 
-* Fixed JS220 h/fs restore.
+* Fixed JS220 "h/fs" restore.
+* Improved JS220 UTC time sync with FW 1.2.0 & FPGA 1.2.0 support.
+* Improved JS220 skip / drop sample handling.
 
 
 ## 1.4.0
