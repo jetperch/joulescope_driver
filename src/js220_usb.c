@@ -572,6 +572,37 @@ static int32_t d_open_ll(struct dev_s * d, int32_t opt) {
     return 0;
 }
 
+static void d_reset(struct dev_s * d) {
+    d->out_frame_id = 0;
+    d->in_frame_id = 0;
+    d->in_frame_count = 0;
+    d->stream_in_port_enable = 0;
+
+    d->ll_await_break_on = BREAK_NONE;
+    d->ll_await_break = false;
+    sbuf_f32_clear(&d->i_buf);
+    sbuf_f32_clear(&d->v_buf);
+    sbuf_f32_clear(&d->p_buf);
+
+    for (uint32_t idx = 0; idx < (PORTS_LENGTH - 2); ++idx) {
+        struct port_s *p = &d->ports[idx];
+        if (p->downsample) {
+            jsdrv_downsample_free(p->downsample);
+            p->downsample = NULL;
+        }
+        p->sample_id_next = 0;
+        if (p->msg_in) {
+            jsdrvp_msg_free(d->context, p->msg_in);
+            p->msg_in = NULL;
+        }
+        p->decimate_factor = PORT_MAP[idx].decimate_min;
+    }
+
+    d->time_map.offset_time = 0;
+    memset(&d->mem_hdr, 0, sizeof(d->mem_hdr));
+}
+
+
 static int32_t d_open(struct dev_s * d, int32_t opt) {
     JSDRV_LOGI("open(opt=%d)", opt);
     int32_t rc;
@@ -581,8 +612,7 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         // ok, just continue on.
     }
 
-    d->time_map.offset_time = 0;
-    d->out_frame_id = 0;
+    d_reset(d);
     d->stream_in_port_enable = 0x000f;  // always enable ports 0, 1, 2, 3
     rc = jsdrvb_bulk_in_stream_open(d);
     if (rc) {
@@ -651,6 +681,7 @@ static int32_t d_close(struct dev_s * d) {
             }
         }
         update_state(d, ST_CLOSED);
+        d_reset(d);
     }
     return rv;
 }
@@ -983,6 +1014,15 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     struct jsdrv_stream_signal_s * s = NULL;
     struct jsdrvp_msg_s * m = port->msg_in;
     if (!field_def->data_topic || !field_def->data_topic[0]) {
+        return;
+    }
+
+    if (0 == field_def->element_size_bits) {
+        JSDRV_LOGW("stream_in_port %d element_size_bits is 0", port_id);
+        return;
+    }
+    if (0 == port->decimate_factor) {
+        JSDRV_LOGW("stream_in_port %d port->decimate_factor is 0", port_id);
         return;
     }
 

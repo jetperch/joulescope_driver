@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.2
+
+2023 Dec 7
+
+* Improved J110 & JS220 state reset on open.  Fixes JS110 fixes UTC time sync.
+* Fixed JS220 communication reliability with FPGA 1.2.1 and FW 1.2.1.
+* Improved JS110 time map for long-term stability.
+
+
 ## 1.4.1
 
 2023 Nov 30

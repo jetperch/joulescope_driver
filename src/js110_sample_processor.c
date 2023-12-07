@@ -215,7 +215,10 @@ struct js110_sample_s js110_sp_process(struct js110_sp_s * self, uint32_t sample
                     pre = post;
                 }
                 uint8_t count = ptr_end - ptr;
-                double step = (post - pre) / count;
+                double step = 0.0;
+                if (count) {
+                    step = (post - pre) / count;
+                }
 
                 ptr = self->start;
                 int32_t k = 0;

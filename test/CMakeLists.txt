@@ -49,6 +49,7 @@ ADD_CMOCKA_TEST(meta_test)
 ADD_CMOCKA_TEST(sample_buffer_f32_test)
 ADD_CMOCKA_TEST(statistics_test)
 ADD_CMOCKA_TEST(time_test)
+ADD_CMOCKA_TEST(time_map_filter_test)
 
 add_executable(topic_test topic_test.c ../src/topic.c)
 add_dependencies(topic_test cmocka)

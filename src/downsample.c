@@ -89,6 +89,10 @@ struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint
                    sample_rate_in, sample_rate_out);
         return NULL;
     }
+    if (0 == sample_rate_out) {
+        JSDRV_LOGE("Cannot downsample: sample_rate_out cannot be 0");
+        return NULL;
+    }
     uint32_t decimate_factor = sample_rate_in / sample_rate_out;
     if ((sample_rate_out * decimate_factor) != sample_rate_in) {
         JSDRV_LOGE("Cannot downsample: sample_rate_out * M != sample_rate_in");
@@ -138,6 +142,9 @@ struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint
 }
 
 void jsdrv_downsample_clear(struct jsdrv_downsample_s * self) {
+    if (NULL == self) {
+        return;
+    }
     self->sample_count = 0;
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(self->filters); ++i) {
         self->filters[i].buffer_idx = 0;
@@ -227,6 +234,10 @@ static bool jsdrv_downsample_add_i64q30(struct jsdrv_downsample_s * self, uint64
 
 bool jsdrv_downsample_add_f32(struct jsdrv_downsample_s * self, uint64_t sample_id, float x_in, float * x_out) {
     int64_t x64;
+    if (NULL == self) {
+        *x_out = x_in;
+        return true;
+    }
     if (isnan(x_in)) {
         x64 = INT64_MIN;
     } else {

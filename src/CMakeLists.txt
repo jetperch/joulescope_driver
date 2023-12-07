@@ -61,6 +61,7 @@ set(SUPPORT_SOURCES
         sample_buffer_f32.c
         statistics.c
         time.c
+        time_map_filter.c
         topic.c
         union.c
         version.c

@@ -28,6 +28,7 @@
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/usb_spec.h"
 #include "jsdrv_prv/thread.h"
+#include "jsdrv_prv/time_map_filter.h"
 #include "jsdrv_prv/pubsub.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
@@ -452,10 +453,10 @@ struct js110_dev_s {
     struct js110_sp_s sample_processor;
     struct js110_stats_s stats;
     uint64_t sample_id;
-    struct jsdrv_time_map_s time_map;
+    struct jsdrv_tmf_s * time_map_filter;
 
     int64_t sstats_samples_total_prev;
-    struct jsdrv_time_map_s sstats_time_map;
+    struct jsdrv_tmf_s * sstats_time_map_filter;
 
     struct port_s ports[JSDRV_ARRAY_SIZE(FIELDS)];
 
@@ -595,12 +596,7 @@ static void statistics_fwd(struct js110_dev_s * d, struct js110_host_status_s co
         return;
     }
 
-    if (0 == d->sstats_time_map.offset_time) {
-        d->sstats_time_map.offset_time = jsdrv_time_utc();
-        d->sstats_time_map.counter_rate = 2000000.0;
-        d->sstats_time_map.offset_counter = s->samples_total + s->samples_this;  // plus communication delay
-    }
-
+    jsdrv_tmf_add(d->sstats_time_map_filter, s->samples_total + s->samples_this, jsdrv_time_utc());
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
     tfp_snprintf(m->topic, sizeof(m->topic), "%s/s/sstats/value", d->ll.prefix);
     struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
@@ -649,7 +645,7 @@ static void statistics_fwd(struct js110_dev_s * d, struct js110_host_status_s co
     dst->energy_i128[0] = energy.u64[0];
     dst->energy_i128[1] = energy.u64[1];
 
-    dst->time_map = d->sstats_time_map;
+    jsdrv_tmf_get(d->sstats_time_map_filter, &dst->time_map);
     jsdrvp_backend_send(d->context, m);
 }
 
@@ -971,6 +967,20 @@ static void on_i_range_post(struct js110_dev_s * d, const struct jsdrv_union_s *
     d->sample_processor._suppress_samples_post = value->value.u8;
 }
 
+static void reset_port(struct js110_dev_s * d, uint32_t port_idx) {
+    if (port_idx >= JSDRV_ARRAY_SIZE(FIELDS)) {
+        return;
+    }
+    struct port_s *p = &d->ports[port_idx];
+    if (NULL != p->downsample) {
+        jsdrv_downsample_clear(p->downsample);
+    }
+    if (NULL != p->msg) {
+        jsdrvp_msg_free(d->context, p->msg);
+        p->msg = NULL;
+    }
+}
+
 static void on_sampling_frequency(struct js110_dev_s * d, const struct jsdrv_union_s * value) {
     struct jsdrv_union_s v = *value;
     uint32_t fs;
@@ -982,18 +992,12 @@ static void on_sampling_frequency(struct js110_dev_s * d, const struct jsdrv_uni
     JSDRV_LOGI("on_sampling_frequency(%lu)", fs);
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(FIELDS); ++idx) {
         struct port_s *p = &d->ports[idx];
-        if (p->downsample) {
+        if (NULL != p->downsample) {
             jsdrv_downsample_free(p->downsample);
             p->downsample = NULL;
         }
-        if (p->msg) {
-            jsdrvp_msg_free(d->context, p->msg);
-            p->msg = NULL;
-        }
+        reset_port(d, idx);
         p->downsample = jsdrv_downsample_alloc(SAMPLING_FREQUENCY, fs);
-        if (NULL == p->downsample) {
-            JSDRV_LOGW("jsdrv_downsample_alloc failed");
-        }
     }
 }
 
@@ -1016,9 +1020,7 @@ static void on_update_ctrl(struct js110_dev_s * d, const struct jsdrv_union_s * 
                 if (NULL != m) {
                     jsdrvp_msg_free(d->context, m);
                 }
-                if (NULL != p->downsample) {
-                    jsdrv_downsample_clear(p->downsample);
-                }
+                jsdrv_downsample_clear(p->downsample);
             }
             d->sample_id = 0;
         }
@@ -1086,8 +1088,22 @@ static int32_t d_open_ll(struct js110_dev_s * d, int32_t opt) {
     return 0;
 }
 
+static void d_reset(struct js110_dev_s * d) {
+    js110_sp_reset(&d->sample_processor);
+    js110_stats_clear(&d->stats);
+    d->sample_id = 0;
+    jsdrv_tmf_clear(d->time_map_filter);
+    jsdrv_tmf_clear(d->sstats_time_map_filter);
+    d->sstats_samples_total_prev = 0;
+
+    for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(FIELDS); ++idx) {
+        reset_port(d, idx);
+    }
+}
+
 static int32_t d_open(struct js110_dev_s * d, int32_t opt) {
     JSDRV_LOGI("open");
+    d_reset(d);
     usb_setup_t setup = { .s = {
             .bmRequestType = USB_REQUEST_TYPE(OUT, VENDOR, DEVICE),
             .bRequest = JS110_HOST_USB_REQUEST_LOOPBACK_BUFFER,
@@ -1304,7 +1320,7 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
     }
     if ((((s->element_count * s->element_size_bits) / 8) >= STREAM_PAYLOAD_FULL)
             || (s->element_count >= element_count_max)) {
-        s->time_map = d->time_map;
+        jsdrv_tmf_get(d->time_map_filter, &s->time_map);
         p->msg->value.size = JSDRV_STREAM_HEADER_SIZE + s->element_count * s->element_size_bits / 8;
         jsdrvp_backend_send(d->context, p->msg);
         p->msg = NULL;
@@ -1313,9 +1329,6 @@ static void field_message_process_end(struct js110_dev_s * d, uint8_t idx) {
 
 static void add_f32_field(struct js110_dev_s * d, uint8_t field_idx, float value) {
     struct port_s * p = &d->ports[field_idx];
-    if (NULL == p->downsample) {
-        return;
-    }
     struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
     if (NULL == m) {
         return;
@@ -1332,9 +1345,6 @@ static void add_f32_field(struct js110_dev_s * d, uint8_t field_idx, float value
 static void add_u4_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t value) {
     struct jsdrv_stream_signal_s * s;
     struct port_s * p = &d->ports[field_idx];
-    if (NULL == p->downsample) {
-        return;
-    }
     struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
     if (NULL == m) {
         return;
@@ -1356,9 +1366,6 @@ static void add_u4_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t valu
 static void add_u1_field(struct js110_dev_s * d, uint8_t field_idx, uint8_t value) {
     struct jsdrv_stream_signal_s * s;
     struct port_s * p = &d->ports[field_idx];
-    if (NULL == p->downsample) {
-        return;
-    }
     struct jsdrvp_msg_s * m = field_message_get(d, field_idx);
     if (NULL == m) {
         return;
@@ -1393,7 +1400,7 @@ static void handle_sample(struct js110_dev_s * d, uint32_t sample, uint8_t v_ran
         tfp_snprintf(m->topic, sizeof(m->topic), "%s/s/stats/value", d->ll.prefix);
         struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
         *dst = *s;
-        dst->time_map = d->time_map;
+        jsdrv_tmf_get(d->time_map_filter, &dst->time_map);
         m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
         m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
         jsdrvp_backend_send(d->context, m);
@@ -1431,11 +1438,7 @@ static void handle_stream_in_frame(struct js110_dev_s * d, uint32_t * p_u32) {
         // todo handle skips better.
         d->packet_index = pkt_index;
     }
-    if (0 == d->time_map.offset_time) {
-        d->time_map.offset_time = jsdrv_time_utc();
-        d->time_map.counter_rate = 2000000.0;
-        d->time_map.offset_counter = d->sample_id;
-    }
+    jsdrv_tmf_add(d->time_map_filter, d->sample_id, jsdrv_time_utc());
     for (uint32_t i = 2; i < (FRAME_SIZE_BYTES / 4); ++i) {
         handle_sample(d, p_u32[i], voltage_range);
     }
@@ -1532,15 +1535,14 @@ static void join(struct jsdrvp_ul_device_s * device) {
 
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
         struct port_s *p = &d->ports[idx];
-        if (NULL != p->msg) {
-            jsdrvp_msg_free(d->context, p->msg);
-            p->msg = NULL;
-        }
         if (NULL != p->downsample) {
             jsdrv_downsample_free(p->downsample);
             p->downsample = NULL;
         }
+        reset_port(d, idx);
     }
+    jsdrv_tmf_free(d->time_map_filter);
+    jsdrv_tmf_free(d->sstats_time_map_filter);
     jsdrv_free(d);
 }
 
@@ -1555,6 +1557,8 @@ int32_t jsdrvp_ul_js110_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
     d->state = ST_CLOSED;
+    d->time_map_filter = jsdrv_tmf_new(SAMPLING_FREQUENCY, 60, JSDRV_TIME_SECOND);
+    d->sstats_time_map_filter = jsdrv_tmf_new(SAMPLING_FREQUENCY, 60, JSDRV_TIME_SECOND);
     on_sampling_frequency(d, &jsdrv_union_u32(SAMPLING_FREQUENCY));
     js110_sp_initialize(&d->sample_processor);
     js110_stats_initialize(&d->stats);

@@ -148,6 +148,7 @@ extensions = [
                                      'src/sample_buffer_f32.c',
                                      'src/statistics.c',
                                      'src/time.c',
+                                     'src/time_map_filter.c',
                                      'src/topic.c',
                                      'src/union.c',
                                      'src/version.c',
