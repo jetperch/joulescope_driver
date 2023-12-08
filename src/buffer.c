@@ -553,6 +553,8 @@ static void _send_buffer_list(struct buffer_mgr_s * self) {
 }
 
 static uint8_t _buffer_recv(void * user_data, struct jsdrvp_msg_s * msg) {
+    (void) user_data;
+
     // topic should be "m/xxx/..."
     if (!jsdrv_cstr_starts_with(msg->topic, "m/")) {
         JSDRV_LOGE("unexpected topic %s", msg->topic);
