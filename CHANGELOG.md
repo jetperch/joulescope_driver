@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.5
+
+2023 Dec 8
+
+* Fixed stream buffer use-after-free and remove timeout.
+* Added fuzz tester.
+
+
 ## 1.4.4
 
 2023 Dec 7

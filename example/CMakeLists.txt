@@ -33,3 +33,7 @@ add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
+
+add_executable(fuzz fuzz.c)
+add_dependencies(fuzz jsdrv)
+target_link_libraries(fuzz jsdrv)

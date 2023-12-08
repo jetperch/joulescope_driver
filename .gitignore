@@ -2,6 +2,7 @@ Debug
 Release
 cmake-build*
 build
+build-cppcheck
 __pycache__
 *.pyo
 *.pyc

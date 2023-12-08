@@ -150,6 +150,29 @@ JSDRV_API int jsdrv_cstr_to_i32(const char * src, int32_t * value);
 JSDRV_API int jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * value);
 
 /**
+ * @brief Convert a string to an unsigned 64-bit integer.
+ *
+ * @param src The input source string containing an integer.  Strings that
+ *      start with "0x" are processed as case-insensitive hexadecimal.
+ * @param value The output unsigned 64-bit integer value.
+ * @return 0 on success or error code.  On error, the value will not be
+ *      modified.  To allow default values on parsing errors, set value
+ *      before calling this function.
+ */
+int jsdrv_cstr_to_u64(const char * src, uint64_t * value);
+
+/**
+ * @brief Convert a string to an signed 64-bit integer.
+ *
+ * @param src The input source string containing an integer.
+ * @param value The output integer value.
+ * @return 0 on success or error code.  On error, the value will not be
+ *      modified.  To allow default values on parsing errors, set value
+ *      before calling this function.
+ */
+int jsdrv_cstr_to_i64(const char * src, int64_t * value);
+
+/**
  * @brief Convert a string to a floating point number.
  *
  * @param src The input source string containing a floating point number.

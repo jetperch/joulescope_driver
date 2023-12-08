@@ -315,6 +315,94 @@ int jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * value) {
     return 0;
 }
 
+int jsdrv_cstr_to_u64(const char * src, uint64_t * value) {
+    uint64_t v = 0;
+
+    if ((NULL == src) || (NULL == value)) {
+        return 1;
+    }
+
+    while (*src && _isspace((uint8_t) *src)) {
+        ++src;
+    }
+    if (!*src) { // empty string.
+        return 1;
+    }
+    if ((src[0] == '0') && (src[1] == 'x')) {
+        // hex string
+        uint64_t nibble;
+        src += 2;
+        while (*src) {
+            char c = *src;
+            if ((c >= '0') && (c <= '9')) {
+                nibble = c - '0';
+            } else if ((c >= 'a') && (c <= 'f')) {
+                nibble = c - 'a' + 10;
+            } else if ((c >= 'A') && (c <= 'F')) {
+                nibble = c - 'A' + 10;
+            } else if (c == '_') {
+                ++src;
+                continue;
+            } else {
+                break;
+            }
+            if (v & 0xFF00000000000000LLU) {
+                return 1;  // overflow
+            }
+            v = (v << 4) + nibble;
+            ++src;
+        }
+    } else {
+        while ((*src >= '0') && (*src <= '9')) {
+            if (((v >> 32) * 10) & 0xFFFFFFFF00000000LLU) {
+                return 1;  // overflow
+            }
+            v = v * 10 + (*src - '0');
+            ++src;
+        }
+    }
+    while (*src) {
+        if (!_isspace((uint8_t) *src++)) { // did not parse full string
+            return 1;
+        }
+    }
+    *value = v;
+    return 0;
+}
+
+int jsdrv_cstr_to_i64(const char * src, int64_t * value) {
+    int neg = 0;
+    uint64_t v;
+
+    if ((NULL == src) || (NULL == value)) {
+        return 1;
+    }
+
+    while (*src && _isspace((uint8_t) *src)) {
+        ++src;
+    }
+
+    if (*src == '-') {
+        neg = 1;
+        ++src;
+    } else if (*src == '+') {
+        ++src;
+    }
+
+    int rc = jsdrv_cstr_to_u64(src, &v);
+    if (rc) {
+        return rc;
+    }
+    if (v > INT64_MAX) {
+        return 1;
+    }
+    *value = (int64_t) v;
+    if (neg) {
+        *value = -*value;
+    }
+    return 0;
+}
+
 #if FBP_CONFIG_USE_CSTR_FLOAT
 const float exp_pow[] = {  // binary lookup table for exponent
         10.0e1f,
