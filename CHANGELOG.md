@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.6
+
+2023 Dec 9
+
+* Fixed timestamp on POSIX (macOS, linux) systems.
+
+
 ## 1.4.5
 
 2023 Dec 8

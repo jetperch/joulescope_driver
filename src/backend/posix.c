@@ -36,7 +36,7 @@
 int64_t jsdrv_time_utc(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    int64_t t = JSDRV_TIME_SECOND * (int64_t) ts.tv_sec;
+    int64_t t = JSDRV_TIME_SECOND * ((int64_t) ts.tv_sec -JSDRV_TIME_EPOCH_UNIX_OFFSET_SECONDS);
     t += JSDRV_NANOSECONDS_TO_TIME(ts.tv_nsec);
     return t;
 }
@@ -44,7 +44,9 @@ int64_t jsdrv_time_utc(void) {
 uint32_t jsdrv_time_ms_u32(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t) (((uint64_t) ts.tv_sec) * 1000 + (uint64_t) (ts.tv_nsec / 1000000));
+    uint64_t t = 1000 * ((int64_t) ts.tv_sec -JSDRV_TIME_EPOCH_UNIX_OFFSET_SECONDS);
+    t += (uint64_t) (ts.tv_nsec / 1000000);
+    return t;
 }
 
 jsdrv_os_mutex_t jsdrv_os_mutex_alloc(const char * name) {
