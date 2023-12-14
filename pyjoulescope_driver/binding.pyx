@@ -583,14 +583,16 @@ cdef int32_t _timeout_validate(value, default=None):
 
 def _handle_rc(rc, src, cause=None):
     if rc:
+        name = c_jsdrv.jsdrv_error_code_name(rc).decode('utf-8')
+        description = c_jsdrv.jsdrv_error_code_description(rc).decode('utf-8')
         if cause:
             cause = f' | {cause}'
         else:
-            ''
+            cause = ''
         if rc == ErrorCode.TIMED_OUT:
             raise TimeoutError(f'{src} timed out{cause}')
         else:
-            raise RuntimeError(f'{src} failed {rc}{cause}')
+            raise RuntimeError(f'{src} failed {rc} {name} | {description}{cause}')
 
 
 cdef class Driver:

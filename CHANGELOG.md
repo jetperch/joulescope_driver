@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.7
+
+2023 Dec 14 [in progress]
+
+* Initialized buffer_mgr_s instance_.context to NULL.
+* Improved python binding error reporting.
+
+
 ## 1.4.6
 
 2023 Dec 9

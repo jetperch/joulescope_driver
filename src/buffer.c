@@ -98,7 +98,7 @@ struct buffer_mgr_s {
 };
 
 
-static struct buffer_mgr_s instance_;
+static struct buffer_mgr_s instance_ = {.context = NULL};
 
 static uint8_t _buffer_recv(void * user_data, struct jsdrvp_msg_s * msg);
 static uint8_t _buffer_recv_data(void * user_data, struct jsdrvp_msg_s * msg);
@@ -701,6 +701,7 @@ int32_t jsdrv_buffer_initialize(struct jsdrv_context_s * context) {
     JSDRV_DBC_NOT_NULL(context);
     struct buffer_mgr_s * self = &instance_;
     if (NULL != self->context) {
+        JSDRV_LOGE("jsdrv_buffer_initialize but context not NULL");
         return JSDRV_ERROR_IN_USE;
     }
     memset(self, 0, sizeof(*self));

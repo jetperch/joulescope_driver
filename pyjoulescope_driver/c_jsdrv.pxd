@@ -22,6 +22,11 @@ DEF JSDRV_STREAM_DATA_SIZE      = (1024 * 64)
 DEF JSDRV_STREAM_PAYLOAD_LENGTH_MAX = (JSDRV_STREAM_DATA_SIZE - 16)
 
 
+cdef extern from "jsdrv/error_code.h":
+    const char * jsdrv_error_code_name(int ec)
+    const char * jsdrv_error_code_description(int ec)
+
+
 cdef extern from "jsdrv/time.h":
     struct jsdrv_time_map_s:
         int64_t offset_time
