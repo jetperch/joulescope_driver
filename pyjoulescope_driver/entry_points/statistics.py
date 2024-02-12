@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pyjoulescope_driver import Driver
+from pyjoulescope_driver import Driver, time64
 import time
 
 
@@ -28,6 +28,11 @@ def parser_config(p):
                    default=2.0,
                    type=float,
                    help='The desired statistics frequency.')
+    p.add_argument('--duration',
+                   default=1.0,
+                   type=time64.duration_to_seconds,
+                   help='The capture duration in float seconds. '
+                        + 'Add a suffix for other units: s=seconds, m=minutes, h=hours, d=days')
     p.add_argument('device_path',
                    nargs='*',
                    help='The target device for this command.')
@@ -91,7 +96,10 @@ def on_cmd(args):
             else:
                 print(f'Skip unsupported device {device}')
         try:
+            t_start = time.time()
             while True:
+                if args.duration is not None and (time.time() - t_start) >= args.duration:
+                    break
                 time.sleep(0.025)
         except KeyboardInterrupt:
             pass
