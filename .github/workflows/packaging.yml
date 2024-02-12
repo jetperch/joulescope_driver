@@ -69,7 +69,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-latest
+          name: windows-latest-${{ matrix.shared }}
           path: artifacts/*
           if-no-files-found: error
 
@@ -225,7 +225,8 @@ jobs:
       - name: Download windows binary artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows-latest
+          pattern: windows-latest-*
+          merge-multiple: true
           path: windows-latest
 
       - name: Display artifacts
