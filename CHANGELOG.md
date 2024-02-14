@@ -6,11 +6,12 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.4.7
 
-2024 Feb 12  [in progress]
+2024 Feb 14
 
 * Initialized buffer_mgr_s instance_.context to NULL.
 * Improved python binding error reporting.
 * Added optional duration to statistics entry point.
+* Bumped minimum pyjls version from 0.8.2 to 0.9.2.
 
 
 ## 1.4.6
