@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.8
+
+2024 Feb 26
+
+* Fixed python statistics entry point to remove 1.0 second default duration.
+
+
 ## 1.4.7
 
 2024 Feb 14

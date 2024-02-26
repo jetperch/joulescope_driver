@@ -23,6 +23,7 @@ def parser_config(p):
                    help='Display verbose information.')
     return on_cmd
 
+
 def _query_gpi_value(d, device):
     gpi_value = None
 
@@ -39,6 +40,7 @@ def _query_gpi_value(d, device):
         time.sleep(0.001)
     d.unsubscribe(f'{device}/s/gpi/+/!value', on_gpi_value)
     return gpi_value
+
 
 def on_cmd(args):
     with Driver() as d:
