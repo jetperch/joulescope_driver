@@ -1,4 +1,4 @@
-# Copyright 2023 Jetperch LLC
+# Copyright 2023-2024 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -69,18 +69,6 @@ def on_cmd(args):
         if args.verbose:
             print(f'Open device: {device_path}')
         d.open(device_path, mode=args.open)
-        if args.open == 'defaults':
-            if 'js110' in device_path:
-                pre_args = [
-                    's/i/range/select=auto',
-                    's/v/range/select=15 V'
-                ]
-            else:
-                pre_args = [
-                    's/i/range/mode=auto',
-                    's/v/range/select=15 V',
-                    's/v/range/mode=manual',  # as of 2023-03-24, auto not working well
-                ]
         try:  # configure the device
             fs = args.frequency
             if fs is None:
@@ -93,13 +81,15 @@ def on_cmd(args):
             d.close(device_path)
             return 1
 
-        for set_arg in pre_args + args.set:
-            try:
-                topic, value = set_arg.split('=')
-                d.publish(f'{device_path}/{topic}', value)
-            except Exception:
-                print(f'Parameter set failed for {set_arg}')
-                raise
+        if args.open == 'defaults':
+            if 'js110' in device_path:
+                d.publish(f'{device_path}/s/i/range/select', 'auto')
+                d.publish(f'{device_path}/s/v/range/select', '15 V')
+            elif 'js220' in device_path:
+                d.publish(f'{device_path}/s/i/range/mode', 'auto')
+                d.publish(f'{device_path}/s/v/range/mode', 'auto')
+            else:
+                print(f'Unsupported device {device_path}')
 
         wr = Record(d, device_path, args.signals)
         if args.verbose:

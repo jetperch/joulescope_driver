@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.9
+
+2024 Mar 18 [in progress]
+
+* Refactored record entry point.
+
+
 ## 1.4.8
 
 2024 Feb 26
