@@ -120,6 +120,15 @@ enum param_e {  // CAREFUL! This must match the order in PARAMS exactly!
 };
 
 
+static const usb_setup_t STATUS_SETUP = { .s = {
+        .bmRequestType = USB_REQUEST_TYPE(IN, VENDOR, DEVICE),
+        .bRequest = JS110_HOST_USB_REQUEST_STATUS,
+        .wValue = 0,
+        .wIndex = 0,
+        .wLength = 128,
+}};
+
+
 static const struct param_s PARAMS[] = {
     {
         "s/i/range/select",
@@ -478,7 +487,7 @@ static const char * prefix_match_and_strip(const char * prefix, const char * top
     return topic;
 }
 
-static struct jsdrvp_msg_s * ll_await_topic(struct js110_dev_s * d, const char * topic, uint32_t timeout_ms) {
+static struct jsdrvp_msg_s * ll_await_msg(struct js110_dev_s * d, struct jsdrvp_msg_s * msg, uint32_t timeout_ms) {
     uint32_t t_now = jsdrv_time_ms_u32();
     uint32_t t_end = t_now + timeout_ms;
 
@@ -497,7 +506,7 @@ static struct jsdrvp_msg_s * ll_await_topic(struct js110_dev_s * d, const char *
         struct jsdrvp_msg_s * m = msg_queue_pop_immediate(d->ll.rsp_q);
         if (!m) {
             // no message yet, keep trying until timeout.
-        } else if (0 == strcmp(m->topic, topic)) {
+        } else if (m == msg) {
             return m;
         } else {
             handle_rsp(d, m);
@@ -534,7 +543,7 @@ static int32_t jsdrvb_ctrl_out(struct js110_dev_s * d, usb_setup_t setup, const 
     m->value.size = setup.s.wLength;
 
     msg_queue_push(d->ll.cmd_q, m);
-    m = ll_await_topic(d, JSDRV_USBBK_MSG_CTRL_OUT, TIMEOUT_MS);
+    m = ll_await_msg(d, m, TIMEOUT_MS);
     if (!m) {
         JSDRV_LOGW("ctrl_out timed out");
         return JSDRV_ERROR_TIMED_OUT;
@@ -554,7 +563,7 @@ static int32_t jsdrvb_ctrl_in(struct js110_dev_s * d, usb_setup_t setup, void * 
     m->extra.bkusb_ctrl.setup = setup;
 
     msg_queue_push(d->ll.cmd_q, m);
-    m = ll_await_topic(d, JSDRV_USBBK_MSG_CTRL_IN, TIMEOUT_MS);
+    m = ll_await_msg(d, m, TIMEOUT_MS);
     if (!m) {
         JSDRV_LOGW("ctrl_in timed out");
         return JSDRV_ERROR_TIMED_OUT;
@@ -578,7 +587,7 @@ static int32_t jsdrvb_bulk_in_stream_open(struct js110_dev_s * d, uint8_t endpoi
     m->value = jsdrv_union_i32(0);
     m->extra.bkusb_stream.endpoint = endpoint;
     msg_queue_push(d->ll.cmd_q, m);
-    m = ll_await_topic(d, JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN, TIMEOUT_MS);
+    m = ll_await_msg(d, m, TIMEOUT_MS);
     if (!m) {
         JSDRV_LOGW("jsdrvb_bulk_in_stream_open timed out");
         return JSDRV_ERROR_TIMED_OUT;
@@ -649,50 +658,60 @@ static void statistics_fwd(struct js110_dev_s * d, struct js110_host_status_s co
     jsdrvp_backend_send(d->context, m);
 }
 
-static int32_t d_status(struct js110_dev_s * d, struct js110_host_status_s * status) {
-    struct js110_host_packet_s pkt;
-    usb_setup_t setup = { .s = {
-            .bmRequestType = USB_REQUEST_TYPE(IN, VENDOR, DEVICE),
-            .bRequest = JS110_HOST_USB_REQUEST_STATUS,
-            .wValue = 0,
-            .wIndex = 0,
-            .wLength = 128,
-    }};
-    uint32_t sz = 0;
-    int32_t rv = jsdrvb_ctrl_in(d, setup, &pkt, &sz);
-    if (rv) {
-        // do nothing
-        JSDRV_LOGE("status returned %d", rv);
-    } else if ((pkt.header.version == JS110_HOST_API_VERSION) && pkt.header.type == JS110_HOST_PACKET_TYPE_STATUS) {
-        if (NULL != status) {
-            memcpy(status, &pkt.payload.status, sizeof(pkt.payload.status));
-        }
+static struct jsdrvp_msg_s * d_status_req(struct js110_dev_s * d) {
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
+    jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_CTRL_IN, sizeof(m->topic));
+    m->value.type = JSDRV_UNION_BIN;
+    m->value.value.bin = m->payload.bin;
+    m->value.app = JSDRV_PAYLOAD_TYPE_USB_CTRL;
+    m->extra.bkusb_ctrl.setup = STATUS_SETUP;
+    msg_queue_push(d->ll.cmd_q, m);
+    return m;
+}
+
+static int32_t d_status_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
+    if (msg->value.size > STATUS_SETUP.s.wLength) {
+        JSDRV_LOGW("d_status_rsp: returned too much data");
+        return JSDRV_ERROR_TOO_BIG;
+    }
+    struct js110_host_packet_s * pkt = (struct js110_host_packet_s *) msg->payload.bin;
+    if (pkt->header.version != JS110_HOST_API_VERSION) {
+        JSDRV_LOGW("d_status_rsp: API mismatch %d != %d", (int) pkt->header.version, JS110_HOST_API_VERSION);
+        return JSDRV_ERROR_NOT_SUPPORTED;
+    } else if (pkt->header.type == JS110_HOST_PACKET_TYPE_STATUS) {
+        statistics_fwd(d, &pkt->payload.status);
+        return 0;
     } else {
-        JSDRV_LOGW("unexpected message");
-        rv = JSDRV_ERROR_UNSPECIFIED;  // unexpected
+        JSDRV_LOGW("d_status_rsp: unsupported type %d", (int) pkt->header.type);
+        return JSDRV_ERROR_PARAMETER_INVALID;
     }
-    if (0 == rv) {
-        statistics_fwd(d, &pkt.payload.status);
-    } else if (NULL != status) {
-        memset(status, 0, sizeof(*status));
-    }
-    return rv;
 }
 
 static int32_t wait_for_sensor_command(struct js110_dev_s * d) {
+    struct js110_host_packet_s * pkt;
+    int32_t rv;
     uint32_t t_start = jsdrv_time_ms_u32();
     while (1) {
-        struct js110_host_status_s status;
-        int32_t rv = d_status(d, &status);
-        if (rv) {
-            JSDRV_LOGW("status failed");
-            return rv;
+        struct jsdrvp_msg_s * m = d_status_req(d);
+        m = ll_await_msg(d, m, TIMEOUT_MS);
+        if (NULL == m) {
+            JSDRV_LOGW("status timed out");
+            return JSDRV_ERROR_TIMED_OUT;
         }
-        if ((status.settings_result == -1) || (status.settings_result == 19)) {
-            // waiting, retry
-        } else {
+        rv = d_status_rsp(d, m);
+        pkt = (struct js110_host_packet_s *) m->payload.bin;
+        if (JSDRV_ERROR_PARAMETER_INVALID == rv) {
+            // ignore -- not a status packet
+        } else if (0 != rv) {
             JSDRV_LOGI("wait_for_sensor_command => %d", (int) rv);
             return rv;
+        } else {
+            int32_t settings_result = pkt->payload.status.settings_result;
+            if ((settings_result == -1) || (settings_result == 19)) {
+                // waiting, retry
+            } else {
+                return 0;
+            }
         }
         if ((jsdrv_time_ms_u32() - t_start) > SENSOR_COMMAND_TIMEOUT_MS) {
             JSDRV_LOGW("wait_for_sensor_command timed out");
@@ -1073,7 +1092,7 @@ static int32_t d_open_ll(struct js110_dev_s * d, int32_t opt) {
     JSDRV_LOGI("open_ll");
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(opt & 1));
     msg_queue_push(d->ll.cmd_q, m);
-    m = ll_await_topic(d, JSDRV_MSG_OPEN, TIMEOUT_MS);
+    m = ll_await_msg(d, m, TIMEOUT_MS);
     if (!m) {
         JSDRV_LOGW("ll_driver open timed out");
         return JSDRV_ERROR_TIMED_OUT;
@@ -1162,7 +1181,7 @@ static int32_t d_close(struct js110_dev_s * d) {
     JSDRV_LOGI("close");
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_CLOSE, &jsdrv_union_u32(0));
     msg_queue_push(d->ll.cmd_q, m);
-    m = ll_await_topic(d, JSDRV_MSG_CLOSE, TIMEOUT_MS);
+    m = ll_await_msg(d, m, TIMEOUT_MS);
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
         struct port_s * p = &d->ports[idx];
         if (NULL != p->msg) {
@@ -1470,6 +1489,8 @@ static bool handle_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
         } else {
             JSDRV_LOGE("handle_rsp unsupported command %s", msg->topic);
         }
+    } else if (0 == strcmp(JSDRV_USBBK_MSG_CTRL_IN, msg->topic)) {
+        d_status_rsp(d, msg);
     } else {
         JSDRV_LOGE("handle_rsp unsupported %s", msg->topic);
     }
@@ -1504,7 +1525,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         if (duration_ms >= INTERVAL_MS) {
             time_prev_ms += INTERVAL_MS;
             if ((d->state == ST_OPEN) && (d->param_values[PARAM_SSTATS_CTRL].value.u8)) {
-                d_status(d, NULL);  // poll status for on-instrument statistics
+                d_status_req(d);  // async poll status for on-instrument statistics
             }
         } else {
             duration_ms = INTERVAL_MS - duration_ms;

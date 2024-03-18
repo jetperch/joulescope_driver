@@ -6,9 +6,10 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.4.9
 
-2024 Mar 18 [in progress]
+2024 Mar 18
 
 * Refactored record entry point.
+* Fixed JS110 performance degradation (blocking status in device thread)  #8
 
 
 ## 1.4.8
