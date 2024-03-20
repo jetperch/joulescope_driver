@@ -463,6 +463,7 @@ struct js110_dev_s {
     struct js110_stats_s stats;
     uint64_t sample_id;
     struct jsdrv_tmf_s * time_map_filter;
+    struct jsdrvp_msg_s * status_msg;
 
     int64_t sstats_samples_total_prev;
     struct jsdrv_tmf_s * sstats_time_map_filter;
@@ -670,6 +671,9 @@ static struct jsdrvp_msg_s * d_status_req(struct js110_dev_s * d) {
 }
 
 static int32_t d_status_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
+    if (msg == d->status_msg) {
+        d->status_msg = NULL;
+    }
     if (msg->value.size > STATUS_SETUP.s.wLength) {
         JSDRV_LOGW("d_status_rsp: returned too much data");
         return JSDRV_ERROR_TOO_BIG;
@@ -1524,8 +1528,8 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         duration_ms = time_now_ms - time_prev_ms;
         if (duration_ms >= INTERVAL_MS) {
             time_prev_ms += INTERVAL_MS;
-            if ((d->state == ST_OPEN) && (d->param_values[PARAM_SSTATS_CTRL].value.u8)) {
-                d_status_req(d);  // async poll status for on-instrument statistics
+            if ((NULL == d->status_msg) && (d->state == ST_OPEN) && (d->param_values[PARAM_SSTATS_CTRL].value.u8)) {
+                d->status_msg = d_status_req(d);  // async poll status for on-instrument statistics
             }
         } else {
             duration_ms = INTERVAL_MS - duration_ms;
@@ -1580,6 +1584,7 @@ int32_t jsdrvp_ul_js110_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     d->state = ST_CLOSED;
     d->time_map_filter = jsdrv_tmf_new(SAMPLING_FREQUENCY, 60, JSDRV_TIME_SECOND);
     d->sstats_time_map_filter = jsdrv_tmf_new(SAMPLING_FREQUENCY, 60, JSDRV_TIME_SECOND);
+    d->status_msg = NULL;
     on_sampling_frequency(d, &jsdrv_union_u32(SAMPLING_FREQUENCY));
     js110_sp_initialize(&d->sample_processor);
     js110_stats_initialize(&d->stats);

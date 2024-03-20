@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.4.10
+
+2024 Mar 20
+
+* Fixed JS110 to only issue one CTRL IN status request at a time.
+
+
 ## 1.4.9
 
 2024 Mar 18
