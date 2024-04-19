@@ -125,6 +125,7 @@ extensions = [
                                      'pyjoulescope_driver/binding' + ext,
                                      'src/buffer.c',
                                      'src/buffer_signal.c',
+                                     'src/calibration_hash.c',
                                      'src/cstr.c',
                                      'src/devices.c',
                                      'src/downsample.c',
@@ -147,6 +148,7 @@ extensions = [
                                      'src/sample_buffer_f32.c',
                                      'src/statistics.c',
                                      'src/time.c',
+                                     'src/time_map_filter.c',
                                      'src/topic.c',
                                      'src/union.c',
                                      'src/version.c',
@@ -244,6 +246,7 @@ setuptools.setup(
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: Implementation :: CPython',
 
         # Topics

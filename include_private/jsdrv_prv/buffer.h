@@ -34,7 +34,7 @@ struct jsdrv_context_s;
 #endif
 
 #ifndef JSDRV_BUFSIG_COUNT_MAX
-#define JSDRV_BUFSIG_COUNT_MAX                       256
+#define JSDRV_BUFSIG_COUNT_MAX                       255
 #endif
 
 // topics for the buffer manager: add/remove buffers
@@ -43,7 +43,7 @@ struct jsdrv_context_s;
 #define JSDRV_BUFFER_MGR_MSG_ACTION_LIST              "m/@/list"      // bin ro: u8[N] ids
 
 // topics per buffer: prefix is "m/BBB/" where BBB is the buffer_id
-#define JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD            "a/!add"          // u8 id
+#define JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD            "a/!add"          // u8 id, 1 <= id <= JSDRV_BUFSIG_COUNT_MAX
 #define JSDRV_BUFFER_MSG_ACTION_SIGNAL_REMOVE         "a/!remove"       // u8 id
 #define JSDRV_BUFFER_MSG_ACTION_CLEAR                 "g/!clear"        // Clear the buffer
 #define JSDRV_BUFFER_MSG_LIST                         "g/list"          // bin ro: u8[N] ids
@@ -66,7 +66,7 @@ int32_t jsdrv_buffer_initialize(struct jsdrv_context_s * context);
 /**
  * @brief Finalize the singleton buffer manager.
  */
-void jsdrv_buffer_finalize();
+void jsdrv_buffer_finalize(void);
 
 
 

@@ -664,6 +664,17 @@ JSDRV_API int32_t jsdrv_open(struct jsdrv_context_s * context, const char * devi
  */
 JSDRV_API int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix);
 
+/**
+ * @brief Compute the calibration hash.
+ *
+ * @param msg[in] The calibration message.
+ * @param length[in] The length of message in bytes which must be
+ *      a multiple of 32 bytes.
+ * @param hash[out] The u32[16] hash of the message.
+ *      The total length is u32 x 16 = 64-byte = 512 bit.
+ */
+JSDRV_API void jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash);
+
 JSDRV_CPP_GUARD_END
 
 /** @} */

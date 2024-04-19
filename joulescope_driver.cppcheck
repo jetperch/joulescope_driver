@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="1">
+    <builddir>build-cppcheck</builddir>
+    <analyze-all-vs-configs>false</analyze-all-vs-configs>
+    <check-headers>true</check-headers>
+    <check-unused-templates>true</check-unused-templates>
+    <max-ctu-depth>2</max-ctu-depth>
+    <max-template-recursion>100</max-template-recursion>
+    <includedir>
+        <dir name="include/"/>
+        <dir name="include_private/"/>
+        <dir name="third-party/tinyprintf/"/>
+    </includedir>
+    <paths>
+        <dir name="src"/>
+        <dir name="third-party/tinyprintf"/>
+    </paths>
+    <project-name>joulescope_driver</project-name>
+</project>

@@ -131,7 +131,7 @@ enum js220_port0_op_e {
      * possible with the timestamps filled in.
      *
      * The payload contains 5 int64_t values:
-     * - 0 Reserved - save for future use
+     * - 0 Reserved - save for future use, set to 0.
      * - 1 The time the JS220 sent the TIMESYNC request message, in JS220 ticks.
      * - 2 The time that the host received the TIMESYNC request message, in UTC time.
      * - 3 The time that the host sent the TIMESYNC response message, in UTC time.
@@ -141,7 +141,20 @@ enum js220_port0_op_e {
      * The response copies 1 and fills in 2 & 3.
      * The JS220 lower-layers may optionally fill in 4 or leave it unused.
      */
-    JS220_PORT0_OP_TIMESYNC = 3,    ///< IN/OUT: perform time sync.
+    JS220_PORT0_OP_TIMESYNC = 3,
+
+    /**
+     * @brief Announce the synchronized sample ID to UTC time.  [Bulk IN]
+     *
+     * The JS220 updates the time mapping periodically.
+     *
+     * The payload contains 5 x 64-bit values:
+     * - 0 Reserved.
+     * - 1 The i64 mapping time in UTC.
+     * - 2 The u64 mapping time in JS220 sample_id counter ticks.
+     * - 3 The u64.32Q32 synchronized estimated ticks per second.
+     */
+    JS220_PORT0_OP_TIMEMAP = 4,
 };
 
 
@@ -160,11 +173,21 @@ struct js220_port0_connect_s {
  * @brief Port0 payload for JS220_PORT0_OP_TIMESYNC. [Bulk IN]
  */
 struct js220_port0_timesync_s {
-    int64_t rsv_i64;
-    uint64_t start_count;
-    int64_t utc_recv;
-    int64_t utc_send;
-    uint64_t end_count;
+    uint64_t rsv0_u64;          ///< Reserved for future use, set to 0
+    uint64_t start_count;       ///< The initial counter just before device send
+    int64_t utc_recv;           ///< UTC time just after host receive
+    int64_t utc_send;           ///< UTC time just before host send
+    uint64_t end_count;         ///< The final counter just after device receive
+};
+
+/**
+ * @brief Port0 payload for JS220_PORT0_OP_TIMEMAP. [Bulk IN]
+ */
+struct js220_port0_timemap_s {
+    uint64_t rsv0_u64;          ///< Reserved for future use, set to 0
+    int64_t utc;                ///< The 34Q30 UTC timestamp
+    uint64_t counter;           ///< The sample_id counter tick
+    uint64_t counter_rate;      ///< Best estimate in ticks per second (Hz) as 32Q32.
 };
 
 /**
@@ -208,6 +231,7 @@ static inline uint8_t js220_frame_hdr_extract_port_id(uint32_t hdr) {
 union js220_port0_payload_u {
     struct js220_port0_connect_s connect;
     struct js220_port0_timesync_s timesync;
+    struct js220_port0_timemap_s timemap;
 };
 
 /// Data structure header for port_id=0 messages
@@ -225,6 +249,7 @@ struct js220_port0_msg_s {
 
 #define JS220_PORT0_CONNECT_LENGTH (sizeof(struct js220_port0_header_s) + sizeof(struct js220_port0_connect_s))
 #define JS220_PORT0_TIMESYNC_LENGTH (sizeof(struct js220_port0_header_s) + sizeof(struct js220_port0_timesync_s))
+#define JS220_PORT0_TIMEMAP_LENGTH (sizeof(struct js220_port0_header_s) + sizeof(struct js220_port0_timemap_s))
 
 /// Data structure for port_id=1 messages.
 struct js220_publish_s {

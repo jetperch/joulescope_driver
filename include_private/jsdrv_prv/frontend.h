@@ -192,4 +192,27 @@ void jsdrvp_backend_send(struct jsdrv_context_s * context, struct jsdrvp_msg_s *
  */
 void jsdrvp_send_finalize_msg(struct jsdrv_context_s * context, struct msg_queue_s * q, const char * topic);
 
+/**
+ * @brief Subscribe a device to an additional topics.
+ *
+ * @param context The Joulescope driver context.
+ * @param dev_topic The device prefix topic.
+ * @param topic The topic for the subscription.
+ * @param flags The jsdrv_subscribe_flag_e subscription flags bitmap.
+ */
+void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_topic,
+                             const char * topic, uint8_t flags);
+
+/**
+ * @brief Unsubscribe a device from an additional topics.
+ *
+ * @param context The Joulescope driver context.
+ * @param dev_topic The device prefix topic.
+ * @param topic The topic for the unsubscription.
+ * @param flags The jsdrv_subscribe_flag_e subscription flags bitmap.
+ */
+void jsdrvp_device_unsubscribe(struct jsdrv_context_s * context, const char * dev_topic,
+                               const char * topic, uint8_t flags);
+
+
 #endif  /* JSDRV_PRV_FRONTEND_H_ */

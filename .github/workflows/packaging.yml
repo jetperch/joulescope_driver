@@ -40,7 +40,7 @@ jobs:
           - {shared: ON, target: jsdrv}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Build
         run: |
@@ -67,9 +67,9 @@ jobs:
         run: Compress-Archive -Path cmake_build/src/Release/jsdrv.* -Destination artifacts/jsdrv_dll.zip
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: windows-latest
+          name: windows-latest-${{ matrix.shared }}
           path: artifacts/*
           if-no-files-found: error
 
@@ -82,7 +82,7 @@ jobs:
         os: ["ubuntu-latest", "macos-latest"]
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Ubuntu dependencies
         if: matrix.os == 'ubuntu-latest'
@@ -102,7 +102,7 @@ jobs:
         run: cmake --build cmake_build_static --target test
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}
           path: cmake_build_static/example/jsdrv
@@ -126,10 +126,10 @@ jobs:
           sudo apt install -y libudev-dev
 
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -143,7 +143,7 @@ jobs:
         run: python -m build --sdist
 
       - name: Upload python source package
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: python_sdist
           path: dist/*.tar.gz
@@ -158,11 +158,11 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest", "windows-latest", "macos-latest"]
-        python_version: ["cp39", "cp310", "cp311"]
+        python_version: ["cp39", "cp310", "cp311", "cp312"]
 
     steps:
       - name: Download sdist
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: python_sdist
           path: dist/
@@ -173,7 +173,7 @@ jobs:
         run: echo "filename=$(ls dist/*.tar.gz)" >> $GITHUB_OUTPUT
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.13.0
+        uses: pypa/cibuildwheel@v2.16.5
         env:
           CIBW_ARCHS_MACOS: universal2
           CIBW_ARCHS_WINDOWS: native
@@ -185,13 +185,14 @@ jobs:
           CIBW_BEFORE_BUILD_LINUX: yum install -y libudev-devel
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest --pyargs pyjoulescope_driver
+          CIBW_TEST_SKIP: "*-macosx_universal2:arm64"  # cannot test arm64 on x86_64
         with:
           package-dir: ${{ steps.find_sdist_filename.outputs.filename }}
 
       - name: Upload python wheels
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: python_wheels
+          name: python_wheel-${{ matrix.os }}-${{ matrix.python_version }}
           path: wheelhouse/*.whl
           if-no-files-found: error
 
@@ -209,21 +210,23 @@ jobs:
 
     steps:
       - name: Download python sdist artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: python_sdist
           path: dist/
 
       - name: Download python wheel artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
-          name: python_wheels
+          pattern: python_wheel-*
+          merge-multiple: true
           path: dist/
 
       - name: Download windows binary artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
-          name: windows-latest
+          pattern: windows-latest-*
+          merge-multiple: true
           path: windows-latest
 
       - name: Display artifacts
@@ -231,7 +234,7 @@ jobs:
         run: ls dist/*
 
       - name: Publish packages to PyPi
-        uses: pypa/gh-action-pypi-publish@v1.8.6
+        uses: pypa/gh-action-pypi-publish@v1.8.11
         with:
           print-hash: true
 

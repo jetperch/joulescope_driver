@@ -162,12 +162,12 @@ JSDRV_API uint32_t jsdrv_time_ms_u32(void);
  *
  * @return 0 or error code.
  */
-int32_t jsdrv_platform_initialize(void);
+JSDRV_API int32_t jsdrv_platform_initialize(void);
 
 /**
  * @brief Finalize any platform-specific features.
  */
-void jsdrv_platform_finalize(void);
+JSDRV_API void jsdrv_platform_finalize(void);
 
 /**
  * Additional functions to define:

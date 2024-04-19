@@ -23,7 +23,7 @@ from pyjoulescope_driver import time64
 import logging
 
 
-_PYJLS_VERSION_MIN = (0, 7, 2)  # inclusive
+_PYJLS_VERSION_MIN = (0, 9, 2)  # inclusive
 _PYJLS_VERSION_MAX = (1, 0, 0)  # exclusive
 
 

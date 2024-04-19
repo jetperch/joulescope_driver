@@ -74,12 +74,12 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
 
     if (JSDRV_DATA_TYPE_FLOAT == self->hdr.element_type) {
         JSDRV_ASSERT(self->hdr.element_size_bits == 32);
-        self->level0_data = calloc(self->N, sizeof(float));
+        self->level0_data = jsdrv_alloc(self->N * sizeof(float));
     } else if (JSDRV_DATA_TYPE_UINT == self->hdr.element_type) {
         if (1 == self->hdr.element_size_bits) {
-            self->level0_data = calloc(1, (self->N * self->hdr.element_size_bits + 7) / 8);
+            self->level0_data = jsdrv_alloc((self->N * self->hdr.element_size_bits + 7) / 8);
         } else if (4 == self->hdr.element_size_bits) {
-            self->level0_data = calloc(1, (self->N * self->hdr.element_size_bits + 1) / 2);
+            self->level0_data = jsdrv_alloc((self->N * self->hdr.element_size_bits + 1) / 2);
         } else {
             JSDRV_ASSERT(false);
         }
@@ -102,20 +102,20 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
         lvl->r = r;
         lvl->samples_per_entry = samples_per_entry;
         JSDRV_LOGD3("alloc lvl=%d %" PRIu64, i + 1, k);
-        lvl->data = malloc(k * sizeof(struct jsdrv_summary_entry_s));
+        lvl->data = jsdrv_alloc(k * sizeof(struct jsdrv_summary_entry_s));
     }
 }
 
 void jsdrv_bufsig_free(struct bufsig_s * self) {
     for (int i = 0; i < JSDRV_BUFSIG_LEVELS_MAX; ++i) {
         if (NULL != self->levels[i].data) {
-            free(self->levels[i].data);
+            jsdrv_free(self->levels[i].data);
             self->levels[i].data = NULL;
         }
     }
     if (self->level0_data) {
         JSDRV_LOGI("jsdrv_bufsig_free %d", (int) self->idx);
-        free(self->level0_data);
+        jsdrv_free(self->level0_data);
         self->level0_data = NULL;
     }
     memset(&self->hdr, 0, sizeof(self->hdr));

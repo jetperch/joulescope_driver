@@ -53,14 +53,14 @@
  * added.  Any changes that break backwards compatibility should
  * not adversely affect performance.
  */
-#define JSDRV_VERSION_MINOR 3
+#define JSDRV_VERSION_MINOR 4
 
 /**
  * @brief The Joulescope driver patch version.
  *
  * Changes in the patch version indicate bug fixes and improvements.
  */
-#define JSDRV_VERSION_PATCH 19
+#define JSDRV_VERSION_PATCH 10
 
 /**
  * \brief The maximum version string length.

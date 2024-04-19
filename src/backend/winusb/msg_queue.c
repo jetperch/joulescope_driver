@@ -60,7 +60,7 @@ struct msg_queue_s * msg_queue_init() {
 
 void msg_queue_finalize(struct msg_queue_s * queue) {
     struct jsdrvp_msg_s * msg;
-    if (queue) {
+    if (NULL != queue) {
         //JSDRV_LOGI("msg_queue free %p %p", queue, queue->available_event);
         EnterCriticalSection(&queue->critical_section);
         while (1) {
@@ -83,6 +83,9 @@ void msg_queue_finalize(struct msg_queue_s * queue) {
 
 bool msg_queue_is_empty(struct msg_queue_s* queue) {
     bool rv;
+    if (NULL == queue) {
+        return true;
+    }
     EnterCriticalSection(&queue->critical_section);
     rv = jsdrv_list_is_empty(&queue->items);
     LeaveCriticalSection(&queue->critical_section);
@@ -90,6 +93,7 @@ bool msg_queue_is_empty(struct msg_queue_s* queue) {
 }
 
 void msg_queue_push(struct msg_queue_s * queue, struct jsdrvp_msg_s * msg) {
+    JSDRV_DBC_NOT_NULL(queue);
     JSDRV_DBC_NOT_NULL(msg);
     EnterCriticalSection(&queue->critical_section);
     jsdrv_list_remove(&msg->item);  // remove from any existing list
@@ -101,6 +105,9 @@ void msg_queue_push(struct msg_queue_s * queue, struct jsdrvp_msg_s * msg) {
 struct jsdrvp_msg_s * msg_queue_pop_immediate(struct msg_queue_s* queue) {
     struct jsdrv_list_s * item;
     struct jsdrvp_msg_s * msg = NULL;
+    if (NULL == queue) {
+        return NULL;
+    }
     EnterCriticalSection(&queue->critical_section);
     item = jsdrv_list_remove_head(&queue->items);
     if (item) {
@@ -117,6 +124,10 @@ struct jsdrvp_msg_s * msg_queue_pop_immediate(struct msg_queue_s* queue) {
 
 int32_t msg_queue_pop(struct msg_queue_s* queue, struct jsdrvp_msg_s ** msg, uint32_t timeout_ms) {
     JSDRV_DBC_NOT_NULL(msg);
+    if (NULL == queue) {
+        *msg = NULL;
+        return JSDRV_ERROR_INVALID_CONTEXT;
+    }
     *msg = msg_queue_pop_immediate(queue);
 
     while (!*msg) {
@@ -140,5 +151,5 @@ int32_t msg_queue_pop(struct msg_queue_s* queue, struct jsdrvp_msg_s ** msg, uin
 }
 
 msg_handle msg_queue_handle_get(struct msg_queue_s* queue) {
-    return queue->available_event;
+    return (NULL == queue) ? NULL : queue->available_event;
 }

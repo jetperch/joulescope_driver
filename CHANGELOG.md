@@ -3,11 +3,102 @@
 
 This file contains the list of changes made to the Joulescope driver.
 
+
+## 1.4.10
+
+2024 Mar 20
+
+* Fixed JS110 to only issue one CTRL IN status request at a time.
+
+
+## 1.4.9
+
+2024 Mar 18
+
+* Refactored record entry point.
+* Fixed JS110 performance degradation (blocking status in device thread)  #8
+
+
+## 1.4.8
+
+2024 Feb 26
+
+* Fixed python statistics entry point to remove 1.0 second default duration.
+
+
+## 1.4.7
+
+2024 Feb 14
+
+* Initialized buffer_mgr_s instance_.context to NULL.
+* Improved python binding error reporting.
+* Added optional duration to statistics entry point.
+* Bumped minimum pyjls version from 0.8.2 to 0.9.2.
+
+
+## 1.4.6
+
+2023 Dec 9
+
+* Fixed timestamp on POSIX (macOS, linux) systems.
+
+
+## 1.4.5
+
+2023 Dec 8
+
+* Fixed stream buffer use-after-free and remove timeout.
+* Added fuzz tester.
+
+
+## 1.4.4
+
+2023 Dec 7
+
+* Improved J110 & JS220 state reset on open.  Fixes JS110 fixes UTC time sync.
+* Fixed JS220 communication reliability with FPGA 1.2.1 and FW 1.2.1.
+* Improved JS110 time map for long-term stability.
+
+
+## 1.4.1
+
+2023 Nov 30
+
+* Fixed JS220 "h/fs" restore.
+* Improved JS220 UTC time sync with FW 1.2.0 & FPGA 1.2.0 support.
+* Improved JS220 skip / drop sample handling.
+
+
+## 1.4.0
+
+2023 Nov 11
+
+* Added jsdrv_calibration_hash and pyjoulescope_driver.calibration_hash.
+
+
+## 1.3.21
+
+2023 Nov 10
+
+* Updated to FW 1.1.1.
+* Added measure entry point to pyjoulescope_driver.
+
+
+## 1.3.20
+
+2023 Oct 26
+
+* Updated to FPGA 1.1.0 for beta release (was mistakenly left at 1.0.4).
+
+
 ## 1.3.19
 
-2023 Oct 5 [in progress]
+2023 Oct 25
 
 * Fixed help text for "program" entry point.
+* Build for Python 3.12.
+* Upgraded to FW & FPGA 1.1.0 stable releases.
+* Upgraded record entry point to pyjls 0.8.2 to 1.0.0.
 
 
 ## 1.3.18

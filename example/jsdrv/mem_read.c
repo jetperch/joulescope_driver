@@ -58,7 +58,7 @@ static int usage() {
     return 1;
 }
 
-void on_mem_rdata(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+static void on_mem_rdata(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) topic;
     struct app_s * self = (struct app_s *) user_data;
     if (JSDRV_UNION_BIN != value->type) {
@@ -129,8 +129,6 @@ int on_mem_read(struct app_s * self, int argc, char * argv[]) {
     ROE(app_match(self, device));
 
     struct jsdrv_topic_s topic;
-    jsdrv_topic_set(&topic, self->device.topic);
-
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_OPEN);
     ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(JSDRV_DEVICE_OPEN_MODE_RESUME), JSDRV_TIMEOUT_MS_DEFAULT));

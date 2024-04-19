@@ -22,6 +22,11 @@ DEF JSDRV_STREAM_DATA_SIZE      = (1024 * 64)
 DEF JSDRV_STREAM_PAYLOAD_LENGTH_MAX = (JSDRV_STREAM_DATA_SIZE - 16)
 
 
+cdef extern from "jsdrv/error_code.h":
+    const char * jsdrv_error_code_name(int ec)
+    const char * jsdrv_error_code_description(int ec)
+
+
 cdef extern from "jsdrv/time.h":
     struct jsdrv_time_map_s:
         int64_t offset_time
@@ -219,6 +224,7 @@ cdef extern from "jsdrv.h":
     int32_t jsdrv_subscribe(jsdrv_context_s * context, const char * topic, uint8_t flags, jsdrv_subscribe_fn cbk_fn, void * cbk_user_data, uint32_t timeout_ms) nogil
     int32_t jsdrv_unsubscribe(jsdrv_context_s * context, const char * topic, jsdrv_subscribe_fn cbk_fn, void * cbk_user_data, uint32_t timeout_ms) nogil
     int32_t jsdrv_unsubscribe_all(jsdrv_context_s * context, jsdrv_subscribe_fn cbk_fn, void * cbk_user_data, uint32_t timeout_ms) nogil
+    void jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash) nogil
 
 
 cdef extern from "jsdrv/log.h":
