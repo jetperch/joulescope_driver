@@ -401,13 +401,13 @@ static const struct param_s PARAMS[] = {
         on_stats_ctrl,
     },
     {
-            "s/sstats/ctrl",
-            "{"
+        "s/sstats/ctrl",
+        "{"
             "\"dtype\": \"bool\","
             "\"brief\": \"Enable on-instrument stats input data stream (u8).\","
             "\"default\": 1"
-            "}",
-            on_sstats_ctrl,
+        "}",
+        on_sstats_ctrl,
     },
     {NULL, NULL, NULL},  // MUST BE LAST
 };
