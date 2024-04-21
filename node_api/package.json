@@ -1,15 +1,19 @@
 {
+  "name": "joulescope_driver",
+  "description": "<!--\r # Copyright 2023-2024 Jetperch LLC\r #\r # Licensed under the Apache License, Version 2.0 (the \"License\");\r # you may not use this file except in compliance with the License.\r # You may obtain a copy of the License at\r #\r #     http://www.apache.org/licenses/LICENSE-2.0\r #\r # Unless required by applicable law or agreed to in writing, software\r # distributed under the License is distributed on an \"AS IS\" BASIS,\r # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\r # See the License for the specific language governing permissions and\r # limitations under the License.\r -->",
+  "version": "1.4.10",
   "main": "lib/binding.js",
   "dependencies": {
-    "node-addon-api": "^1.1.0"
+    "bindings": "~1.5.0",
+    "node-addon-api": "^3.0.0"
   },
   "scripts": {
     "test": "node --napi-modules ./test/test_binding.js"
   },
   "gypfile": true,
-  "name": "joulescope_driver",
-  "description": "<!--\r # Copyright 2023 Jetperch LLC\r #\r # Licensed under the Apache License, Version 2.0 (the \"License\");\r # you may not use this file except in compliance with the License.\r # You may obtain a copy of the License at\r #\r #     http://www.apache.org/licenses/LICENSE-2.0\r #\r # Unless required by applicable law or agreed to in writing, software\r # distributed under the License is distributed on an \"AS IS\" BASIS,\r # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\r # See the License for the specific language governing permissions and\r # limitations under the License.\r -->",
-  "version": "1.3.19",
+  "engines": {
+    "node": "~10 >=10.20 || >=12.17"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jetperch/joulescope_driver.git"

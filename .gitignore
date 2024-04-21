@@ -37,6 +37,10 @@ pyjoulescope_driver/img_*.img
 .*.swp
 .*.swo
 
+# node.js temporary directories
+node_api/build/**
+node_api/node_modules/**
+
 .force_relink
 .force_rebuild
 
