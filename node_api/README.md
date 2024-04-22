@@ -1,5 +1,5 @@
 <!--
-# Copyright 2023 Jetperch LLC
+# Copyright 2023-2024 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,6 +16,14 @@
 
 # Node.js Node-API bindings for Joulescope Driver
 
+Welcome to the Joulescope™ Driver project.
+[Joulescope](https://www.joulescope.com) is an affordable, precision DC energy
+analyzer that enables you to build better products.
+
+This node.js package contains the Javascript bindings for the Joulescope driver.
+See the [source code](https://github.com/jetperch/joulescope_driver)
+and the main [README](https://github.com/jetperch/joulescope_driver/README.md).
+
 
 # Building
 
@@ -25,6 +33,8 @@ Install node.js and npm.  See [instructions](https://nodejs.github.io/node-addon
 npm install
 npm test
 ```
+
+
 
 ## References
 

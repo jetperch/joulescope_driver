@@ -54,7 +54,7 @@ int32_t jsdrv_time_to_str(int64_t t, char * str, size_t size) {
     }
 }
 
-int64_t jsdrv_time_from_counter(struct jsdrv_time_map_s * self, uint64_t counter) {
+int64_t jsdrv_time_from_counter(const struct jsdrv_time_map_s * self, uint64_t counter) {
     int64_t delta = (int64_t) (counter - self->offset_counter);
     double scale =  (double) JSDRV_TIME_SECOND / self->counter_rate;
     int64_t time64 = (int64_t) round(scale * (double) delta);
@@ -62,7 +62,7 @@ int64_t jsdrv_time_from_counter(struct jsdrv_time_map_s * self, uint64_t counter
     return time64;
 }
 
-uint64_t jsdrv_time_to_counter(struct jsdrv_time_map_s * self, int64_t time64) {
+uint64_t jsdrv_time_to_counter(const struct jsdrv_time_map_s * self, int64_t time64) {
     time64 -= self->offset_time;
     double scale = self->counter_rate / (double) JSDRV_TIME_SECOND;
     int64_t counter = (int64_t) round(scale * (double) time64);

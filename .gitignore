@@ -40,6 +40,7 @@ pyjoulescope_driver/img_*.img
 # node.js temporary directories
 node_api/build/**
 node_api/node_modules/**
+node_api/prebuilds/**
 
 .force_relink
 .force_rebuild

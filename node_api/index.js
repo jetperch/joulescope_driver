@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-const addon = require('../build/Release/joulescope_driver_native');
+const addon = require('node-gyp-build')(__dirname);
 
 
 class JoulescopeDriver {

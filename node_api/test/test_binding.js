@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-const JoulescopeDriver = require("../lib/binding.js");
+const JoulescopeDriver = require("..");
 const assert = require("assert");
 
 const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay));
@@ -23,7 +23,7 @@ async function testBasic(){
     await sleep(100);
     var drv = new JoulescopeDriver();
     var device_paths = drv.device_paths();
-    console.log(device_paths);
+    console.log('device_paths: ' + device_paths);
     if (0 == device_paths.length) {
         return;
     }
@@ -33,26 +33,29 @@ async function testBasic(){
     assert(4 == drv.query(device_path.concat("/s/i/range/mode")));
     drv.publish(device_path.concat("/s/v/range/mode"), "auto");
 
-    var cbk = (topic, value) => {
-        console.log(topic)
+    var sample_cbk = (topic, value) => {
+        // console.log('topic=' + topic + ', sample_id=' + value['sample_id']);
     }
-    const i_unsub = drv.subscribe(device_path.concat("/s/i/!data"), 2, cbk);
-    const v_unsub = drv.subscribe(device_path.concat("/s/v/!data"), 2, cbk);
+    var stats_cbk = (topic, value) => {
+        console.log('topic=' + topic + ', energy=' + value['accumulators']['energy']['value']);
+    }
+
+    const s_unsub = drv.subscribe(device_path.concat("/s/stats/value"), 2, stats_cbk);
+    const i_unsub = drv.subscribe(device_path.concat("/s/i/!data"), 2, sample_cbk);
+    const v_unsub = drv.subscribe(device_path.concat("/s/v/!data"), 2, sample_cbk);
+    drv.publish(device_path.concat('/s/stats/ctrl'), 1, 0);
     drv.publish(device_path.concat("/s/i/ctrl"), 1, 0);
     drv.publish(device_path.concat("/s/v/ctrl"), 1, 0);
-    console.log("wait")
     await sleep(2000)
-    console.log("unsub start")
     i_unsub();
     v_unsub();
-    console.log("unsub done")
+    s_unsub();
 
+    drv.publish(device_path.concat('/s/stats/ctrl'), 0, 0);
     drv.publish(device_path.concat("/s/i/ctrl"), 0, 0);
     drv.publish(device_path.concat("/s/v/ctrl"), 0);
     drv.close(device_path);
-    console.log("close done")
     drv.finalize();
-    console.log("finalize done")
 }
 
 assert.doesNotThrow(async() => {await testBasic()}, undefined, "testBasic threw an exception");

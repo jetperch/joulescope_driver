@@ -425,7 +425,7 @@ struct jsdrv_time_map_s {
  * @param counter The counter value u64.
  * @return The JSDRV time i64.
  */
-JSDRV_API int64_t jsdrv_time_from_counter(struct jsdrv_time_map_s * self, uint64_t counter);
+JSDRV_API int64_t jsdrv_time_from_counter(const struct jsdrv_time_map_s * self, uint64_t counter);
 
 /**
  * @brief Convert time from JSDRV time to a counter value.
@@ -434,7 +434,7 @@ JSDRV_API int64_t jsdrv_time_from_counter(struct jsdrv_time_map_s * self, uint64
  * @param time64 The JSDRV time i64.
  * @return The counter value u64.
  */
-JSDRV_API uint64_t jsdrv_time_to_counter(struct jsdrv_time_map_s * self, int64_t time64);
+JSDRV_API uint64_t jsdrv_time_to_counter(const struct jsdrv_time_map_s * self, int64_t time64);
 
 JSDRV_CPP_GUARD_END
 
