@@ -244,3 +244,61 @@ jobs:
           files: |
             dist/*
             windows-latest/*
+
+  build_node_js:
+    name: build_node_js_${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "windows-latest", "macos-latest"]
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: NPM
+        shell: bash
+        run: |
+          cd node_api
+          npm install --global prebuildify node-gyp node-gyp-build
+          npm update
+          prebuildify --napi --strip --target 20.12.2
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: node_js_native-${{ matrix.os }}
+          path: node_api/prebuilds/*
+          if-no-files-found: error
+
+  package_node_js:
+    name: Package node.js binding
+    needs:
+      - build_node_js
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download node.js native build files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: node_js_native-*
+          merge-multiple: true
+          path: node_api/prebuilds/
+
+      - name: Create package
+        shell: bash
+        run: |
+          mkdir package
+          cd node_api
+          npm pack --pack-destination ../package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node_js
+          path: package/*
+          if-no-files-found: error
