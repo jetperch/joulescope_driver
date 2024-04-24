@@ -308,3 +308,39 @@ jobs:
           name: node_js
           path: package/*
           if-no-files-found: error
+
+  publish_node_js:
+    name: Publish node.js package to registry.npmjs.org
+    if: github.event_name == 'push' && startswith(github.ref, 'refs/tags/v')
+    needs:
+      - package_node_js
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - name: Download node package
+        uses: actions/download-artifact@v4
+        with:
+          name: node_js
+          path: dist/
+
+      - name: Find package filename
+        shell: bash
+        id: find_package
+        run: echo "filename=$(ls ./dist/*.tgz)" >> $GITHUB_OUTPUT
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install NPM command line utility
+        run: npm install -g npm
+
+      - name: Publish to NPM
+        run: npm publish --provenance --access public ${{ steps.find_package.outputs.filename }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
