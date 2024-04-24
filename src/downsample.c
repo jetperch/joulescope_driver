@@ -258,6 +258,7 @@ bool jsdrv_downsample_add_u8(struct jsdrv_downsample_s * self, uint64_t sample_i
     int64_t x64 = ((int64_t) x_in) << 30;
     bool rv = jsdrv_downsample_add_i64q30(self, sample_id, x64, &x64);
     if (rv) {
+        x64 += (1 << 29);  // add 0.5 to so truncation rounds to nearest integer
         *x_out = (x64 < 0) ? 0 : ((uint8_t) (x64 >> 30));
     }
     return rv;
