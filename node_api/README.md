@@ -24,6 +24,8 @@ This node.js package contains the Javascript bindings for the Joulescope driver.
 See the [source code](https://github.com/jetperch/joulescope_driver)
 and the main [README](https://github.com/jetperch/joulescope_driver/README.md).
 
+See the "example" subdirectory for examples of how to use this package.
+
 
 # Building
 
