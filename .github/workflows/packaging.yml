@@ -257,6 +257,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Install Ubuntu dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt install -y libudev-dev          
+
       - name: NPM
         shell: bash
         run: |

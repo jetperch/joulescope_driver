@@ -57,7 +57,7 @@
             '../third-party/libusb/libusb/os/events_posix.c',
             '../third-party/libusb/libusb/os/threads_posix.c'
           ],
-          'libraries': ['pthread', 'm'],
+          'libraries': [],
           "conditions": [
             ["OS=='mac'", {
               'sources': [

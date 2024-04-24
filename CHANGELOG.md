@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.5.0
+
+2024 Apr 24
+
+* Added node.js binding.
+* Fixed downsampling to round to nearest integer for integer types.
+
+
 ## 1.4.10
 
 2024 Mar 20
