@@ -84,12 +84,26 @@ def _py_version(version):
     os.replace(path_tmp, path)
 
 
+def _node_version(version):
+    path = os.path.join(MYPATH, 'node_api', 'package.json')
+    path_tmp = path + '.tmp'
+    with open(path, 'rt') as rd:
+        with open(path_tmp, 'wt') as wr:
+            for line in rd:
+                if line.strip().startswith('"version":'):
+                    quotes = [i for i in range(len(line)) if line[i] == '"']
+                    line = f'{line[:quotes[2] + 1]}{_str(version)}{line[quotes[3]:]}'
+                wr.write(line)
+    os.replace(path_tmp, path)
+
+
 def run():
     version = _changelog_version()
     print(f'Version = {_str(version)}')
     _cmakelists_update(version)
     _include_h_version(version)
     _py_version(version)
+    _node_version(version)
     return 0
 
 
