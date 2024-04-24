@@ -32,7 +32,7 @@ static void test_passthrough_f32(void **state) {
     (void) state;
     struct jsdrv_downsample_s * d;
     float y = 0.0f;
-    d = jsdrv_downsample_alloc(1000000, 1000000);
+    d = jsdrv_downsample_alloc(1000000, 1000000, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
     assert_non_null(d);
     assert_int_equal(1, jsdrv_downsample_decimate_factor(d));
     assert_true(jsdrv_downsample_add_f32(d, 1000, 1.0f, &y));
@@ -46,7 +46,7 @@ static void test_basic_x2_f32(void **state) {
     (void) state;
     struct jsdrv_downsample_s * d;
     float y = 0.0f;
-    d = jsdrv_downsample_alloc(1000000, 500000);
+    d = jsdrv_downsample_alloc(1000000, 500000, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
     assert_non_null(d);
     assert_int_equal(2, jsdrv_downsample_decimate_factor(d));
     assert_false(jsdrv_downsample_add_f32(d, 1000, 1.0f, &y));
@@ -59,7 +59,7 @@ static void test_basic_x5_f32(void **state) {
     (void) state;
     struct jsdrv_downsample_s * d;
     float y = 0.0f;
-    d = jsdrv_downsample_alloc(1000000, 200000);
+    d = jsdrv_downsample_alloc(1000000, 200000, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
     assert_non_null(d);
     assert_int_equal(5, jsdrv_downsample_decimate_factor(d));
     assert_false(jsdrv_downsample_add_f32(d, 1000, 1.0f, &y));
@@ -71,6 +71,22 @@ static void test_basic_x5_f32(void **state) {
     jsdrv_downsample_free(d);
 }
 
+static void test_avg_x100_f32(void **state) {
+    (void) state;
+    struct jsdrv_downsample_s * d;
+    float y = 0.0f;
+    uint32_t N = 100;
+    d = jsdrv_downsample_alloc(1000000, 1000000 / N, JSDRV_DOWNSAMPLE_MODE_AVERAGE);
+    assert_non_null(d);
+    assert_int_equal(N, jsdrv_downsample_decimate_factor(d));
+    for (uint32_t i = 0; i < (N - 1); ++i) {
+        assert_false(jsdrv_downsample_add_f32(d, i, (float) i, &y));
+    }
+    assert_true(jsdrv_downsample_add_f32(d, N - 1, (float) (N - 1), &y));
+    assert_float_equal(y, 49.5, 1e-5);
+    jsdrv_downsample_free(d);
+}
+
 static void test_filt1_f32(void **state) {
     (void) state;
     struct jsdrv_downsample_s * d;
@@ -78,7 +94,7 @@ static void test_filt1_f32(void **state) {
     int count = 0;
     uint32_t sample_rate_out = 20000;
     uint32_t decimate = 50;
-    d = jsdrv_downsample_alloc(decimate * sample_rate_out, sample_rate_out);
+    d = jsdrv_downsample_alloc(decimate * sample_rate_out, sample_rate_out, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
     assert_non_null(d);
     assert_int_equal(decimate, jsdrv_downsample_decimate_factor(d));
     for (uint32_t i = 0; i < (128 * decimate); ++i) {
@@ -98,7 +114,7 @@ static void test_filt1_f32_nan(void **state) {
     int count = 0;
     uint32_t sample_rate_out = 20000;
     uint32_t decimate = 50;
-    d = jsdrv_downsample_alloc(decimate * sample_rate_out, sample_rate_out);
+    d = jsdrv_downsample_alloc(decimate * sample_rate_out, sample_rate_out, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
     assert_non_null(d);
     assert_int_equal(decimate, jsdrv_downsample_decimate_factor(d));
     for (uint32_t i = 0; i < (128 * decimate); ++i) {
@@ -123,7 +139,7 @@ static void test_filt1_u8(void **state) {
     int count = 0;
     uint32_t sample_rate_out = 20000;
     uint32_t decimate = 50;
-    d = jsdrv_downsample_alloc(decimate * sample_rate_out, sample_rate_out);
+    d = jsdrv_downsample_alloc(decimate * sample_rate_out, sample_rate_out, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
     assert_non_null(d);
     for (uint32_t i = 0; i < (128 * decimate); ++i) {
         if (jsdrv_downsample_add_u8(d, 1000, (i & 1) << 7, &y)) {
@@ -137,9 +153,9 @@ static void test_filt1_u8(void **state) {
 
 static void test_invalid_args(void **state) {
     (void) state;
-    assert_null(jsdrv_downsample_alloc(1000000, 2000000));
-    assert_null(jsdrv_downsample_alloc(1000000, 800000));
-    assert_null(jsdrv_downsample_alloc(12000, 1000));  // only factors of 2 & 5 allowed
+    assert_null(jsdrv_downsample_alloc(1000000, 2000000, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND));
+    assert_null(jsdrv_downsample_alloc(1000000, 800000, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND));
+    assert_null(jsdrv_downsample_alloc(12000, 1000, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND));  // only factors of 2 & 5 allowed
 }
 
 int main(void) {
@@ -148,6 +164,7 @@ int main(void) {
             cmocka_unit_test(test_passthrough_f32),
             cmocka_unit_test(test_basic_x2_f32),
             cmocka_unit_test(test_basic_x5_f32),
+            cmocka_unit_test(test_avg_x100_f32),
             cmocka_unit_test(test_filt1_f32),
             cmocka_unit_test(test_filt1_f32_nan),
             cmocka_unit_test(test_filt1_u8),

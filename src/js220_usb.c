@@ -919,7 +919,7 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
         if (fs >= fs_in) {
             continue;
         }
-        p->downsample = jsdrv_downsample_alloc(fs_in, fs);
+        p->downsample = jsdrv_downsample_alloc(fs_in, fs, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
         if (NULL == p->downsample) {
             JSDRV_LOGW("jsdrv_downsample_alloc failed");
         }

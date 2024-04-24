@@ -39,10 +39,15 @@
 
 JSDRV_CPP_GUARD_START
 
+enum jsdrv_downsample_mode_e {
+    JSDRV_DOWNSAMPLE_MODE_AVERAGE = 0,
+    JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND = 1,
+};
+
 /// Opaque object
 struct jsdrv_downsample_s;
 
-struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint32_t sample_rate_out);
+struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint32_t sample_rate_out, int mode);
 void jsdrv_downsample_free(struct jsdrv_downsample_s * self);
 void jsdrv_downsample_clear(struct jsdrv_downsample_s * self);
 uint32_t jsdrv_downsample_decimate_factor(struct jsdrv_downsample_s * self);

@@ -74,16 +74,18 @@ struct filter_s {
 
 
 struct jsdrv_downsample_s {
+    enum jsdrv_downsample_mode_e mode;
     uint32_t sample_rate_in;
     uint32_t sample_rate_out;
     uint32_t decimate_factor;
     uint32_t sample_delay;
     struct filter_s filters[14];  // enough to go from 2 Msps to 1 sps
     uint64_t sample_count;
+    int64_t avg;
 };
 
 
-struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint32_t sample_rate_out) {
+struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint32_t sample_rate_out, int mode) {
     if (sample_rate_in < sample_rate_out) {
         JSDRV_LOGE("Not downsample: sample_rate_in < sample_rate_out: %lu < %lu",
                    sample_rate_in, sample_rate_out);
@@ -93,6 +95,7 @@ struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint
         JSDRV_LOGE("Cannot downsample: sample_rate_out cannot be 0");
         return NULL;
     }
+
     uint32_t decimate_factor = sample_rate_in / sample_rate_out;
     if ((sample_rate_out * decimate_factor) != sample_rate_in) {
         JSDRV_LOGE("Cannot downsample: sample_rate_out * M != sample_rate_in");
@@ -103,9 +106,23 @@ struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint
     if (NULL == self) {
         return NULL;
     }
+    self->avg = 0;
     self->sample_rate_in = sample_rate_in;
     self->sample_rate_out = sample_rate_out;
     self->decimate_factor = decimate_factor;
+
+    switch (mode) {
+        case JSDRV_DOWNSAMPLE_MODE_AVERAGE:
+            self->mode = JSDRV_DOWNSAMPLE_MODE_AVERAGE;
+            break;
+        case JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND:
+            self->mode = JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND;
+            break;
+        default:
+            jsdrv_free(self);
+            JSDRV_LOGE("Unsupported mode: %d", mode);
+            return NULL;
+    }
 
     uint32_t idx = 0;
     while (decimate_factor > 1) {
@@ -146,6 +163,7 @@ void jsdrv_downsample_clear(struct jsdrv_downsample_s * self) {
         return;
     }
     self->sample_count = 0;
+    self->avg = 0;
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(self->filters); ++i) {
         self->filters[i].buffer_idx = 0;
         jsdrv_memset(self->filters[i].buffer, 0, sizeof(self->filters[i].buffer));
@@ -168,6 +186,24 @@ uint32_t jsdrv_downsample_decimate_factor(struct jsdrv_downsample_s * self) {
 
 static bool jsdrv_downsample_add_i64q30(struct jsdrv_downsample_s * self, uint64_t sample_id, int64_t x_in, int64_t * x_out) {
     struct filter_s * f;
+    if (self->mode == JSDRV_DOWNSAMPLE_MODE_AVERAGE) {
+        if (self->sample_count == 0) {
+            if (0 != sample_id % self->decimate_factor) {
+                // discard until aligned
+                return false;
+            }
+            self->avg = 0;
+        }
+        self->avg += x_in;
+        ++self->sample_count;
+        if (self->sample_count >= self->decimate_factor) {
+            *x_out = (self->avg / self->sample_count);
+            self->sample_count = 0;
+            return true;
+        }
+        return false;
+    }
+
     if (self->sample_count == 0) {
         if (0 != sample_id % self->decimate_factor) {
             // discard until aligned

@@ -10,6 +10,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 * Added node.js binding.
 * Fixed downsampling to round to nearest integer for integer types.
+* Added downsampling mode JSDRV_DOWNSAMPLE_MODE_AVERAGE, but not yet connected.
 
 
 ## 1.4.10

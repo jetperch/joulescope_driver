@@ -1020,7 +1020,7 @@ static void on_sampling_frequency(struct js110_dev_s * d, const struct jsdrv_uni
             p->downsample = NULL;
         }
         reset_port(d, idx);
-        p->downsample = jsdrv_downsample_alloc(SAMPLING_FREQUENCY, fs);
+        p->downsample = jsdrv_downsample_alloc(SAMPLING_FREQUENCY, fs, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
     }
 }
 
