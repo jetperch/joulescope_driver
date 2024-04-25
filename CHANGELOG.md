@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.5.1
+
+2024 Apr 26 [in progress]
+
+* Fixed JSDRV_DOWNSAMPLE_MODE_AVERAGE glitches due to C type conversion.
+
+
 ## 1.5.0
 
 2024 Apr 24

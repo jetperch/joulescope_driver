@@ -117,7 +117,8 @@ struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint
             break;
         case JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND:
             self->mode = JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND;
-            break;
+            self->sample_delay = self->decimate_factor / 2;
+            return self;
         default:
             jsdrv_free(self);
             JSDRV_LOGE("Unsupported mode: %d", mode);
@@ -188,24 +189,31 @@ static bool jsdrv_downsample_add_i64q30(struct jsdrv_downsample_s * self, uint64
     struct filter_s * f;
     if (self->mode == JSDRV_DOWNSAMPLE_MODE_AVERAGE) {
         if (self->sample_count == 0) {
-            if (0 != sample_id % self->decimate_factor) {
+            if (0 != (sample_id % self->decimate_factor)) {
                 // discard until aligned
                 return false;
             }
             self->avg = 0;
         }
-        self->avg += x_in;
+        if (INT64_MIN != self->avg) {
+            if (INT64_MIN == x_in) {  // NaN
+                self->avg = INT64_MIN;
+            } else {
+                self->avg += x_in;
+            }
+        }
         ++self->sample_count;
         if (self->sample_count >= self->decimate_factor) {
-            *x_out = (self->avg / self->sample_count);
+            *x_out = (INT64_MIN == self->avg) ? INT64_MIN : (self->avg / (int64_t) self->sample_count);
             self->sample_count = 0;
+            self->avg = 0;
             return true;
         }
         return false;
     }
 
     if (self->sample_count == 0) {
-        if (0 != sample_id % self->decimate_factor) {
+        if (0 != (sample_id % self->decimate_factor)) {
             // discard until aligned
             return false;
         }
