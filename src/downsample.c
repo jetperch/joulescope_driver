@@ -114,11 +114,11 @@ struct jsdrv_downsample_s * jsdrv_downsample_alloc(uint32_t sample_rate_in, uint
     switch (mode) {
         case JSDRV_DOWNSAMPLE_MODE_AVERAGE:
             self->mode = JSDRV_DOWNSAMPLE_MODE_AVERAGE;
-            break;
-        case JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND:
-            self->mode = JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND;
             self->sample_delay = self->decimate_factor / 2;
             return self;
+        case JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND:
+            self->mode = JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND;
+            break;
         default:
             jsdrv_free(self);
             JSDRV_LOGE("Unsupported mode: %d", mode);
