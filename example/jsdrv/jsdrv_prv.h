@@ -77,6 +77,7 @@ int32_t app_match(struct app_s * self, const char * filter);
 typedef int (*command_fn)(struct app_s * self, int argc, char * argv[]);
 
 int on_help(struct app_s * self, int argc, char * argv[]);
+int on_capture(struct app_s * self, int argc, char * argv[]);
 int on_demo(struct app_s * self, int argc, char * argv[]);
 int on_dev(struct app_s * self, int argc, char * argv[]);
 int on_hotplug(struct app_s * self, int argc, char * argv[]);

@@ -122,6 +122,7 @@ int32_t app_match(struct app_s * self, const char * filter) {
 }
 
 const struct command_s COMMANDS[] = {
+        {"capture", on_capture, "Capture sample data to a file"},
         {"demo", on_demo, "Demonstrate streaming"},
         {"dev",  on_dev,  "Developer tools"},
         {"hotplug", on_hotplug, "Monitor device insertion and removal"},

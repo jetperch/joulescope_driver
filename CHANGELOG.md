@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.5.2
+
+2024 May 8
+
+* Added "capture" subcommand to jsdrv example executable.
+
+
 ## 1.5.1
 
 2024 Apr 27

@@ -14,6 +14,7 @@
 
 add_executable(jsdrv_exe
         jsdrv/jsdrv.c
+        jsdrv/capture.c
         jsdrv/demo.c
         jsdrv/dev.c
         jsdrv/hotplug.c
