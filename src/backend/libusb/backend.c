@@ -54,7 +54,6 @@ enum device_mark_e {
     DEVICE_MARK_NONE = 0,
     DEVICE_MARK_FOUND = 1,
     DEVICE_MARK_ADDED = 2,
-    DEVICE_MARK_REMOVED = 3,
 };
 
 enum device_mode_e {
@@ -475,6 +474,7 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             msg->value = jsdrv_union_i32(rc);
             msg_queue_push(d->ll_device.rsp_q, msg);
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, msg->topic)) {
+            JSDRV_LOGI("device_close(%s)", d->ll_device.prefix);
             device_close(d);
             msg->value = jsdrv_union_i32(0);
             msg_queue_push(d->ll_device.rsp_q, msg);
@@ -506,12 +506,27 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
 static void process_devices(struct backend_s * s) {
     struct jsdrv_list_s * item;
     struct dev_s * d;
-    struct jsdrvp_msg_s * msg;
+    struct jsdrvp_msg_s * msg = NULL;
     jsdrv_list_foreach(&s->devices_active, item) {
         d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
-        msg = msg_queue_pop_immediate(d->ll_device.cmd_q);
-        device_handle_msg(d, msg);
+        do {
+            msg = msg_queue_pop_immediate(d->ll_device.cmd_q);
+            device_handle_msg(d, msg);
+        } while (NULL != msg);
     }
+    jsdrv_list_foreach(&s->devices_free, item) {
+        d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
+        while (1) {
+            msg = msg_queue_pop_immediate(d->ll_device.cmd_q);
+            if (NULL == msg) {
+                break;
+            }
+            JSDRV_LOGW("device closed, but message %s", msg->topic);
+            msg->value = jsdrv_union_i32(JSDRV_ERROR_CLOSED);
+            msg_queue_push(d->ll_device.rsp_q, msg);
+        };
+    }
+
 }
 
 static int32_t device_add(struct backend_s * s, libusb_device * usb_device, struct libusb_device_descriptor * descriptor) {
@@ -724,27 +739,42 @@ void * backend_thread(void * arg) {
 
     while (!s->do_exit) {
         nfds = 0;
+
+        // Add primary backend command queue descriptor.
         fds[nfds].fd = msg_queue_handle_get(s->backend.cmd_q);
         fds[nfds].events = POLLIN;
         fds[nfds++].revents = 0;
+
+        // Add hotplug command queue descriptor.
         fds[nfds].fd = s->hotplug_event->fd_poll;
         fds[nfds].events = s->hotplug_event->events;
         fds[nfds++].revents = 0;
 
+        // Add libusb file descriptors.
         const struct libusb_pollfd ** libusb_fds = libusb_get_pollfds(s->ctx);
         for (int i = 0; libusb_fds[i]; ++i) {
             fds[nfds].fd = libusb_fds[i]->fd;
-            fds[nfds++].events = libusb_fds[i]->events;
+            fds[nfds].events = libusb_fds[i]->events;
+            fds[nfds++].revents = 0;
         }
         libusb_free_pollfds(libusb_fds);
 
-        rc = poll(fds, nfds, 10);
+        // Add file descriptors for each device command queue.
+        for (size_t i = 0; i < JSDRV_ARRAY_SIZE(s->devices); ++i) {
+            fds[nfds].fd = msg_queue_handle_get(s->devices[i].ll_device.cmd_q);
+            fds[nfds].events = POLLIN;
+            fds[nfds++].revents = 0;
+        }
+
+        if (nfds > JSDRV_ARRAY_SIZE(fds)) {
+            JSDRV_LOG_CRITICAL("nfds too large");
+        }
+
+        rc = poll(fds, nfds, 5000);
         rc = libusb_handle_events_timeout_completed(s->ctx, &libusb_timeout_tv, NULL);
-        //if (fds[0].revents) {
-            while (handle_msg(s, msg_queue_pop_immediate(s->backend.cmd_q))) {
-                ; //
-            }
-        //}
+        while (handle_msg(s, msg_queue_pop_immediate(s->backend.cmd_q))) {
+            ; //
+        }
         process_devices(s);
         if (fds[1].revents) {
             handle_hotplug(s);

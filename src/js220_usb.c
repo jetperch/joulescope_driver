@@ -673,6 +673,9 @@ static int32_t d_close(struct dev_s * d) {
             rv = JSDRV_ERROR_TIMED_OUT;
         } else {
             rv = m->value.value.i32;
+            if (JSDRV_ERROR_CLOSED == rv) {
+                rv = 0;
+            }
             jsdrvp_msg_free(d->context, m);
         }
         for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {

@@ -4,6 +4,16 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.5.3
+
+2024 May 28
+
+* Improved libusb (macOS, linux) backend message processing.
+  * Handle closed command queues to improve firmware update reliability.
+  * Added device command queues to poll for improved performance.
+  * Handle all pending device commands with each pass.
+
+
 ## 1.5.2
 
 2024 May 8
