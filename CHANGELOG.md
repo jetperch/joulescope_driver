@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.5.4
+
+2024 Jun 28
+
+* Pinned numpy version dependency to < 2.
+
+
 ## 1.5.3
 
 2024 May 28

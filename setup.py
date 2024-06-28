@@ -274,7 +274,7 @@ setuptools.setup(
 
     # See https://packaging.python.org/en/latest/requirements.html
     install_requires=[
-        'numpy>=1.23',
+        'numpy>=1.23,<2',
         'psutil',
         "pywin32; platform_system=='Windows'",
         'requests',

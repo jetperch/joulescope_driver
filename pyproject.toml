@@ -20,7 +20,7 @@
 # Minimum requirements for the build system to execute.
 requires = [
     "Cython>=0.29",
-    "numpy>=1.23",
+    "numpy>=1.23,<2",
     "pywin32; sys_platform == 'win32'",
     "requests",
     "setuptools>=42",
