@@ -882,10 +882,17 @@ cdef class Driver:
 cdef void _on_cmd_publish_cbk(void * user_data, const char * topic,
                               const c_jsdrv.jsdrv_union_s * value) noexcept with gil:
     cdef object fn = <object> user_data
-    topic_str = topic.decode('utf-8')
-    v = _jsdrv_union_to_py(value)
-    # print(f'{topic_str} = {v}')
-    fn(topic_str, v)
+    try:
+        topic_str = topic.decode('utf-8')
+    except:
+        _log_c.exception('_on_cmd_publish_cbk could not convert topic to utf-8')
+        return
+    try:
+        v = _jsdrv_union_to_py(value)
+        # print(f'{topic_str} = {v}')
+        fn(topic_str, v)
+    except:
+        _log_c.exception(f'_on_cmd_publish_cbk({topic_str})')
 
 
 cdef void _on_log_recv(void * user_data, const c_jsdrv.jsdrv_log_header_s * header,
