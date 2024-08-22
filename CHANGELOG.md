@@ -4,6 +4,16 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.5.5
+
+2024 Aug 22
+
+* Modified Python record entry point to use all connected Joulescopes by default.
+  Use the "--serial_number" argument to record from a specific Joulescope
+  when the host computer has more than one Joulescope connected.
+* Catch exceptions on pyjoulescope_driver callbacks to Python code.  
+
+
 ## 1.5.4
 
 2024 Jun 28

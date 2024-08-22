@@ -62,52 +62,54 @@ def on_cmd(args):
         if len(device_paths) == 0:
             print('Device not found')
             return
-        elif len(device_paths) > 1:
-            print(f'Selecting {device_paths[0]}')
-        device_path = device_paths[0]
 
-        if args.verbose:
-            print(f'Open device: {device_path}')
-        d.open(device_path, mode=args.open)
-        try:  # configure the device
-            fs = args.frequency
-            if fs is None:
-                fs = 2_000_000 if 'js110' in device_path else 1_000_000
-            else:
-                fs = int(fs)
-            d.publish(f'{device_path}/h/fs', fs)
-        except Exception:
-            print('failed to configure device')
-            d.close(device_path)
-            return 1
-
-        if args.open == 'defaults':
-            if 'js110' in device_path:
-                d.publish(f'{device_path}/s/i/range/select', 'auto')
-                d.publish(f'{device_path}/s/v/range/select', '15 V')
-            elif 'js220' in device_path:
-                d.publish(f'{device_path}/s/i/range/mode', 'auto')
-                d.publish(f'{device_path}/s/v/range/mode', 'auto')
-            else:
-                print(f'Unsupported device {device_path}')
-
-        wr = Record(d, device_path, args.signals)
-        if args.verbose:
-            print(f'Record to file: {args.filename}')
-        print('Start recording.  Press CTRL-C to stop.')
-        wr.open(args.filename)
-        t_stop = None if args.duration is None else time.time() + args.duration
         try:
-            while t_stop is None or t_stop > time.time():
-                time.sleep(0.010)
+            for device_path in device_paths:
+                if args.verbose:
+                    print(f'Open device: {device_path}')
+                d.open(device_path, mode=args.open)
+                try:  # configure the device
+                    fs = args.frequency
+                    if fs is None:
+                        fs = 2_000_000 if 'js110' in device_path else 1_000_000
+                    else:
+                        fs = int(fs)
+                    d.publish(f'{device_path}/h/fs', fs)
+                except Exception:
+                    print('failed to configure device')
+                    return 1
+
+                if args.open == 'defaults':
+                    if 'js110' in device_path:
+                        d.publish(f'{device_path}/s/i/range/select', 'auto')
+                        d.publish(f'{device_path}/s/v/range/select', '15 V')
+                    elif 'js220' in device_path:
+                        d.publish(f'{device_path}/s/i/range/mode', 'auto')
+                        d.publish(f'{device_path}/s/v/range/mode', 'auto')
+                    else:
+                        print(f'Unsupported device {device_path}')
+
+            wr = Record(d, device_paths, args.signals)
             if args.verbose:
-                print(f'Record complete due to duration')
-        except KeyboardInterrupt:
-            if args.verbose:
-                print(f'Record complete due to user CTRL-C')
+                print(f'Record to file: {args.filename}')
+            print('Start recording.  Press CTRL-C to stop.')
+            wr.open(args.filename)
+            t_stop = None if args.duration is None else time.time() + args.duration
+            try:
+                while t_stop is None or t_stop > time.time():
+                    time.sleep(0.010)
+                if args.verbose:
+                    print(f'Record complete due to duration')
+            except KeyboardInterrupt:
+                if args.verbose:
+                    print(f'Record complete due to user CTRL-C')
+            finally:
+                wr.close()
         finally:
-            wr.close()
-            d.close(device_path)
+            for device_path in device_paths:
+                if args.verbose:
+                    print(f'Close device: {device_path}')
+                d.close(device_path)
     if args.verbose:
         print(f'Record complete')
     return 0

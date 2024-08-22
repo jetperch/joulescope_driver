@@ -125,7 +125,7 @@ class Record:
     """Record streaming sample data to a JLS v2 file.
 
     :param driver: The active driver instance.
-    :param device_path: The device prefix path.
+    :param device_path: The device prefix path or list of device prefix paths.
     :param signals: The list of signals to record.  None=['current', 'voltage']
     :param auto: Configure automatic operation.
         Provide the list of automatic operations to perform, which can be:
@@ -150,7 +150,7 @@ class Record:
         self._wr = None
         self._data_map = {}
         self._driver = driver
-        self._device_path = device_path
+        self._device_paths = [device_path] if isinstance(device_path, str) else device_path
         self._on_data_fn = self._on_data  # bind and save for unsubscribe
         if signals is None:
             signals = ['current', 'voltage']
@@ -166,16 +166,19 @@ class Record:
 
         signal_id = 0
         self._signals = {}
-        for signal_name in signals:
-            signal_id += 1
-            signal = copy.deepcopy(_SIGNALS[signal_name])
-            signal['name'] = signal_name
-            signal['signal_id'] = signal_id
-            signal['signal_type'] = _DTYPE_MAP[signal['signal_type']]
-            signal['data_topic_abs'] = f"{self._device_path}/{signal['data_topic']}"
-            signal['utc_next'] = None
-            signal['utc'] = None
-            self._signals[signal_name] = signal
+        for idx, device_path in enumerate(self._device_paths):
+            for signal_name in signals:
+                signal_id += 1
+                signal = copy.deepcopy(_SIGNALS[signal_name])
+                signal['name'] = signal_name
+                signal['source_id'] = idx + 1
+                signal['signal_id'] = signal_id
+                signal['signal_type'] = _DTYPE_MAP[signal['signal_type']]
+                signal['ctrl_topic_abs'] = f"{device_path}/{signal['ctrl_topic']}"
+                signal['data_topic_abs'] = f"{device_path}/{signal['data_topic']}"
+                signal['utc_next'] = None
+                signal['utc'] = None
+                self._signals[f'{device_path}.{signal_name}'] = signal
 
     def open(self, filename):
         """Start the recording.
@@ -187,33 +190,30 @@ class Record:
         if self._wr is not None:
             self.close()
         self._data_map.clear()
-        device_path = self._device_path
         self._wr = Writer(filename)
-        _, model, serial_number = device_path.split('/')
-        model = model.upper()
-        self._wr.source_def(
-            source_id=1,
-            name=f'{model}-{serial_number}',
-            vendor='Jetperch',
-            model=model,
-            version='',
-            serial_number=serial_number,
-        )
+        for idx, device_path in enumerate(self._device_paths):
+            _, model, serial_number = device_path.split('/')
+            model = model.upper()
+            self._wr.source_def(
+                source_id=idx + 1,
+                name=f'{model}-{serial_number}',
+                vendor='Jetperch',
+                model=model,
+                version='',
+                serial_number=serial_number,
+            )
 
-        for signal in self._signals.values():
-            data_topic = signal['data_topic_abs']
-            self._data_map[data_topic] = signal
-            self._driver.subscribe(data_topic, ['pub'], self._on_data_fn)
-
-        if 'signal_enable' in self._auto:
             for signal in self._signals.values():
-                ctrl_topic = signal['ctrl_topic']
-                self._publish(ctrl_topic, 1, timeout=0)
+                data_topic = signal['data_topic_abs']
+                self._data_map[data_topic] = signal
+                self._driver.subscribe(data_topic, ['pub'], self._on_data_fn)
+
+            if 'signal_enable' in self._auto:
+                for signal in self._signals.values():
+                    ctrl_topic = signal['ctrl_topic_abs']
+                    self._driver.publish(ctrl_topic, 1, timeout=0)
 
         return self
-
-    def _publish(self, topic, value, timeout=None):
-        self._driver.publish(f'{self._device_path}/{topic}', value, timeout=timeout)
 
     def close(self):
         """Close the recording and release all resources."""
@@ -224,9 +224,9 @@ class Record:
                 if signal['utc'] is not None:
                     self._wr.utc(signal['signal_id'], *signal['utc'])
                 if 'signal_disable' in self._auto:
-                    ctrl_topic = signal['ctrl_topic']
+                    ctrl_topic = signal['ctrl_topic_abs']
                     try:
-                        self._publish(ctrl_topic, 0, timeout=0.25)
+                        self._driver.publish(ctrl_topic, 0, timeout=0.25)
                     except TimeoutError:
                         self._log.warning('Timed out in publish: %s <= 0', ctrl_topic)
                     except Exception:
@@ -246,7 +246,7 @@ class Record:
         if signal['utc_next'] is None:
             self._wr.signal_def(
                 signal_id=signal['signal_id'],
-                source_id=1,
+                source_id=signal['source_id'],
                 signal_type=SignalType.FSR,
                 data_type=signal['signal_type'],
                 sample_rate=value['sample_rate'] // decimate_factor,
