@@ -23,6 +23,7 @@
 #include "jsdrv/cmacro_inc.h"
 #include "js220_api.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifndef JSDRV_JS220_I128_MATH_H__
 #define JSDRV_JS220_I128_MATH_H__
@@ -48,6 +49,7 @@ js220_i128 js220_i128_udiv(js220_i128 dividend, uint64_t divisor, uint64_t * rem
 js220_i128 js220_i128_lshift(js220_i128 x, int32_t shift);
 js220_i128 js220_i128_rshift(js220_i128 x, int32_t shift);
 double js220_i128_to_f64(js220_i128 x, uint32_t q);
+bool js220_i128_is_neg(js220_i128 x);
 double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint64_t n, uint32_t q);
 js220_i128 js220_i128_compute_integral(js220_i128 x, uint64_t n);
 

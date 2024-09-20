@@ -154,6 +154,10 @@ double js220_i128_to_f64(js220_i128 x, uint32_t q) {
     return f;
 }
 
+bool js220_i128_is_neg(js220_i128 x) {
+    return x.i64[1] < 0;
+}
+
 double js220_i128_compute_std(int64_t x1, js220_i128 x2, uint64_t n, uint32_t q) {
     double f;
     if (x1 < 0) {

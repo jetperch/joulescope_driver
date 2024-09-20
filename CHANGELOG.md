@@ -9,6 +9,7 @@ This file contains the list of changes made to the Joulescope driver.
 2024 Sep 20
 
 * Reduced log verbosity for some JS220 messages.
+* Added js220_i128_is_neg.
 
 
 ## 1.5.5

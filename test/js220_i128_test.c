@@ -134,6 +134,13 @@ static void test_to_f64(void ** state) {
     assert_float_equal((double) (1LLU<<32), js220_i128_to_f64((js220_i128) {.u64 = {1LLU<<63, 0}}, 31), 0.0);
 }
 
+static void test_is_neg(void ** state) {
+    (void) state;
+    assert_false(js220_i128_is_neg(js220_i128_init_i64(0)));
+    assert_false(js220_i128_is_neg(js220_i128_init_i64(1)));
+    assert_true(js220_i128_is_neg(js220_i128_init_i64(-1)));
+}
+
 static void test_compute_std(void ** state) {
     (void) state;
     assert_float_equal(0.0, js220_i128_compute_std(0, (js220_i128) {.u64 = {0, 0}}, 1, 0), 0.0);
@@ -160,6 +167,7 @@ int main(void) {
             cmocka_unit_test(test_lshift),
             cmocka_unit_test(test_rshift),
             cmocka_unit_test(test_to_f64),
+            cmocka_unit_test(test_is_neg),
             cmocka_unit_test(test_compute_std),
             cmocka_unit_test(test_compute_integral),
     };
