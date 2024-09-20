@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.5.6
+
+2024 Sep 20
+
+* Reduced log verbosity for some JS220 messages.
+
+
 ## 1.5.5
 
 2024 Aug 22

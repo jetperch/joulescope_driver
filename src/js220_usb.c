@@ -429,7 +429,7 @@ static int32_t bulk_out_publish(struct dev_s * d, const char * topic, const stru
     struct js220_publish_s * p = (struct js220_publish_s *) &m->payload.bin[4];
     char buf[32];
     jsdrv_union_value_to_str(value, buf, (uint32_t) sizeof(buf), 1);
-    JSDRV_LOGI("publish to dev %s %s", topic, buf);
+    JSDRV_LOGD1("publish to dev %s %s", topic, buf);
     memset(p, 0, sizeof(*p) + sizeof(union jsdrv_union_inner_u));
     jsdrv_cstr_copy(p->topic, topic, sizeof(p->topic));
     p->type = value->type;
@@ -1055,8 +1055,8 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     const uint32_t quarter_range_u32 = 0x40000000LU;  // 536 seconds = 8.9 minutes @ 2 Msps
 
     if (port->sample_id_next == 0) {
-        JSDRV_LOGI("stream_in_port %d initial synchronization: u32=0x%" PRIx32 ", u64=0x%" PRIx64,
-                   port_id, sample_id_u32, d->time_map.offset_counter);
+        JSDRV_LOGD2("stream_in_port %d initial synchronization: u32=0x%" PRIx32 ", u64=0x%" PRIx64,
+                    port_id, sample_id_u32, d->time_map.offset_counter);
         resync = true;
     } else if ((skip >= quarter_range_u32) && (dup >= quarter_range_u32)) {
         JSDRV_LOGW("stream_in_port %d lost sync", port_id);

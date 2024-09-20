@@ -1,6 +1,6 @@
 {
   "name": "joulescope_driver",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Interface with Joulescopes using node.js and Electron",
   "keywords": [
     "Joulescope",
