@@ -180,17 +180,24 @@ class Record:
                 signal['utc'] = None
                 self._signals[f'{device_path}.{signal_name}'] = signal
 
-    def open(self, filename):
+    def open(self, filename, user_data=None):
         """Start the recording.
 
         :param filename: The filename for the recording.  Use
             time64.filename to produce a filename from timestamp.
+        :param user_data: The list of additional user data
+            given as [chunk_meta, data] pairs.
+            Use chunk_meta 0 and a data string for notes
+            that display in the Joulescope UI.
         :return: self.
         """
         if self._wr is not None:
             self.close()
         self._data_map.clear()
         self._wr = Writer(filename)
+        if user_data is not None:
+            for chunk_meta, data in user_data:
+                self._wr.user_data(chunk_meta, data)
         for idx, device_path in enumerate(self._device_paths):
             _, model, serial_number = device_path.split('/')
             model = model.upper()

@@ -44,6 +44,9 @@ def parser_config(p):
                         + 'current, voltage, power, current_range, gpi[0], gpi[1], gpi[2], gpi[3], trigger_in. '
                         + 'You can also use the short form i, v, p, r, 0, 1, 2, 3, T '
                         + 'Defaults to current,voltage.')
+    p.add_argument('--note',
+                   help='Add an arbitrary note to the JLS file. '
+                        + 'Provide a quoted string to handle spaces.')
     p.add_argument('filename',
                    nargs='?',
                    default=time64.filename(),
@@ -93,7 +96,10 @@ def on_cmd(args):
             if args.verbose:
                 print(f'Record to file: {args.filename}')
             print('Start recording.  Press CTRL-C to stop.')
-            wr.open(args.filename)
+            user_data = []
+            if args.note is not None:
+                user_data.append([0, args.note])
+            wr.open(args.filename, user_data=user_data)
             t_stop = None if args.duration is None else time.time() + args.duration
             try:
                 while t_stop is None or t_stop > time.time():

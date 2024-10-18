@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.6.0
+
+2024 Oct 18
+
+* Added support for notes to Record class and record entry point.
+  * Added user_data parameter to Record.open().
+  * Added "--note" option to record entry point.
+
+
 ## 1.5.6
 
 2024 Sep 20
