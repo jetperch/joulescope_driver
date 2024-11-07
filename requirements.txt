@@ -17,7 +17,7 @@
 
 check-manifest>=0.37
 Cython                                  # C native build
-numpy>=1.23,<2
+numpy>=2.1.0,<3
 psutil
 pywin32; sys_platform == 'win32'
 requests                                # firmware image download

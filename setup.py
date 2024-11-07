@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2018-2023 Jetperch LLC
+# Copyright 2018-2024 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -243,10 +243,10 @@ setuptools.setup(
         # Supported Python versions
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
         'Programming Language :: Python :: Implementation :: CPython',
 
         # Topics
@@ -270,11 +270,11 @@ setuptools.setup(
     include_package_data=True,
 
     # See https://packaging.python.org/guides/distributing-packages-using-setuptools/#python-requires
-    python_requires='~=3.9',
+    python_requires='~=3.10',
 
     # See https://packaging.python.org/en/latest/requirements.html
     install_requires=[
-        'numpy>=1.23,<2',
+        'numpy>=2.1.0,<3',
         'psutil',
         "pywin32; platform_system=='Windows'",
         'requests',

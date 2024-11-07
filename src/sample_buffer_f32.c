@@ -24,8 +24,10 @@ JSDRV_STATIC_ASSERT(offsetof(struct sbuf_f32_s, msg_sample_id) + 4 == offsetof(s
 
 
 void sbuf_f32_clear(struct sbuf_f32_s * self) {
-    jsdrv_memset(self, 0, offsetof(struct sbuf_f32_s, buffer));
-    self->sample_id_decimate = 2;
+    if (NULL != self) {
+        jsdrv_memset(self, 0, offsetof(struct sbuf_f32_s, buffer));
+        self->sample_id_decimate = 2;
+    }
 }
 
 uint32_t sbuf_f32_length(struct sbuf_f32_s * self) {

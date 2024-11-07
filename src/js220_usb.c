@@ -143,6 +143,21 @@ static const char * sampling_frequency_meta = "{"
     "]"
 "}";
 
+static const char * signal_downsample_filter = "{"
+    "\"dtype\": \"u32\","
+    "\"brief\": \"The signal downsampling filter.\","
+    "\"default\": 0,"
+    "\"options\": ["
+        "[0, \"wideband\"],"  // on host (default)
+        "[1, \"sinc1\"]"      // on instrument, added in fpga & fw version 1.3.0
+    "]"
+"}";
+
+enum downsample_e {
+    DOWNSAMPLE_WIDEBAND = 0,
+    DOWNSAMPLE_SINC1 = 1,
+};
+
 enum state_e {
     ST_NOT_PRESENT = 0,  //
     ST_CLOSED = 1,
@@ -209,6 +224,7 @@ struct port_s {
     uint32_t decimate_factor;      // on-instrument decimation performed, excluding host downsampling
     uint64_t sample_id_next;
     struct jsdrvp_msg_s * msg_in;  // one for each port
+    struct sbuf_f32_s * buf;
 };
 
 struct dev_s {
@@ -219,6 +235,11 @@ struct dev_s {
     uint16_t in_frame_id;
     uint64_t in_frame_count;
     uint32_t stream_in_port_enable;
+
+    struct js220_port0_connect_s port0_connect;
+    uint32_t fs;  // sampling frequency
+    uint32_t signal_downsample_filter;
+    uint32_t gpi_downsample_filter;
 
     struct port_s ports[PORTS_LENGTH]; // one for each port
     enum break_e ll_await_break_on;
@@ -585,6 +606,9 @@ static void d_reset(struct dev_s * d) {
     sbuf_f32_clear(&d->i_buf);
     sbuf_f32_clear(&d->v_buf);
     sbuf_f32_clear(&d->p_buf);
+    d->ports[0x0f & PORT_ID_CURRENT].buf = &d->i_buf;
+    d->ports[0x0f & PORT_ID_VOLTAGE].buf = &d->v_buf;
+    d->ports[0x0f & PORT_ID_POWER].buf = &d->p_buf;
 
     for (uint32_t idx = 0; idx < (PORTS_LENGTH - 2); ++idx) {
         struct port_s *p = &d->ports[idx];
@@ -718,13 +742,7 @@ static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
             }
             JSDRV_LOGD1("stream_in_port_enable port %s %s => 0x%08lx",
                         topic, (enable ? "on" : "off"), d->stream_in_port_enable);
-            if (PORT_MAP[i].field_id == JSDRV_FIELD_CURRENT) {
-                sbuf_f32_clear(&d->i_buf);
-            } else if (PORT_MAP[i].field_id == JSDRV_FIELD_VOLTAGE) {
-                sbuf_f32_clear(&d->v_buf);
-            } else if (PORT_MAP[i].field_id == JSDRV_FIELD_POWER) {
-                sbuf_f32_clear(&d->p_buf);
-            }
+            sbuf_f32_clear(p->buf);
             return (PORT_MAP[i].field_id != JSDRV_FIELD_POWER);  // todo when add decimate, always true when decimated
         }
     }
@@ -894,18 +912,28 @@ static int32_t handle_reset(struct dev_s * d, int32_t target) {
     return 0;
 }
 
+static bool has_on_instrument_downsample(struct dev_s * d) {
+    return (
+            (d->port0_connect.fw_version >= (JSDRV_VERSION_ENCODE_U32(1, 3, 0)))
+            && (d->port0_connect.fpga_version >= (JSDRV_VERSION_ENCODE_U32(1, 3, 0)))
+    );
+}
+
 static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union_s * value) {
     struct jsdrv_union_s v = *value;
-    uint32_t fs;
     uint32_t fs_in;
     if (jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
         JSDRV_LOGW("Could not process sampling frequency");
         return JSDRV_ERROR_PARAMETER_INVALID;
     }
-    fs = v.value.u32;
-    JSDRV_LOGI("on_sampling_frequency(%lu)", fs);
+    d->fs = v.value.u32;
+    JSDRV_LOGI("on_sampling_frequency(%lu)", d->fs);
+    uint32_t gpi_n = SAMPLING_FREQUENCY / d->fs;
+    uint32_t signal_n = (DOWNSAMPLE_WIDEBAND == d->signal_downsample_filter) ? 1 : (gpi_n / 2);
+
     for (uint32_t idx = 0; idx < (PORTS_LENGTH - 2); ++idx) {
         struct port_s *p = &d->ports[idx];
+        p->sample_id_next = 0;
         if (p->downsample) {
             jsdrv_downsample_free(p->downsample);
             p->downsample = NULL;
@@ -916,17 +944,58 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
         }
         p->decimate_factor = PORT_MAP[idx].decimate_min;
         fs_in = SAMPLING_FREQUENCY / p->decimate_factor;
+        if (
+                (PORT_MAP[idx].element_type == JSDRV_DATA_TYPE_UINT)
+                && (PORT_MAP[idx].element_size_bits == 1)
+                && (d->gpi_downsample_filter)) {
+            p->decimate_factor = gpi_n;
+            continue;
+        }
         if (PORT_MAP[idx].element_type != JSDRV_DATA_TYPE_FLOAT) {
             continue;
         }
-        if (fs >= fs_in) {
+        if (d->fs >= fs_in) {
             continue;
         }
-        p->downsample = jsdrv_downsample_alloc(fs_in, fs, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
-        if (NULL == p->downsample) {
-            JSDRV_LOGW("jsdrv_downsample_alloc failed");
+
+        if (DOWNSAMPLE_WIDEBAND == d->signal_downsample_filter) {
+            p->downsample = jsdrv_downsample_alloc(fs_in, d->fs, JSDRV_DOWNSAMPLE_MODE_FLAT_PASSBAND);
+            if (NULL == p->downsample) {
+                JSDRV_LOGW("jsdrv_downsample_alloc failed");
+            }
+        } else {
+            p->decimate_factor = gpi_n;  // GPI is from full rate
         }
+        JSDRV_LOGI("jsdrv_downsample_alloc idx=%lu, decimate_factor=%lu",
+                   idx, p->decimate_factor);
     }
+
+    if (has_on_instrument_downsample(d) && (NULL != d->ll.cmd_q)) {
+        JSDRV_LOGI("jsdrv_downsample_alloc signal_n=%lu, gpi_n=%lu", signal_n, gpi_n);
+        bulk_out_publish(d, "s/dwnN/N", &jsdrv_union_u32(signal_n));
+        bulk_out_publish(d, "s/gpi/+/dwnN/N", &jsdrv_union_u32(gpi_n));
+    }
+
+    return 0;
+}
+
+static int32_t on_filter(struct dev_s * d,  const struct jsdrv_union_s * value) {
+    struct jsdrv_union_s v = *value;
+    if (jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+        JSDRV_LOGW("Could not process signal downsampling filter setting");
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    d->signal_downsample_filter = v.value.u32;
+    return on_sampling_frequency(d, &jsdrv_union_u32(d->fs));
+}
+
+static int32_t on_gpi_downsample_filter(struct dev_s * d,  const struct jsdrv_union_s * value) {
+    struct jsdrv_union_s v = *value;
+    if (jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+        JSDRV_LOGW("Could not process GPI downsampling filter setting");
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    d->gpi_downsample_filter = v.value.u32;
     return 0;
 }
 
@@ -988,6 +1057,9 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         } else if (0 == strcmp("h/fs", topic)) {
             rc = on_sampling_frequency(d, &msg->value);
             send_return_code_to_frontend(d, topic, rc);
+        } else if (0 == strcmp("h/filter", topic)) {
+            rc = on_filter(d, &msg->value);
+            send_return_code_to_frontend(d, topic, rc);
         } else if (0 == strcmp("h/state", topic)) {
             // ignore
         } else {
@@ -996,6 +1068,9 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         }
     } else {
         JSDRV_LOGD1("handle_cmd to device %s", topic);
+        if (0 == strcmp("s/gpi/+/dwnN/mode", topic)) {
+            on_gpi_downsample_filter(d, &msg->value);
+        }
         if (!handle_cmd_ctrl(d, topic, &msg->value)) {
             bulk_out_publish(d, topic, &msg->value);
         }
@@ -1048,9 +1123,9 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     // sample_id is always for 2 Msps, regardless of this port's sample rate
     // Use 32-bit sample_id (not unwrapped 64-bit) to determine skips & duplicates
     uint32_t sample_id_u32 = *p_u32++;
-    uint32_t sample_id_next_u32 = (uint32_t) (port->sample_id_next & 0xffffffffLLU);
-    uint32_t skip = sample_id_u32 - sample_id_next_u32;
-    uint32_t dup = sample_id_next_u32 - sample_id_u32;
+    uint32_t sample_id_expect_u32 = (uint32_t) (port->sample_id_next & 0xffffffffLLU);
+    uint32_t skip = sample_id_u32 - sample_id_expect_u32;
+    uint32_t dup = sample_id_expect_u32 - sample_id_u32;
     bool resync = false;
     const uint32_t quarter_range_u32 = 0x40000000LU;  // 536 seconds = 8.9 minutes @ 2 Msps
 
@@ -1091,21 +1166,24 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
     if ((dup == 0) && (skip == 0)) {
         // normal operation, ready to process sample_id_next.
     } else if ((sample_count * port->decimate_factor) < dup) {
-        JSDRV_LOGI("stream_in_port %d dup %" PRIu32 " : received=0x%" PRIx32 " expected=0x%" PRIu32,
-                   port_id, dup, sample_id_u32, sample_id_next_u32);
+        JSDRV_LOGI("stream_in_port %d dup %" PRIu32 " : received=0x%" PRIx32 " expected=0x%" PRIx32,
+                   port_id, dup, sample_id_u32, sample_id_expect_u32);
         return;  // no new data present, still awaiting sample_id_next.
     } else if (dup) {
-        JSDRV_LOGI("stream_in_port %d overlap %" PRIu32 " : received=0x%" PRIx32 " expected=0x%" PRIu32,
-                   port_id, dup, sample_id_u32, sample_id_next_u32);
+        JSDRV_LOGI("stream_in_port %d overlap %" PRIu32 " : received=0x%" PRIx32 " expected=0x%" PRIx32,
+                   port_id, dup, sample_id_u32, sample_id_expect_u32);
         uint32_t overlap = dup / port->decimate_factor;
         uint16_t overlap_size = (uint16_t) ((overlap * field_def->element_size_bits) / 8);
+        if (overlap_size < port->decimate_factor) {
+            port->sample_id_next -= dup;
+        }
         size -= overlap_size;
         sample_count -= overlap;
         p_u32 += overlap_size / sizeof(uint32_t);
         // ready to process starting from sample_id_next.
     } else if (skip) {
         JSDRV_LOGI("stream_in_port %d skip %" PRIu32 " : received=0x%" PRIx32 " expected=0x%" PRIx32,
-                   port_id, skip, sample_id_u32, sample_id_next_u32);
+                   port_id, skip, sample_id_u32, sample_id_expect_u32);
         if (m) {
             JSDRV_LOGD1("stream_in_port: port_id=%d send partial message", (int) port_id);
             port->msg_in = NULL;
@@ -1256,7 +1334,8 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
             char hw_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
             char fpga_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
 
-            struct js220_port0_connect_s * c = &p->connect;
+            d->port0_connect = p->connect;
+            struct js220_port0_connect_s * c = &d->port0_connect;
 
             JSDRV_LOGI("port0 connect rsp");
             jsdrv_version_u32_to_str(c->protocol_version, prot_ver_str, sizeof(prot_ver_str));
@@ -1280,10 +1359,14 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
             send_to_frontend(d, "c/fw/version$", &jsdrv_union_cjson_r(fw_ver_meta));
             send_to_frontend(d, "c/hw/version$", &jsdrv_union_cjson_r(hw_ver_meta));
             send_to_frontend(d, "h/fs$", &jsdrv_union_cjson_r(sampling_frequency_meta));
+            if (has_on_instrument_downsample(d)) {
+                send_to_frontend(d, "h/filter$", &jsdrv_union_cjson_r(signal_downsample_filter));
+            }
             send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
             send_to_frontend(d, "c/fw/version", &jsdrv_union_u32_r(c->fw_version));
             send_to_frontend(d, "c/hw/version", &jsdrv_union_u32_r(c->hw_version));
             send_to_frontend(d, "s/fpga/version", &jsdrv_union_u32_r(c->fpga_version));
+            send_to_frontend(d, "h/filter", &jsdrv_union_u32_r(0));
 
             if (d->ll_await_break_on == BREAK_CONNECT) {
                 d->ll_await_break_on = BREAK_NONE;

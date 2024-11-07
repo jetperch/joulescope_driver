@@ -4,6 +4,16 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.7.0
+
+2024 Nov 7 [in progress]
+
+* Added support for JS220 on-instrument downsampling with fw 1.3.0 & fpga 1.3.0
+* Migrated to numpy 2
+* Added Python 3.13 support
+* Dropped Python 3.9 support
+
+
 ## 1.6.0
 
 2024 Oct 18

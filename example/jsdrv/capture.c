@@ -106,7 +106,7 @@ static void channel_finalize(struct app_s * self, const char * device, const cha
     jsdrv_topic_append(&t, "s");
     jsdrv_topic_append(&t, channel);
     jsdrv_topic_append(&t, "ctrl");
-    rc = jsdrv_publish(self->context, t.topic, &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT);
+    rc = jsdrv_publish(self->context, t.topic, &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
     if (rc) {
         printf("jsdrv_publish failed with %d\n", rc);
     }
@@ -116,12 +116,13 @@ static void channel_finalize(struct app_s * self, const char * device, const cha
 
 
 static int usage(void) {
-    printf("usage: jsdrv_util capture [<option> <value>]"
+    printf("usage: jsdrv capture [<option> <value>]"
            "\n"
            "Options:\n"
            "    -d, --duration  The duration in milliseconds.\n"
            "                    0 (default) runs until CTRL-C\n"
            "    -f, --frequency The sampling frequency in Hz.\n"
+           "    --filter        Downsample filter type uint32.\n"
            "    -i, --current   The capture filename for current.\n"
            "    -v, --voltage   The capture filename for voltage.\n"
            "    -p, --power     The capture filename for power.\n"
@@ -131,6 +132,8 @@ static int usage(void) {
 
 int on_capture(struct app_s * self, int argc, char * argv[]) {
     uint32_t frequency = 0;
+    uint32_t filter = 0;
+    bool on_instrument = false;
     char * filename_i = NULL;
     char * filename_v = NULL;
     char * filename_p = NULL;
@@ -150,6 +153,11 @@ int on_capture(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
             ARG_REQUIRE();
             ROE(jsdrv_cstr_to_u32(argv[0], &frequency));
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--filter")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &filter));
             ARG_CONSUME();
         } else if ((0 == strcmp(argv[0], "-i")) || (0 == strcmp(argv[0], "--current"))) {
             ARG_CONSUME();
@@ -175,13 +183,17 @@ int on_capture(struct app_s * self, int argc, char * argv[]) {
     char * device = self->device.topic;
     ROE(publish(self, device, JSDRV_MSG_OPEN, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
     if (jsdrv_cstr_starts_with(device, "u/js220")) {
-        ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto"), 0));
     } else if (jsdrv_cstr_starts_with(device, "u/js110")) {
-        ROE(publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), 0));
     }
     if (frequency) {
-        ROE(publish(self, device, "h/fs", &jsdrv_union_u32_r(frequency), JSDRV_TIMEOUT_MS_DEFAULT));
+        if (filter) {
+            ROE(publish(self, device, "h/filter", &jsdrv_union_u32_r(filter), 0));
+        }
+        ROE(publish(self, device, "h/fs", &jsdrv_union_u32_r(frequency), 0));
     }
+
     file_i = channel_init(self, device, "i", filename_i);
     file_v = channel_init(self, device, "v", filename_v);
     file_p = channel_init(self, device, "p", filename_p);

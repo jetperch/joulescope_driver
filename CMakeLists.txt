@@ -1,4 +1,4 @@
-# Copyright 2014-2022 Jetperch LLC
+# Copyright 2014-2024 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required (VERSION 3.1)
+cmake_minimum_required (VERSION 3.20)
 set(PARENT_PROJECT_DIR ${PROJECT_SOURCE_DIR})
 
 if ("${CMAKE_C_COMPILER}" MATCHES "MSVC")
@@ -23,7 +23,7 @@ else()
 endif()
 
 project(JOULESCOPE_DRIVER
-        VERSION 1.6.0
+        VERSION 1.7.0
         LANGUAGES C)
 SET(PROJECT_PREFIX JSDRV)
 SET(VERSION_STRING "${PROJECT_VERSION}")

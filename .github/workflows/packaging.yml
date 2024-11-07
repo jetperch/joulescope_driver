@@ -24,7 +24,7 @@ on: ['push', 'pull_request']
 
 
 env:
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: '3.13'
 
 
 jobs:
@@ -158,7 +158,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest", "windows-latest", "macos-latest"]
-        python_version: ["cp39", "cp310", "cp311", "cp312"]
+        python_version: ["cp310", "cp311", "cp312", "cp313"]
 
     steps:
       - name: Download sdist
