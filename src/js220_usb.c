@@ -85,6 +85,7 @@
 #define FRAME_SIZE_U32             (FRAME_SIZE_BYTES / 4)
 #define MEM_SIZE_MAX               (512U * 1024U)
 #define SAMPLING_FREQUENCY         (2000000U)
+#define FS_MIN_ON_INSTRUMENT       (1000U)
 #define STREAM_PAYLOAD_FULL        (JSDRV_STREAM_DATA_SIZE - JSDRV_STREAM_HEADER_SIZE - JS220_USB_FRAME_LENGTH)
 
 extern const struct jsdrvp_param_s js220_params[];
@@ -715,6 +716,61 @@ static int32_t d_close(struct dev_s * d) {
     return rv;
 }
 
+static bool has_on_instrument_downsample(struct dev_s * d) {
+    return (
+            (d->port0_connect.fw_version >= (JSDRV_VERSION_ENCODE_U32(1, 3, 0)))
+            && (d->port0_connect.fpga_version >= (JSDRV_VERSION_ENCODE_U32(1, 3, 0)))
+    );
+}
+
+static bool is_on_instrument_downsample_active(struct dev_s * d) {
+    return (has_on_instrument_downsample(d)
+        && (d->fs < (SAMPLING_FREQUENCY / 2))
+        && (DOWNSAMPLE_SINC1 == d->signal_downsample_filter));
+}
+
+static bool is_ivp_enabled(struct dev_s * d) {
+    return (COMPUTE_POWER_MASK == (COMPUTE_POWER_MASK & d->stream_in_port_enable));
+}
+
+static void stream_reset_host_side(struct dev_s * d, size_t port_id) {
+    struct port_s * p = &d->ports[port_id & 0x0f];
+    if (NULL != p->msg_in) {
+        jsdrvp_msg_free(d->context, p->msg_in);
+        p->msg_in = NULL;
+    }
+    sbuf_f32_clear(p->buf);
+    jsdrv_downsample_clear(p->downsample);
+    p->sample_id_next = 0;
+}
+
+static void stream_suspend(struct dev_s * d) {
+    for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
+        size_t port_id = i + 16;
+        uint32_t mask = (0x00010000 << i);
+        bool enabled = (0 != (d->stream_in_port_enable & mask));
+        if (enabled) {
+            bulk_out_publish(d, PORT_MAP[i].ctrl_topic, &jsdrv_union_u32_r(0));
+        }
+        stream_reset_host_side(d, port_id);
+    }
+}
+
+static void stream_resume(struct dev_s * d) {
+    for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
+        size_t port_id = i + 16;
+        uint32_t mask = 1 << port_id;
+        stream_reset_host_side(d, port_id);
+        bool enabled = (0 != (d->stream_in_port_enable & mask));
+        if ((port_id == PORT_ID_POWER) && is_ivp_enabled(d) && !is_on_instrument_downsample_active(d)) {
+            continue;
+        }
+        if (enabled) {
+            bulk_out_publish(d, PORT_MAP[i].ctrl_topic, &jsdrv_union_u32_r(1));
+        }
+    }
+}
+
 static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool enable) {
     bool was_enabled;
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
@@ -726,24 +782,27 @@ static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
                             topic, (enable ? "on" : "off"));
                 return true;
             }
-            struct port_s * p = &d->ports[i];
-            if (NULL != p->msg_in) {
-                jsdrvp_msg_free(d->context, p->msg_in);
-                p->msg_in = NULL;
-            }
-            if (NULL != p->downsample) {
-                jsdrv_downsample_clear(p->downsample);
-            }
+            stream_reset_host_side(d, i + 16);
             if (enable) {
-                p->sample_id_next = 0;
                 d->stream_in_port_enable |= mask;
             } else {
                 d->stream_in_port_enable &= ~mask;
             }
             JSDRV_LOGD1("stream_in_port_enable port %s %s => 0x%08lx",
                         topic, (enable ? "on" : "off"), d->stream_in_port_enable);
-            sbuf_f32_clear(p->buf);
-            return (PORT_MAP[i].field_id != JSDRV_FIELD_POWER);  // todo when add decimate, always true when decimated
+
+            if ((PORT_MAP[i].field_id == JSDRV_FIELD_CURRENT)
+                    || (PORT_MAP[i].field_id == JSDRV_FIELD_VOLTAGE)
+                    || (PORT_MAP[i].field_id == JSDRV_FIELD_POWER)) {
+                if (is_ivp_enabled(d) && !is_on_instrument_downsample_active(d)) {
+                    // computer power on host
+                    bulk_out_publish(d, "s/p/ctrl", &jsdrv_union_u32_r(0));
+                    bulk_out_publish(d, "s/i/ctrl", &jsdrv_union_u32_r(1));
+                    bulk_out_publish(d, "s/v/ctrl", &jsdrv_union_u32_r(1));
+                    return false;
+                }
+            }
+            return true;
         }
     }
     JSDRV_LOGW("stream_in_port_enable port not found %s", topic);
@@ -912,13 +971,6 @@ static int32_t handle_reset(struct dev_s * d, int32_t target) {
     return 0;
 }
 
-static bool has_on_instrument_downsample(struct dev_s * d) {
-    return (
-            (d->port0_connect.fw_version >= (JSDRV_VERSION_ENCODE_U32(1, 3, 0)))
-            && (d->port0_connect.fpga_version >= (JSDRV_VERSION_ENCODE_U32(1, 3, 0)))
-    );
-}
-
 static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union_s * value) {
     struct jsdrv_union_s v = *value;
     uint32_t fs_in;
@@ -926,21 +978,21 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
         JSDRV_LOGW("Could not process sampling frequency");
         return JSDRV_ERROR_PARAMETER_INVALID;
     }
+
+    stream_suspend(d);
     d->fs = v.value.u32;
     JSDRV_LOGI("on_sampling_frequency(%lu)", d->fs);
     uint32_t gpi_n = SAMPLING_FREQUENCY / d->fs;
+    if (d->fs < FS_MIN_ON_INSTRUMENT) {
+        gpi_n = SAMPLING_FREQUENCY / FS_MIN_ON_INSTRUMENT;
+    }
     uint32_t signal_n = (DOWNSAMPLE_WIDEBAND == d->signal_downsample_filter) ? 1 : (gpi_n / 2);
 
     for (uint32_t idx = 0; idx < (PORTS_LENGTH - 2); ++idx) {
         struct port_s *p = &d->ports[idx];
-        p->sample_id_next = 0;
         if (p->downsample) {
             jsdrv_downsample_free(p->downsample);
             p->downsample = NULL;
-        }
-        if (p->msg_in) {
-            jsdrvp_msg_free(d->context, p->msg_in);
-            p->msg_in = NULL;
         }
         p->decimate_factor = PORT_MAP[idx].decimate_min;
         fs_in = SAMPLING_FREQUENCY / p->decimate_factor;
@@ -965,6 +1017,12 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
             }
         } else {
             p->decimate_factor = gpi_n;  // GPI is from full rate
+            if (d->fs < FS_MIN_ON_INSTRUMENT) {
+                p->downsample = jsdrv_downsample_alloc(FS_MIN_ON_INSTRUMENT, d->fs, JSDRV_DOWNSAMPLE_MODE_AVERAGE);
+                if (NULL == p->downsample) {
+                    JSDRV_LOGW("jsdrv_downsample_alloc failed");
+                }
+            }
         }
         JSDRV_LOGI("jsdrv_downsample_alloc idx=%lu, decimate_factor=%lu",
                    idx, p->decimate_factor);
@@ -972,9 +1030,10 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
 
     if (has_on_instrument_downsample(d) && (NULL != d->ll.cmd_q)) {
         JSDRV_LOGI("jsdrv_downsample_alloc signal_n=%lu, gpi_n=%lu", signal_n, gpi_n);
-        bulk_out_publish(d, "s/dwnN/N", &jsdrv_union_u32(signal_n));
-        bulk_out_publish(d, "s/gpi/+/dwnN/N", &jsdrv_union_u32(gpi_n));
+        bulk_out_publish(d, "s/dwnN/N", &jsdrv_union_u32_r(signal_n));
+        bulk_out_publish(d, "s/gpi/+/dwnN/N", &jsdrv_union_u32_r(gpi_n));
     }
+    stream_resume(d);
 
     return 0;
 }
@@ -986,7 +1045,7 @@ static int32_t on_filter(struct dev_s * d,  const struct jsdrv_union_s * value) 
         return JSDRV_ERROR_PARAMETER_INVALID;
     }
     d->signal_downsample_filter = v.value.u32;
-    return on_sampling_frequency(d, &jsdrv_union_u32(d->fs));
+    return on_sampling_frequency(d, &jsdrv_union_u32_r(d->fs));
 }
 
 static int32_t on_gpi_downsample_filter(struct dev_s * d,  const struct jsdrv_union_s * value) {
@@ -1195,16 +1254,7 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         port->sample_id_next += skip;
     }
 
-    switch (port_id) {
-        case PORT_ID_CURRENT:
-            sbuf_f32_add(&d->i_buf, port->sample_id_next, (float *) p_u32, sample_count);
-            break;
-        case PORT_ID_VOLTAGE:
-            sbuf_f32_add(&d->v_buf, port->sample_id_next, (float *) p_u32, sample_count);
-            break;
-        default:
-            break;
-    }
+    sbuf_f32_add(port->buf, port->sample_id_next, (float *) p_u32, sample_count);
 
     if (m && ((m->value.size + size) >= sizeof(struct jsdrv_stream_signal_s))) {
         // should never happen (see jsdrvp_backend_send towards end), but just in case
@@ -1628,8 +1678,9 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
             handle_statistics_in(d, p_u32 + 1, hdr.h.length);
         } else {
             handle_stream_in_port(d, hdr.h.port_id, p_u32 + 1, hdr.h.length);
-            if ((hdr.h.port_id == PORT_ID_VOLTAGE) &&
-                       ((d->stream_in_port_enable & COMPUTE_POWER_MASK) == COMPUTE_POWER_MASK)) {
+            if ((hdr.h.port_id == PORT_ID_VOLTAGE)
+                    && is_ivp_enabled(d)
+                    && !is_on_instrument_downsample_active(d)) {
                 compute_power(d);
             }
         }
@@ -1759,7 +1810,7 @@ int32_t jsdrvp_ul_js220_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     *device = NULL;
     struct dev_s * d = jsdrv_alloc_clr(sizeof(struct dev_s));
     JSDRV_LOGD3("jsdrvp_ul_js220_usb_factory %p", d);
-    on_sampling_frequency(d, &jsdrv_union_u32(SAMPLING_FREQUENCY));
+    on_sampling_frequency(d, &jsdrv_union_u32_r(SAMPLING_FREQUENCY));
     d->context = context;
     d->ll = *ll;
     d->ul.cmd_q = msg_queue_init();

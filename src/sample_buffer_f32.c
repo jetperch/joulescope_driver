@@ -43,6 +43,9 @@ uint64_t sbuf_tail_sample_id(struct sbuf_f32_s * self) {
 }
 
 void sbuf_f32_add(struct sbuf_f32_s * self, uint64_t sample_id, float * data, uint32_t length) {
+    if (NULL == self) {
+        return;
+    }
     if (self->head_sample_id > sample_id) {
         // common case, some overlap with previous data, only need new data.
         uint64_t dup = (self->head_sample_id - sample_id) / self->sample_id_decimate;
