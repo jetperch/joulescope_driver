@@ -12,6 +12,7 @@ This file contains the list of changes made to the Joulescope driver.
 * Migrated to numpy 2
 * Added Python 3.13 support
 * Dropped Python 3.9 support
+* Added arbitrary scaler for i,v,p
 
 
 ## 1.6.0

@@ -154,6 +154,19 @@ static const char * signal_downsample_filter = "{"
     "]"
 "}";
 
+static const char * i_scale_factor = "{"
+    "\"dtype\": \"f32\","
+    "\"brief\": \"The current signal scale factor.\","
+    "\"default\": 1.0"
+"}";
+
+static const char * v_scale_factor = "{"
+    "\"dtype\": \"f32\","
+    "\"brief\": \"The voltage signal scale factor.\","
+    "\"default\": 1.0"
+"}";
+
+
 enum downsample_e {
     DOWNSAMPLE_WIDEBAND = 0,
     DOWNSAMPLE_SINC1 = 1,
@@ -253,6 +266,8 @@ struct dev_s {
 
     struct jsdrv_time_map_s time_map;
 
+    float i_scale;
+    float v_scale;
     struct sbuf_f32_s i_buf;
     struct sbuf_f32_s v_buf;
     struct sbuf_f32_s p_buf;
@@ -1119,6 +1134,20 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         } else if (0 == strcmp("h/filter", topic)) {
             rc = on_filter(d, &msg->value);
             send_return_code_to_frontend(d, topic, rc);
+        } else if (0 == strcmp("h/i_scale", topic)) {
+            struct jsdrv_union_s value = msg->value;
+            rc = jsdrv_union_as_type(&value, JSDRV_UNION_F64);
+            if (!rc) {
+                d->i_scale = (float) msg->value.value.f64;
+            }
+            send_return_code_to_frontend(d, topic, rc);
+        } else if (0 == strcmp("h/v_scale", topic)) {
+            struct jsdrv_union_s value = msg->value;
+            rc = jsdrv_union_as_type(&value, JSDRV_UNION_F64);
+            if (!rc) {
+                d->v_scale = (float) msg->value.value.f64;
+            }
+            send_return_code_to_frontend(d, topic, rc);
         } else if (0 == strcmp("h/state", topic)) {
             // ignore
         } else {
@@ -1254,6 +1283,21 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         port->sample_id_next += skip;
     }
 
+    float scale = 1.0;
+    switch (port_id) {
+        case PORT_ID_CURRENT: scale = d->i_scale; break;
+        case PORT_ID_VOLTAGE: scale = d->v_scale; break;
+        default: break;
+    }
+
+    // apply scale
+    if ((scale != 1.0) && (scale != 0.0)) {
+        float * samples_f32 = (float *) p_u32;
+        for (size_t i = 0; i < sample_count; ++i) {
+            *samples_f32++ *= scale;
+        }
+    }
+
     sbuf_f32_add(port->buf, port->sample_id_next, (float *) p_u32, sample_count);
 
     if (m && ((m->value.size + size) >= sizeof(struct jsdrv_stream_signal_s))) {
@@ -1360,6 +1404,21 @@ static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t si
     struct js220_statistics_raw_s src;
     memcpy(&src, p_u32, sizeof(src));
     if (0 == js220_stats_convert(&src, dst)) {
+        dst->i_avg *= d->i_scale;
+        dst->i_std *= d->i_scale;
+        dst->i_min *= d->i_scale;
+        dst->i_max *= d->i_scale;
+        dst->v_avg *= d->v_scale;
+        dst->v_std *= d->v_scale;
+        dst->v_min *= d->v_scale;
+        dst->v_max *= d->v_scale;
+        double p_scale = d->i_scale * d->v_scale;
+        dst->p_avg *= p_scale;
+        dst->p_std *= p_scale;
+        dst->p_min *= p_scale;
+        dst->p_max *= p_scale;
+        dst->charge_f64 *= d->i_scale;
+        dst->energy_f64 *= p_scale;
         time_map_update(d,
                         dst->block_sample_id + dst->block_sample_count * dst->decimate_factor,
                         (double) dst->sample_freq,
@@ -1412,6 +1471,8 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
             if (has_on_instrument_downsample(d)) {
                 send_to_frontend(d, "h/filter$", &jsdrv_union_cjson_r(signal_downsample_filter));
             }
+            send_to_frontend(d, "h/i_scale", &jsdrv_union_cjson_r(i_scale_factor));
+            send_to_frontend(d, "h/v_scale", &jsdrv_union_cjson_r(v_scale_factor));
             send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
             send_to_frontend(d, "c/fw/version", &jsdrv_union_u32_r(c->fw_version));
             send_to_frontend(d, "c/hw/version", &jsdrv_union_u32_r(c->hw_version));
@@ -1810,6 +1871,8 @@ int32_t jsdrvp_ul_js220_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     *device = NULL;
     struct dev_s * d = jsdrv_alloc_clr(sizeof(struct dev_s));
     JSDRV_LOGD3("jsdrvp_ul_js220_usb_factory %p", d);
+    d->i_scale = 1.0f;
+    d->v_scale = 1.0f;
     on_sampling_frequency(d, &jsdrv_union_u32_r(SAMPLING_FREQUENCY));
     d->context = context;
     d->ll = *ll;

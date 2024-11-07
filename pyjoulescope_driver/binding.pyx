@@ -701,6 +701,9 @@ cdef class Driver:
             v.type = c_jsdrv.JSDRV_UNION_BIN
             v.value.bin = <const uint8_t *> byte_str
             v.size = <uint32_t> len(value)
+        elif isinstance(value, float):
+            v.type = c_jsdrv.JSDRV_UNION_F64
+            v.value.f64 = value
         else:
             raise ValueError(f'Unsupported value type: {type(value)}')
         if '!' not in topic:
