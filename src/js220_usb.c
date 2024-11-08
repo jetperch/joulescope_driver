@@ -1070,7 +1070,7 @@ static int32_t on_gpi_downsample_filter(struct dev_s * d,  const struct jsdrv_un
         return JSDRV_ERROR_PARAMETER_INVALID;
     }
     d->gpi_downsample_filter = v.value.u32;
-    return 0;
+    return on_sampling_frequency(d, &jsdrv_union_u32_r(d->fs));
 }
 
 static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
