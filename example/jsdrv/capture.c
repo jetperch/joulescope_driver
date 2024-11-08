@@ -133,7 +133,6 @@ static int usage(void) {
 int on_capture(struct app_s * self, int argc, char * argv[]) {
     uint32_t frequency = 0;
     uint32_t filter = 0;
-    bool on_instrument = false;
     char * filename_i = NULL;
     char * filename_v = NULL;
     char * filename_p = NULL;
