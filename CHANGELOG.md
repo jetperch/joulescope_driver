@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.7.1
+
+2024 Nov 20 [in progress]
+
+* Fixed memory leak on error condition for Windows backend.
+
+
 ## 1.7.0
 
 2024 Nov 8

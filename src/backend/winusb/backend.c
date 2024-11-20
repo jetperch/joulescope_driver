@@ -843,11 +843,11 @@ static void device_scan(struct backend_s * s) {
                     &dev_interface,
                     dev_interface_detail, required_size, &required_size, 0)) {
                 wcstombs_s(0, device_path, sizeof(device_path), dev_interface_detail->DevicePath, _TRUNCATE);
-                jsdrv_free(dev_interface_detail);
                 device_update(s, dt, device_path);
             } else {
                 WINDOWS_LOGE("SetupDiGetDeviceInterfaceDetailW failed %d", dt->device_type);
             }
+            jsdrv_free(dev_interface_detail);
             jsdrv_memset(&dev_interface, 0, sizeof(dev_interface));
             dev_interface.cbSize = sizeof(dev_interface);
             ++member_index;
