@@ -38,10 +38,10 @@ static inline uint8_t ptr_sub(uint8_t a, uint8_t b) {
     return (a - b) & _SUPPRESS_SAMPLES_MASK;
 }
 
-static const struct js110_sample_s SAMPLE_MISSING = {
-        .i = NAN,
-        .v = NAN,
-        .p = NAN,
+static struct js110_sample_s SAMPLE_MISSING = {
+        .i = 0.0f,  // initialized to NAN
+        .v = 0.0f,  // initialized to NAN
+        .p = 0.0f,  // initialized to NAN
         .current_range = JS110_I_RANGE_MISSING,
         .gpi0 = 0,
         .gpi1 = 0,
@@ -85,6 +85,9 @@ void js110_sp_initialize(struct js110_sp_s * self) {
     self->_suppress_samples_post = 1;
     self->_suppress_mode = JS110_SUPPRESS_MODE_INTERP;
     self->_suppress_matrix = &SUPPRESS_MATRIX_N;
+    SAMPLE_MISSING.i = NAN;
+    SAMPLE_MISSING.v = NAN;
+    SAMPLE_MISSING.p = NAN;
     js110_sp_reset(self);
 }
 
