@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.7.2
+
+2024 Dec 10
+
+* Fixed time sync inaccuracy by including FPGA 1.3.2
+
+
 ## 1.7.1
 
 2024 Nov 25
