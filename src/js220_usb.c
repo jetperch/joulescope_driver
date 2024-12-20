@@ -588,12 +588,12 @@ static int32_t d_open_ll(struct dev_s * d, int32_t opt) {
     JSDRV_LOGI("open_ll(opt=%d)", opt);
     int32_t rc;
     d->ll_await_break_on = BREAK_NONE;
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(opt & 1));
 
     if (d->state == ST_OPEN) {
         JSDRV_LOGE("open_ll but already open");
         return JSDRV_ERROR_IN_USE;
     }
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(opt & 1));
     msg_queue_push(d->ll.cmd_q, m);
     m = ll_await_topic(d, JSDRV_MSG_OPEN, TIMEOUT_MS);
     if (!m) {
