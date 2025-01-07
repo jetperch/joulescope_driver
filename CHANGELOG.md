@@ -6,9 +6,10 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.7.3
 
-2024 Dec 20 [in progress]
+2025 Jan 7
 
-* Fixed memory leak on JS220 repeated open without close. 
+* Fixed memory leak on JS220 repeated open without close.
+* Fixed setup.py links (fixes PyPi links).
 
 
 ## 1.7.2
