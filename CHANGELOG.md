@@ -9,6 +9,8 @@ This file contains the list of changes made to the Joulescope driver.
 2025 Mar 4
 
 * Fixed memory leak on every JS220 command.
+* Increased JSDRV_STREAM_DATA_SIZE from 64 kB to 256 kB to support
+  larger buffer requests.
 
 
 ## 1.7.3

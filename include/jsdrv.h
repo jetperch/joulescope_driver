@@ -127,7 +127,7 @@
 /// The header size of jsdrv_stream_signal_s before the data field.
 #define JSDRV_STREAM_HEADER_SIZE        (48U)
 /// The size of data in jsdrv_stream_signal_s.
-#define JSDRV_STREAM_DATA_SIZE          (1024 * 64)    // 64 kB max
+#define JSDRV_STREAM_DATA_SIZE          (1024 * 256)    // 256 kB max
 
 /**
  * @defgroup jsdrv_topis Topics
