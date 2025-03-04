@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.7.4
+
+2025 Mar 4
+
+* Fixed memory leak on every JS220 command.
+
+
 ## 1.7.3
 
 2025 Jan 7
