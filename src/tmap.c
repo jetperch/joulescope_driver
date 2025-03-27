@@ -311,7 +311,7 @@ static int64_t entry_to_timestamp(struct jsdrv_time_map_s * entry, uint64_t samp
 static uint64_t entry_to_sample_id(struct jsdrv_time_map_s * entry, int64_t timestamp) {
     double dt = (double) (timestamp - entry->offset_time);;
     dt *= (1.0 / JSDRV_TIME_SECOND);
-    return entry->offset_counter + (uint64_t) (dt * entry->counter_rate);
+    return (uint64_t) (((int64_t) entry->offset_counter) + (int64_t) (dt * entry->counter_rate));
 }
 
 int32_t jsdrv_tmap_sample_id_to_timestamp(struct jsdrv_tmap_s * self, uint64_t sample_id, int64_t * timestamp) {

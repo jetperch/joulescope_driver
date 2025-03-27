@@ -67,7 +67,6 @@ static void test_add_duplicate(void **state) {
         .counter_rate = 1000.0,
     };
 
-    int64_t v;
     struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(0);
     jsdrv_tmap_add(s, &entry);
     jsdrv_tmap_add(s, &entry);
@@ -132,6 +131,7 @@ static void test_multiple(void **state) {
 }
 
 static void test_expire(void **state) {
+    (void) state;
     struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(0);
     struct jsdrv_time_map_s entry = {
         .offset_time = YEAR,
@@ -166,7 +166,7 @@ static struct jsdrv_time_map_s * construct(size_t count) {
     e[0].offset_time = YEAR;
     e[0].offset_counter = 1000;
     e[0].counter_rate = 1000.0;
-    for (size_t idx = 1; idx < 20; ++idx) {
+    for (size_t idx = 1; idx < count; ++idx) {
         e[idx].offset_time = e[idx - 1].offset_time + SECOND;
         e[idx].offset_counter = e[idx - 1].offset_counter + (uint64_t) e[idx - 1].counter_rate;
         e[idx].counter_rate = e[idx - 1].counter_rate + 2.0;
@@ -175,6 +175,7 @@ static struct jsdrv_time_map_s * construct(size_t count) {
 }
 
 static void test_wrap(void **state) {
+    (void) state;
     struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(8);
     struct jsdrv_time_map_s * entry = construct(20);
     for (size_t idx = 1; idx < 20; ++idx) {
@@ -197,6 +198,7 @@ static void test_wrap(void **state) {
 }
 
 static void test_grow(void **state) {
+    (void) state;
     struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(4);
     struct jsdrv_time_map_s * entry = construct(20);
     for (size_t idx = 0; idx < 20; ++idx) {
@@ -237,6 +239,7 @@ static void test_clear(void **state) {
 }
 
 static void test_get(void **state) {
+    (void) state;
     struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(8);
     struct jsdrv_time_map_s * entry = construct(20);
     for (size_t idx = 0; idx < 20; ++idx) {
@@ -255,6 +258,7 @@ static void test_get(void **state) {
 }
 
 static void test_concurrency(void **state) {
+    (void) state;
     struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(8);
     struct jsdrv_time_map_s * entry = construct(20);
 
