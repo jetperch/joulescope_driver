@@ -82,7 +82,9 @@ _field_to_meta = {
 }
 
 
-cdef class TMap:
+cdef class TimeMap:
+    """Python wrapper for jsdrv_tmap_s instance."""
+
     cdef c_jsdrv.jsdrv_tmap_s * this
     cdef uint64_t _reader_active
 
@@ -94,7 +96,7 @@ cdef class TMap:
 
     @staticmethod
     cdef factory(c_jsdrv.jsdrv_tmap_s * this):
-        cdef TMap instance = TMap.__new__(TMap)
+        cdef TimeMap instance = TimeMap.__new__(TimeMap)
         c_jsdrv.jsdrv_tmap_ref_incr(this)
         instance.this = this
         return instance
@@ -104,10 +106,10 @@ cdef class TMap:
         self.this = NULL
 
     def __copy__(self):
-        return TMap.factory(self.this)
+        return TimeMap.factory(self.this)
 
     def __deepcopy__(self, memo):
-        return TMap.factory(self.this)
+        return TimeMap.factory(self.this)
 
     def __enter__(self):
         c_jsdrv.jsdrv_tmap_reader_enter(self.this)
@@ -208,7 +210,7 @@ cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
             'counter_rate': info[0].time_map.counter_rate,
         },
         'decimate_factor': info[0].decimate_factor,
-        'tmap': TMap.factory(info[0].tmap),
+        'tmap': TimeMap.factory(info[0].tmap),
     }
     return v
 

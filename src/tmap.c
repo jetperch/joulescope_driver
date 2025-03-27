@@ -17,7 +17,7 @@
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/assert.h"
 #include "jsdrv/tmap.h"
-#include "jsdrv/log.h"
+#include "jsdrv_prv/log.h"
 #include "jsdrv_prv/mutex.h"
 #include <stddef.h>
 #include <stdlib.h>

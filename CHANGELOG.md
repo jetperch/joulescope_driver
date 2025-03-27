@@ -6,7 +6,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 1.8.0
 
-2025 Mar 27 [in progress]
+2025 Mar 27
 
 * Added improved time mapping to keep buffer time map consistent.
   * Added jsdrv/tmap.h, tmap.c and tmap_test.c.
