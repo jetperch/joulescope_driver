@@ -13,6 +13,7 @@ This file contains the list of changes made to the Joulescope driver.
   * Added jsdrv_buffer_info_s.tmap field.
   * Added jsdrv_buffer_info_s.decimate_factor field.
   * Maintained jsdrv_buffer_response_s.info.time_map functionality.
+* Added Linux ARM64 builds.
 
 
 ## 1.7.4
