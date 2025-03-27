@@ -1,4 +1,4 @@
-# Copyright 2022-2024 Jetperch LLC
+# Copyright 2022-2025 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-__version__ = "1.7.4"
+__version__ = "1.8.0"
 
 __title__ = "pyjoulescope_driver"
 __description__ = 'Joulescope™ driver'

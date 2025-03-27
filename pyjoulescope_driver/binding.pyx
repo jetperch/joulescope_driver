@@ -1,4 +1,4 @@
-# Copyright 2022-2023 Jetperch LLC
+# Copyright 2022-2025 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ from libc.float cimport DBL_MAX
 from libc.math cimport isfinite, NAN
 from libc.string cimport memset, strcpy
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import json
 import logging
 import numpy as np
@@ -82,6 +82,85 @@ _field_to_meta = {
 }
 
 
+cdef class TMap:
+    cdef c_jsdrv.jsdrv_tmap_s * this
+    cdef uint64_t _reader_active
+
+    def __init__(self):
+        self._reader_active = 0
+
+    def __len__(self):
+        return c_jsdrv.jsdrv_tmap_size(self.this)
+
+    @staticmethod
+    cdef factory(c_jsdrv.jsdrv_tmap_s * this):
+        cdef TMap instance = TMap.__new__(TMap)
+        c_jsdrv.jsdrv_tmap_ref_incr(this)
+        instance.this = this
+        return instance
+
+    def __del__(self):
+        c_jsdrv.jsdrv_tmap_ref_decr(self.this)
+        self.this = NULL
+
+    def __copy__(self):
+        return TMap.factory(self.this)
+
+    def __deepcopy__(self, memo):
+        return TMap.factory(self.this)
+
+    def __enter__(self):
+        c_jsdrv.jsdrv_tmap_reader_enter(self.this)
+        self._reader_active += 1
+
+    def __exit__(self, type, value, traceback):
+        c_jsdrv.jsdrv_tmap_reader_exit(self.this)
+        self._reader_active -= 1
+
+    def sample_id_to_timestamp(self, sample_id):
+        cdef int64_t r
+        if 0 == self._reader_active:
+            with self:
+                return self.sample_id_to_timestamp(sample_id)
+        is_iterable = isinstance(sample_id, Iterable)
+        if is_iterable:
+            sz = len(sample_id)
+            result = np.empty(sz, dtype=np.int64)
+            for idx, s in enumerate(sample_id):
+                if c_jsdrv.jsdrv_tmap_sample_id_to_timestamp(self.this, s, &r):
+                    raise ValueError(f'invalid timestamp {s}')
+                result[idx] = r
+            return result
+        else:
+            c_jsdrv.jsdrv_tmap_sample_id_to_timestamp(self.this, sample_id, &r)
+            return int(r)
+
+    def timestamp_to_sample_id(self, timestamp):
+        cdef uint64_t r
+        if 0 == self._reader_active:
+            with self:
+                return self.timestamp_to_sample_id(timestamp)
+        is_iterable = isinstance(timestamp, Iterable)
+        if is_iterable:
+            sz = len(timestamp)
+            result = np.empty(sz, dtype=np.uint64)
+            for idx, t in enumerate(timestamp):
+                if c_jsdrv.jsdrv_tmap_timestamp_to_sample_id(self.this, t, &r):
+                    raise ValueError(f'invalid timestamp {t}')
+                result[idx] = r
+            return result
+        else:
+            c_jsdrv.jsdrv_tmap_timestamp_to_sample_id(self.this, timestamp, &r)
+            return int(r)
+
+    def get(self, index):
+        cdef c_jsdrv.jsdrv_time_map_s * time_map
+        if 0 == self._reader_active:
+            with self:
+                return self.get(index)
+        time_map = c_jsdrv.jsdrv_tmap_get(self.this, index)
+
+
 cdef object _i128_to_int(uint64_t high, uint64_t low):
     i = int(high) << 64
     i |= int(low)
@@ -128,6 +207,8 @@ cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
             'offset_counter': info[0].time_map.offset_counter,
             'counter_rate': info[0].time_map.counter_rate,
         },
+        'decimate_factor': info[0].decimate_factor,
+        'tmap': TMap.factory(info[0].tmap),
     }
     return v
 

@@ -1,5 +1,5 @@
 /*
-* Copyright 2022 Jetperch LLC
+* Copyright 2022-2025 Jetperch LLC
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -1170,7 +1170,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
 static void time_map_update(struct dev_s * d, uint64_t sample_id, double counter_rate, bool force) {
     if (force || (0 == d->time_map.offset_time)) {
         int64_t t_now = jsdrv_time_utc();
-        JSDRV_LOGI("time_map_update: now=%" PRIi64 " counter=%" PRIi64, t_now, sample_id);
+        JSDRV_LOGI("time_map_update: now=%" PRIi64 " counter=%" PRIi64 " rate=%f", t_now, sample_id, counter_rate);
         d->time_map.offset_time = t_now;
         d->time_map.counter_rate = counter_rate;
         d->time_map.offset_counter = sample_id;
@@ -1511,11 +1511,11 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
         }
 
         case JS220_PORT0_OP_TIMEMAP: {
-            JSDRV_LOGD2("port 0 timemap utc=%" PRIi64 " counter=%" PRIi64,
-                        p->timemap.utc, p->timemap.counter);
             d->time_map.offset_time = p->timemap.utc;
             d->time_map.offset_counter = p->timemap.counter;
-            d->time_map.counter_rate = p->timemap.counter_rate / ((double) (1ULL << 32));
+            d->time_map.counter_rate = ((double) p->timemap.counter_rate) / ((double) (1ULL << 32));
+            JSDRV_LOGD1("port 0 timemap utc=%" PRIi64 " counter=%" PRIi64 " rate=%f",
+                        d->time_map.offset_time, d->time_map.offset_counter, d->time_map.counter_rate);
             break;
         }
 

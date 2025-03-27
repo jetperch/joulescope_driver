@@ -149,6 +149,7 @@ extensions = [
                                      'src/statistics.c',
                                      'src/time.c',
                                      'src/time_map_filter.c',
+                                     'src/tmap.c',
                                      'src/topic.c',
                                      'src/union.c',
                                      'src/version.c',

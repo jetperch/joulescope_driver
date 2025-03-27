@@ -1,4 +1,4 @@
-# Copyright 2014-2021 Jetperch LLC
+# Copyright 2014-2025 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ ADD_CMOCKA_TEST(sample_buffer_f32_test)
 ADD_CMOCKA_TEST(statistics_test)
 ADD_CMOCKA_TEST(time_test)
 ADD_CMOCKA_TEST(time_map_filter_test)
+ADD_CMOCKA_TEST(tmap_test)
 
 add_executable(topic_test topic_test.c ../src/topic.c)
 add_dependencies(topic_test cmocka)

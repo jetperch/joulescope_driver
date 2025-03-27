@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Jetperch LLC
+ * Copyright 2023-2025 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ const char SRC_TOPIC[] = "src/topic/!data";
     b.hdr.element_count = 0;                                \
     b.hdr.decimate_factor = 1;                              \
     b.hdr.sample_rate = 1000000;                            \
-    b.time_map.counter_rate = (double) b.hdr.sample_rate;   \
+    b.tmap = NULL;                                          \
     b.active = true;                                        \
     jsdrv_bufsig_alloc(&b, 1000000, 10, 10)
 
@@ -63,7 +63,7 @@ static void test_initialize_finalize(void **state) {
     assert_int_equal(1000000, info.size_in_samples);
     assert_int_equal(0, info.time_range_utc.length);
     assert_int_equal(0, info.time_range_samples.length);
-    assert_int_equal(1000000, info.time_map.counter_rate);
+    assert_int_equal(0, info.time_map.counter_rate);
 
     jsdrv_bufsig_free(&b);
 }
@@ -141,7 +141,8 @@ static void test_samples_start_length(void **state) {
     assert_int_equal(1000, info.time_range_samples.start);
     assert_int_equal(1999, info.time_range_samples.end);
 
-    int64_t offset_time = jsdrv_time_from_counter(&b.time_map, 1000);
+    int64_t offset_time = 0;
+    assert_int_equal(0, jsdrv_tmap_sample_id_to_timestamp(b.tmap, 1000, &offset_time));
     assert_int_equal(offset_time, info.time_range_utc.start);
     assert_int_equal(offset_time + JSDRV_TIME_MILLISECOND - JSDRV_TIME_MICROSECOND, info.time_range_utc.end);
 

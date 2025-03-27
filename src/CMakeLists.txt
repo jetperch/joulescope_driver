@@ -1,4 +1,4 @@
-# Copyright 2014-2022 Jetperch LLC
+# Copyright 2014-2025 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -62,6 +62,7 @@ set(SUPPORT_SOURCES
         statistics.c
         time.c
         time_map_filter.c
+        tmap.c
         topic.c
         union.c
         version.c

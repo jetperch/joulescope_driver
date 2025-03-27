@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2024 Jetperch LLC
+ * Copyright 2014-2025 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,14 +53,14 @@
  * added.  Any changes that break backwards compatibility should
  * not adversely affect performance.
  */
-#define JSDRV_VERSION_MINOR 7
+#define JSDRV_VERSION_MINOR 8
 
 /**
  * @brief The Joulescope driver patch version.
  *
  * Changes in the patch version indicate bug fixes and improvements.
  */
-#define JSDRV_VERSION_PATCH 4
+#define JSDRV_VERSION_PATCH 0
 
 /**
  * \brief The maximum version string length.

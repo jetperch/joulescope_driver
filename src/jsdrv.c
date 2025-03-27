@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2022 Jetperch LLC
+ * Copyright 2014-2025 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -767,6 +767,10 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
     }
     if (!jsdrv_list_is_empty(&msg->item)) {
         JSDRV_LOGW("jsdrvp_msg_free but still in list");
+    }
+    if (msg->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_RSP) {
+        struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) msg->value.value.bin;
+        jsdrv_tmap_ref_decr(rsp->info.tmap);
     }
     if (msg->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
         msg->value.flags &= ~JSDRV_UNION_FLAG_HEAP_MEMORY;

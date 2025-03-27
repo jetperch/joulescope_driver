@@ -1,5 +1,5 @@
 /*
-* Copyright 2023 Jetperch LLC
+* Copyright 2023-2025 Jetperch LLC
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,6 +32,8 @@
 
 #define JSDRV_BUFSIG_LEVELS_MAX 32
 
+// Forward declaration, see jsdrv/tmap.h
+struct jsdrv_tmap_s;
 
 struct buffer_s;
 
@@ -59,7 +61,7 @@ struct bufsig_s {
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     struct buffer_s * parent;
     struct bufsig_stream_header_s hdr;
-    struct jsdrv_time_map_s time_map;
+    struct jsdrv_tmap_s * tmap;
 
     uint64_t N;             // size in samples
     int64_t size_in_utc;    // size in UTC time
