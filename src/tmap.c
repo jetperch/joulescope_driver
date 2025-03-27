@@ -96,7 +96,7 @@ struct jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size) {
     self->mutex = jsdrv_os_mutex_alloc("tmap");
     self->ref_count = 1;
     return self;
-};
+}
 
 void jsdrv_tmap_ref_incr(struct jsdrv_tmap_s * self) {
     jsdrv_os_mutex_lock(self->mutex);
