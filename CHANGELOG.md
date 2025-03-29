@@ -4,6 +4,16 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.9.0
+
+2025 Mar 29
+
+* Fixed TimeMap.get() in Python binding. 
+* Deprecated jsdrv_buffer_info_s.time_map.  Use tmap.
+* Renamed jsdrv_tmap_size to jsdrv_tmap_length.
+* Changed jsdrv_tmap_get() signature.
+
+
 ## 1.8.0
 
 2025 Mar 27

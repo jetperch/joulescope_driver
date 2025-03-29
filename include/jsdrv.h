@@ -354,14 +354,17 @@ struct jsdrv_buffer_info_s {
     uint8_t element_type;                   ///< jsdrv_element_type_e
     uint8_t element_size_bits;              ///< The element size in bits
     char topic[JSDRV_TOPIC_LENGTH_MAX];     ///< The source topic that provides jsdrv_stream_signal_s.
-    int64_t size_in_utc;                    ///< The total buffer size in UTC time.
+    int64_t size_in_utc;                    ///< The total buffer size in UTC time based on nominal sample rate.
     uint64_t size_in_samples;               ///< The total buffer size in samples.
-    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time.
+    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time based on tmap (not deprecated time_map).
     struct jsdrv_time_range_samples_s time_range_samples;  ///< In sample time.
 
     /**
      * @brief The simple time map for the response.
      * @see tmap
+     *
+     * .. deprecated:: 1.8.0
+     *    Use tmap instead.
      *
      * This field contains the most recent time map between sample ids and
      * UTC wall-clock time.  It does not preserve past history and will

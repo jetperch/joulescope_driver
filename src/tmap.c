@@ -60,7 +60,7 @@ static size_t tmap_size(const struct jsdrv_tmap_s * self) {
     return self->alloc_size - self->tail + self->head;
 }
 
-size_t jsdrv_tmap_size(struct jsdrv_tmap_s * self) {
+size_t jsdrv_tmap_length(struct jsdrv_tmap_s * self) {
     return tmap_size(self);
 }
 
@@ -334,10 +334,11 @@ int32_t jsdrv_tmap_timestamp_to_sample_id(struct jsdrv_tmap_s * self, int64_t ti
     return 0;
 }
 
-struct jsdrv_time_map_s * jsdrv_tmap_get(struct jsdrv_tmap_s * self, size_t index) {
+int32_t jsdrv_tmap_get(struct jsdrv_tmap_s * self, size_t index, struct jsdrv_time_map_s * time_map) {
     if (index >= tmap_size(self)) {
-        return NULL;
+        return JSDRV_ERROR_UNAVAILABLE;
     }
     size_t idx = (self->tail + index) & (self->alloc_size - 1);
-    return &self->entry[idx];
+    *time_map = self->entry[idx];
+    return 0;
 }

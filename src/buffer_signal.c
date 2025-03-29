@@ -166,7 +166,6 @@ bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
     info->index = self->hdr.index;
     info->element_type = self->hdr.element_type;
     info->element_size_bits = self->hdr.element_size_bits;
-    info->size_in_utc = self->size_in_utc;
     info->size_in_samples = self->N;
     jsdrv_cstr_copy(info->topic, self->topic, sizeof(info->topic));
     info->size_in_utc = self->size_in_utc;
@@ -185,9 +184,9 @@ bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
         samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
     }
     info->decimate_factor = self->hdr.decimate_factor;
-    size_t tmap_sz = jsdrv_tmap_size(self->tmap);
+    size_t tmap_sz = jsdrv_tmap_length(self->tmap);
     if (tmap_sz) {
-        info->time_map = *jsdrv_tmap_get(self->tmap, tmap_sz - 1);
+        jsdrv_tmap_get(self->tmap, tmap_sz - 1, &info->time_map);
     }
     jsdrv_tmap_ref_incr(self->tmap);
     info->tmap = self->tmap;
@@ -831,6 +830,7 @@ int32_t jsdrv_bufsig_process_request(
         return JSDRV_ERROR_PARAMETER_INVALID;
     }
     rsp->info.time_range_samples = req->time.samples;
+    samples_to_utc(self, &rsp->info.time_range_samples, &rsp->info.time_range_utc);
     struct jsdrv_time_range_samples_s * r = &rsp->info.time_range_samples;
     uint64_t interval = r->end - r->start + 1;
     if (r->length && r->end) {

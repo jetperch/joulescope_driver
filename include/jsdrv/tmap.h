@@ -106,13 +106,13 @@ void jsdrv_tmap_ref_decr(struct jsdrv_tmap_s * self);
 void jsdrv_tmap_clear(struct jsdrv_tmap_s * self);
 
 /**
- * @brief Get the current size.
+ * @brief Get the current number of entries in the time map.
  *
  * @param self The instance
  * @return The number of entries in this instance.
  * @note Readers should call this from within jsdrv_tmap_reader_enter().
  */
-size_t jsdrv_tmap_size(struct jsdrv_tmap_s * self);
+size_t jsdrv_tmap_length(struct jsdrv_tmap_s * self);
 
 /**
  * @brief Add a new time map entry to this instance.
@@ -193,10 +193,11 @@ int32_t jsdrv_tmap_timestamp_to_sample_id(struct jsdrv_tmap_s * self, int64_t ti
  *
  * @param self The instance.
  * @param index The entry index. 0 is oldest.  jsdrv_tmap_size() - 1 is newest.
- * @return The entry for the corresponding index.
+ * @param time_map[out] The  entry for the corresponding index.
+ * @return 0 or JSDRV_ERROR_UNAVAILABLE.
  * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
  */
-struct jsdrv_time_map_s * jsdrv_tmap_get(struct jsdrv_tmap_s * self, size_t index);
+int32_t jsdrv_tmap_get(struct jsdrv_tmap_s * self, size_t index, struct jsdrv_time_map_s * time_map);
 
 JSDRV_CPP_GUARD_END
 

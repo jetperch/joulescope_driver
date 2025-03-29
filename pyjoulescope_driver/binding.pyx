@@ -82,6 +82,12 @@ _field_to_meta = {
 }
 
 
+_TIME_MAP_GET_DTYPE = np.dtype({
+    'names': ['offset_time', 'offset_counter', 'counter_rate'],
+    'formats': ['i8', 'u8', 'f8']
+})
+
+
 cdef class TimeMap:
     """Python wrapper for jsdrv_tmap_s instance."""
 
@@ -92,7 +98,7 @@ cdef class TimeMap:
         self._reader_active = 0
 
     def __len__(self):
-        return c_jsdrv.jsdrv_tmap_size(self.this)
+        return c_jsdrv.jsdrv_tmap_length(self.this)
 
     @staticmethod
     cdef factory(c_jsdrv.jsdrv_tmap_s * this):
@@ -100,6 +106,11 @@ cdef class TimeMap:
         c_jsdrv.jsdrv_tmap_ref_incr(this)
         instance.this = this
         return instance
+
+    @staticmethod
+    def factory_new(initial_size=0):
+        cdef c_jsdrv.jsdrv_tmap_s * this = c_jsdrv.jsdrv_tmap_alloc(initial_size)
+        return TimeMap.factory(this)
 
     def __del__(self):
         c_jsdrv.jsdrv_tmap_ref_decr(self.this)
@@ -114,6 +125,7 @@ cdef class TimeMap:
     def __enter__(self):
         c_jsdrv.jsdrv_tmap_reader_enter(self.this)
         self._reader_active += 1
+        return self
 
     def __exit__(self, type, value, traceback):
         c_jsdrv.jsdrv_tmap_reader_exit(self.this)
@@ -124,8 +136,7 @@ cdef class TimeMap:
         if 0 == self._reader_active:
             with self:
                 return self.sample_id_to_timestamp(sample_id)
-        is_iterable = isinstance(sample_id, Iterable)
-        if is_iterable:
+        if isinstance(sample_id, Iterable):
             sz = len(sample_id)
             result = np.empty(sz, dtype=np.int64)
             for idx, s in enumerate(sample_id):
@@ -142,8 +153,7 @@ cdef class TimeMap:
         if 0 == self._reader_active:
             with self:
                 return self.timestamp_to_sample_id(timestamp)
-        is_iterable = isinstance(timestamp, Iterable)
-        if is_iterable:
+        if isinstance(timestamp, Iterable):
             sz = len(timestamp)
             result = np.empty(sz, dtype=np.uint64)
             for idx, t in enumerate(timestamp):
@@ -155,12 +165,50 @@ cdef class TimeMap:
             c_jsdrv.jsdrv_tmap_timestamp_to_sample_id(self.this, timestamp, &r)
             return int(r)
 
-    def get(self, index):
-        cdef c_jsdrv.jsdrv_time_map_s * time_map
+    def time_map_get(self, index=None):
+        """Get the time map data.
+
+        :param index: The index for the time map which is one of:
+            - None: return all time maps in the instance.
+            - int index: Return only this index.
+            - (int start_index, int end_index): Return this range.
+              start_index is inclusive, end_index is exclusive.
+
+        :return: Return an np.ndarray with the the named columns
+            ['offset_time', 'offset_counter', 'counter_rate'].
+            Access as either a[0]['offset_counter'] or a[0][1].
+        """
+        cdef c_jsdrv.jsdrv_time_map_s time_map
         if 0 == self._reader_active:
             with self:
                 return self.get(index)
-        time_map = c_jsdrv.jsdrv_tmap_get(self.this, index)
+        n = len(self)
+        if index is None:
+            index = 0, n
+        elif isinstance(index, Iterable):
+            index = int(index[0]), int(index[1])
+        else:
+            index = int(index)
+            if index < 0:
+                index = n + index
+            index = index, index + 1
+        i0, i1 = index
+        if i0 < 0:
+            i0 = n + i0
+        if i1 < 0:
+            i1 = n + i1
+        if i0 > i1:
+            i0, i1 = 0, 0
+        elif i1 > n:
+            raise ValueError(f'index out of range: {index}')
+        k = i1 - i0
+        out = np.empty(k, dtype=_TIME_MAP_GET_DTYPE)
+        for i in range(k):
+            c_jsdrv.jsdrv_tmap_get(self.this, i + i0, &time_map)
+            out[i][0] = time_map.offset_time
+            out[i][1] = time_map.offset_counter
+            out[i][2] = time_map.counter_rate
+        return out
 
 
 cdef object _i128_to_int(uint64_t high, uint64_t low):
