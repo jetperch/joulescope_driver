@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.9.1
+
+2025 Apr 9
+
+* Handle 500 ksps on-instrument downsampling by forcing to 250 ksps.
+
+
 ## 1.9.0
 
 2025 Mar 29

@@ -363,9 +363,6 @@ struct jsdrv_buffer_info_s {
      * @brief The simple time map for the response.
      * @see tmap
      *
-     * .. deprecated:: 1.8.0
-     *    Use tmap instead.
-     *
      * This field contains the most recent time map between sample ids and
      * UTC wall-clock time.  It does not preserve past history and will
      * adjust the UTC time for old samples.  For an invariant time map,

@@ -1037,6 +1037,11 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
                 if (NULL == p->downsample) {
                     JSDRV_LOGW("jsdrv_downsample_alloc failed");
                 }
+                if ((signal_n == 2) || (signal_n == 3)) {
+                    // not supported, force to 4
+                    signal_n = 4;
+                    d->fs = fs_in / signal_n;
+                }
             }
         }
         JSDRV_LOGI("jsdrv_downsample_alloc idx=%lu, decimate_factor=%lu",
