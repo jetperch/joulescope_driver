@@ -9,6 +9,9 @@ This file contains the list of changes made to the Joulescope driver.
 2025 Apr 9
 
 * Handle 500 ksps on-instrument downsampling by forcing to 250 ksps.
+* Fixed time sync inaccuracy by including FPGA 1.3.3
+  * handle large update gaps
+  * bound error on sampling rate
 
 
 ## 1.9.0
