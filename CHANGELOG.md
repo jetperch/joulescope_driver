@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.9.2
+
+2025 May 6
+
+* Fixed self->tmap NULL pointer access in jsdrv_bufsig_info.
+* Added NULL pointer handling to tmap.
+
+
 ## 1.9.1
 
 2025 Apr 9

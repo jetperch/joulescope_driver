@@ -54,6 +54,9 @@ static inline size_t ptr_decr(size_t ptr, size_t size) {
 }
 
 static size_t tmap_size(const struct jsdrv_tmap_s * self) {
+    if (NULL == self) {
+        return 0;
+    }
     if (self->head >= self->tail) {
         return self->head - self->tail;
     }
@@ -335,6 +338,9 @@ int32_t jsdrv_tmap_timestamp_to_sample_id(struct jsdrv_tmap_s * self, int64_t ti
 }
 
 int32_t jsdrv_tmap_get(struct jsdrv_tmap_s * self, size_t index, struct jsdrv_time_map_s * time_map) {
+    if (NULL == self) {
+        return JSDRV_ERROR_UNAVAILABLE;
+    }
     if (index >= tmap_size(self)) {
         return JSDRV_ERROR_UNAVAILABLE;
     }

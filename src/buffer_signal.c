@@ -184,11 +184,13 @@ bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
         samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
     }
     info->decimate_factor = self->hdr.decimate_factor;
-    size_t tmap_sz = jsdrv_tmap_length(self->tmap);
-    if (tmap_sz) {
-        jsdrv_tmap_get(self->tmap, tmap_sz - 1, &info->time_map);
+    if (NULL != self->tmap) {
+        size_t tmap_sz = jsdrv_tmap_length(self->tmap);
+        if (tmap_sz) {
+            jsdrv_tmap_get(self->tmap, tmap_sz - 1, &info->time_map);
+        }
+        jsdrv_tmap_ref_incr(self->tmap);
     }
-    jsdrv_tmap_ref_incr(self->tmap);
     info->tmap = self->tmap;
     return true;
 }
