@@ -9,6 +9,8 @@ This file contains the list of changes made to the Joulescope driver.
 2025 May 19
 
 * Implemented "--set" option to record entry point.
+* Changed "UTC add is not monotonically increasing" log errors to warnings 
+  and reduced frequency.
 
 
 ## 1.9.2

@@ -161,7 +161,11 @@ static void defer_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s 
         size_t head_prev = ptr_decr(self->head, self->alloc_size);
         struct jsdrv_time_map_s * entry_prev = &self->entry[head_prev];
         if (time_map->offset_time < entry_prev->offset_time) {
-            JSDRV_LOGE("UTC add is not monotonically increasing");
+            int64_t dt = entry_prev->offset_time - time_map->offset_time;
+            if (dt > JSDRV_TIME_SECOND) {
+                JSDRV_LOGW("UTC add is not monotonically increasing %" PRIi64,
+                           entry_prev->offset_time - time_map->offset_time);
+            }
             return;
         }
     }
