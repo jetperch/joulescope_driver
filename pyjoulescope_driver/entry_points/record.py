@@ -92,6 +92,10 @@ def on_cmd(args):
                     else:
                         print(f'Unsupported device {device_path}')
 
+                for set_cmd in args.set:
+                    topic, value = set_cmd.split('=')
+                    d.publish(f'{device_path}/{topic}', value)
+
             wr = Record(d, device_paths, args.signals)
             if args.verbose:
                 print(f'Record to file: {args.filename}')

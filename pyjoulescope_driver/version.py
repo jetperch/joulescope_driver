@@ -13,14 +13,14 @@
 # limitations under the License.
 
 
-__version__ = "1.9.2"
+__version__ = "1.9.3"
 
 __title__ = "pyjoulescope_driver"
 __description__ = 'Joulescope™ driver'
 __url__ = 'https://joulescope-driver.readthedocs.io/en/latest/'
 __author__ = 'Jetperch LLC'
 __author_email__ = 'joulescope-dev@jetperch.com'
-__license__ = 'Apache 2.0'
+__license__ = 'Apache-2.0'
 __copyright__ = 'Copyright 2022-2025 Jetperch LLC'
 
 __all__ = ['__version__', '__title__', '__description__', '__url__',
