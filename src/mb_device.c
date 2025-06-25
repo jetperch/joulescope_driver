@@ -319,7 +319,7 @@ const struct state_machine_state_s state_machine_states[] = {
     {ST_LL_CLOSE_PEND, "ll_close_pend", NULL, NULL, state_machine_ll_close_pend},
     {ST_LL_CLOSE, "ll_close", on_ll_close, NULL, state_machine_ll_close},
     {ST_FINALIZED, "finalized", NULL, NULL, state_machine_end},
-    {0, NULL, NULL, NULL},
+    {0, NULL, NULL, NULL, NULL},
 };
 
 static inline void state_transition(struct dev_s * self, uint8_t next_state) {
@@ -449,7 +449,6 @@ static void publish_to_device(struct dev_s * d, const char * topic, const struct
 }
 
 static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
-    int32_t rc = 0;
     bool rv = true;
     if (!msg) {
         return false;
@@ -718,7 +717,6 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
 }
 
 static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
-    struct jsdrvp_msg_s * msg;
     struct dev_s *d = (struct dev_s *) lpParam;
     JSDRV_LOGI("JS220 USB upper-level thread started for %s", d->ll.prefix);
     state_machine_process(d, EV_RESET);

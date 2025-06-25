@@ -64,12 +64,13 @@ static void on_pub(void * user_data, const char * topic, const struct jsdrv_unio
 
 static int device_info(struct app_s * self, const char * device) {
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
+    printf("%s\n", device);
     if (self->verbose) {
-        printf("device: %s\n", device);
         printf("metadata:\n");
         // todo
         printf("values:\n");
         // todo
+        printf("\n");
     }
 
     return jsdrv_close(self->context, device, 0);

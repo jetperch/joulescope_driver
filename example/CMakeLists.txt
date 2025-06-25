@@ -34,6 +34,15 @@ add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
+
+add_executable(ecpprog
+        ecpprog/ecpprog.c
+        ecpprog/jtag.c
+)
+add_dependencies(ecpprog jsdrv)
+target_link_libraries(ecpprog jsdrv)
+
+
 add_definitions(
         -DTRACY_ENABLE=1
         -DTRACY_ON_DEMAND=1

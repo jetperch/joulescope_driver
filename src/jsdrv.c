@@ -512,9 +512,9 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
         rv = jsdrvp_ul_js110_usb_factory(&d->device, c, &msg->payload.device);
     } else if (0 == strcmp("&js220", model))  {
         rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
-    } else if (0 == strcmp("mb", model))  {
+    } else if (0 == strcmp("mb", model)) {
         rv = jsdrvp_ul_mb_device_usb_factory(&d->device, c, &msg->payload.device);
-    } else if (0 == strcmp("&mb", model))  {
+    } else if (0 == strcmp("js320", model))  {
         rv = jsdrvp_ul_mb_device_usb_factory(&d->device, c, &msg->payload.device);
 #if UNITTEST == 0
     //} else if (0 == strcmp("emu", model)) {

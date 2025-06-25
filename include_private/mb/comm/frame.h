@@ -52,6 +52,9 @@ MB_CPP_GUARD_START
 #define MB_FRAMER_OVERHEAD_SIZE (MB_FRAMER_HEADER_SIZE + MB_FRAMER_FOOTER_SIZE)
 #define MB_FRAMER_FRAME_ID_MAX ((1U << 11) - 1U)
 
+// forward declaration
+struct mb_msg_s;
+
 /**
  * @brief The frame types.
  *
