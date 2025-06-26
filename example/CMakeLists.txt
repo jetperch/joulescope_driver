@@ -34,14 +34,16 @@ add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
-
-add_executable(ecpprog
-        ecpprog/ecpprog.c
-        ecpprog/jtag.c
-)
-add_dependencies(ecpprog jsdrv)
-target_link_libraries(ecpprog jsdrv)
-
+if ("${CMAKE_C_COMPILER}" MATCHES "MSVC")
+    # ecpprog requires mingw on Windows
+else()
+    add_executable(ecpprog
+            ecpprog/ecpprog.c
+            ecpprog/jtag.c
+    )
+    add_dependencies(ecpprog jsdrv)
+    target_link_libraries(ecpprog jsdrv)
+endif()
 
 add_definitions(
         -DTRACY_ENABLE=1
