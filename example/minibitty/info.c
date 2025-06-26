@@ -21,6 +21,7 @@
 #include <string.h>
 #include <inttypes.h>
 
+#if 0
 static void on_meta(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
     printf("%s => %s\n", topic, value->value.str);
@@ -61,6 +62,7 @@ static void on_pub(void * user_data, const char * topic, const struct jsdrv_unio
     }
     printf("\n");
 }
+#endif
 
 static int device_info(struct app_s * self, const char * device) {
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
@@ -94,6 +96,30 @@ int on_info(struct app_s * self, int argc, char * argv[]) {
         } else {
             return usage();
         }
+    }
+
+    printf("JSDRV version: %s\n", JSDRV_VERSION_STR);
+
+    ROE(app_scan(self));
+    if (0 == self->devices[0]) {
+        printf("No devices found\n");
+        return 1;
+    }
+    char * d = &self->devices[0];
+    char * p = &self->devices[0];
+    size_t sz = strlen(d);
+
+    printf("Devices:\n");
+    for (size_t i = 0; i <= sz; ++i) {
+        if (*p == ',') {
+            *p++ = 0;
+            printf("    %s\n", d);
+            d = p;
+        } else if (*p == 0) {
+            printf("    %s\n", d);
+            break;
+        }
+        p++;
     }
 
     ROE(app_match(self, device_filter));
