@@ -184,14 +184,16 @@ bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
         samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
     }
     info->decimate_factor = self->hdr.decimate_factor;
+
+    info->tmap = NULL;
     if (NULL != self->tmap) {
         size_t tmap_sz = jsdrv_tmap_length(self->tmap);
         if (tmap_sz) {
             jsdrv_tmap_get(self->tmap, tmap_sz - 1, &info->time_map);
+            jsdrv_tmap_ref_incr(self->tmap);
+            info->tmap = self->tmap;
         }
-        jsdrv_tmap_ref_incr(self->tmap);
     }
-    info->tmap = self->tmap;
     return true;
 }
 
@@ -800,7 +802,11 @@ int32_t jsdrv_bufsig_process_request(
     rsp->rsv2_u8 = 0;
     rsp->rsv3_u32 = 0;
     rsp->rsp_id = req->rsp_id;
-    jsdrv_bufsig_info(self, &rsp->info);
+
+    if (!jsdrv_bufsig_info(self, &rsp->info)) {
+        JSDRV_LOGW("jsdrv_bufsig_process_request info unavailable");
+        return JSDRV_ERROR_UNAVAILABLE;
+    }
 
     if (!self->active) {
         JSDRV_LOGW("jsdrv_bufsig_process_request inactive");

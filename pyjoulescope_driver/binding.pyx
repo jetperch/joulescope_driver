@@ -258,8 +258,10 @@ cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
             'counter_rate': info[0].time_map.counter_rate,
         },
         'decimate_factor': info[0].decimate_factor,
-        'tmap': TimeMap.factory(info[0].tmap),
+        'tmap': None,
     }
+    if (info[0].tmap):
+        v['tmap'] = TimeMap.factory(info[0].tmap)
     return v
 
 

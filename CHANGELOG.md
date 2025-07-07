@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.9.4
+
+2025 Jul 7
+
+* Fixed tmap NULL pointer reference  (Joulescope UI 321).
+
+
 ## 1.9.3
 
 2025 May 19
