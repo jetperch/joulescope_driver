@@ -7,6 +7,7 @@
     "Jetperch"
   ],
   "main": "./index.js",
+  "types": "./joulescope_driver.d.ts",
   "scripts": {
     "install": "node-gyp-build",
     "test": "node --napi-modules ./test/test_binding.js",
