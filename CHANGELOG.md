@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.10.0
+
+2025 Jul 15
+
+* Added Typescript support.  Thanks @biosbob !
+
+
 ## 1.9.4
 
 2025 Jul 7
