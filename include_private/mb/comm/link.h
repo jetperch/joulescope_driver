@@ -1,5 +1,5 @@
 /*
-* Copyright 2014-2024 Jetperch LLC
+ * Copyright 2014-2024 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,7 @@ enum mb_link_msg_e {
     MB_LINK_MSG_PING = 1,           // ping test, response with pong
     MB_LINK_MSG_PONG = 2,           // response to ping
 };
+
 MB_CPP_GUARD_END
 
 /** @} */

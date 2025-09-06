@@ -65,7 +65,7 @@ static void on_log_recv(void * user_data, struct jsdrv_log_header_s const * head
 #else
     gmtime_r(&time_s, &tm_utc);  // posix https://en.cppreference.com/w/c/chrono/gmtime
 #endif
-    strftime(time_str, sizeof(time_str), "%FT%T", &tm_utc);
+    strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", &tm_utc);
     printf("%s.%06dZ %c %s:%d %s\n", time_str, time_us,
            jsdrv_log_level_to_char(header->level), filename, header->line, message);
 }

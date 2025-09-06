@@ -19,11 +19,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static int usage(void) {
-    printf("usage: minibitty hotplug\n");
-    return 1;
-}
-
 static void on_list(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
     (void) topic;
@@ -55,6 +50,9 @@ static void on_remove(void * user_data, const char * topic, const struct jsdrv_u
 }
 
 int on_hotplug(struct app_s * self, int argc, char * argv[]) {
+    (void) argc;
+    (void) argv;
+
     jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_LIST, JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB,
                         on_list, self, 0);
     jsdrv_unsubscribe(self->context, JSDRV_MSG_DEVICE_LIST, on_list, self, 0);

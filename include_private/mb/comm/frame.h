@@ -74,26 +74,47 @@ enum mb_frame_type_e {
  * @brief The subtypes for `MB_FRAME_FT_CONTROL`.
  *
  * The sender populates the `frame_id` field with these subtype values.
- *
+ * The link layer uses these controls to resync, connect, and gracefully
+ * disconnect.
  */
 enum mb_frame_control_e {
     /**
-     * @brief Request link reset and connection.
-     *
-     * The transmitter uses this message to establish a connection.
-     * On success, the receiver discards all queued messages and
-     * replies with MB_FRAME_CTRL_RESET_ACK.
+     * @brief Invalid operation.
      */
-    MB_FRAME_CTRL_RESET_REQ = 0x00,
+    MB_FRAME_CTRL_INVALID = 0x00,
 
     /**
-     * @brief Acknowledge link reset and establish connection.
+     * @brief Request link reset and connection.
      *
-     * When the receiver is disconnected and receives MB_FRAME_CTRL_RESET_REQ,
-     * message, it replies with MB_FRAME_CTRL_RESET_ACK.  After reset
-     * acknowledgement, communications begin.
+     * The local instance uses this message to establish or reset
+     * a connection with the remote.
+     * On success, the receiver moves to the disconnected state,
+     * discards all queued messages and replies with MB_FRAME_CTRL_RESET_RSP.
      */
-    MB_FRAME_CTRL_RESET_ACK = 0x01,
+    MB_FRAME_CTRL_RESET_REQ = 0x01,
+
+    /**
+     * @brief Acknowledge link reset request.
+     *
+     * When an instance receives MB_FRAME_CTRL_RESET_RSP after transmitting
+     * a MB_FRAME_CTRL_RESET_REQ, it becomes connected.  It immediately
+     * sends MB_FRAME_CTRL_RESET_DONE.  If the instance does not receive
+     * MB_FRAME_CTRL_RESET_RSP in a timeout after sending
+     * MB_FRAME_CTRL_RESET_REQ, it MUST retry the MB_FRAME_CTRL_RESET_RSP.
+     */
+    MB_FRAME_CTRL_RESET_RSP = 0x02,
+
+    /**
+     * @brief Acknowledge link reset and finalize connection establishment.
+     *
+     * After sending MB_FRAME_CTRL_RESET_RSP in response to a
+     * MB_FRAME_CTRL_RESET_REQ, it expects MB_FRAME_CTRL_RESET_DONE as the
+     * next frame.  Upon receipt, the connection is fully established.
+     * If the instance does not receive MB_FRAME_CTRL_RESET_DONE within
+     * a timeout of sending MB_FRAME_CTRL_RESET_RSP, it MUST re-establish
+     * the connection by sending MB_FRAME_CTRL_RESET_REQ.
+     */
+    MB_FRAME_CTRL_RESET_DONE = 0x03,
 
     /**
      * @brief Request a link disconnect.
@@ -103,7 +124,7 @@ enum mb_frame_control_e {
      * becomes unresponsive, this explicit disconnect allows for a graceful
      * disconnection free from warnings or errors.
      */
-    MB_FRAME_CTRL_DISCONNECT_REQ = 0x02,
+    MB_FRAME_CTRL_DISCONNECT_REQ = 0x04,
 
     /**
      * @brief Acknowledge link disconnect.
@@ -113,7 +134,7 @@ enum mb_frame_control_e {
      * and prevent new message transmission until a successful
      * MB_FRAME_CTRL_RESET_REQ / MB_FRAME_CTRL_RESET_ACK handshake.
      */
-    MB_FRAME_CTRL_DISCONNECT_ACK = 0x03,
+    MB_FRAME_CTRL_DISCONNECT_ACK = 0x05,
 };
 
 /**
@@ -122,7 +143,6 @@ enum mb_frame_control_e {
  * Service types usually use the metadata field for additional
  * payload identification.
  */
-/// RTOS trace events for performance monitoring.
 enum mb_frame_service_type_e {
     MB_FRAME_ST_INVALID = 0,             ///< reserved, additional differentiation from link frames
     MB_FRAME_ST_LINK = 1,                ///< Link-layer message: see os/comm/link.h
@@ -132,7 +152,11 @@ enum mb_frame_service_type_e {
      * @brief PubSub publish message.
      *
      * This message defines the fields as follows:
-     * - metadata[7:0]: mb_value_e
+     * - metadata[7:0]: 0x83=standardized binary message
+     *   - [7]: standardized message,
+     *   - [6:5]: 0 (reserved)
+     *   - [4]: 0 (no pointer values allowed)
+     *   - [3:0] mb_value_e
      * - metadata[9:8]: size LSB
      * - metadata[15:10]: reserved, set to 0
      * - payload:
@@ -142,7 +166,47 @@ enum mb_frame_service_type_e {
     MB_FRAME_ST_PUBSUB = 3,
 
     MB_FRAME_ST_COMM_THROUGHPUT = 4,
+
+    /**
+     * @brief Application-specific service type.
+     *
+     * The application can use metadata to further distinguish the
+     * contents of this message.
+     */
+    MB_FRAME_ST_APP = 0x0f,
 };
+
+/**
+ * @brief Length check computation constant.
+ * 
+ * This 16-bit constant provides Hamming Distance (HD) of 4 when used
+ * for length validation. The algorithm computes:
+ * length_check = (length * MB_FRAME_LENGTH_CHECK_CONSTANT) >> MB_FRAME_LENGTH_CHECK_SHIFT
+ * 
+ * This detects all 1, 2, and 3 bit errors, and 97.4% of 4 bit errors.
+ * See doc/comm/frame.md for detailed analysis.
+ */
+#define MB_FRAME_LENGTH_CHECK_CONSTANT ((uint16_t) 0xd8d9)
+
+/**
+ * @brief Length check right shift amount.
+ * 
+ * Used with MB_FRAME_LENGTH_CHECK_CONSTANT to extract bits [18:11]
+ * of the multiplication result for optimal error detection.
+ */
+#define MB_FRAME_LENGTH_CHECK_SHIFT (11)
+
+/**
+ * @brief Link check computation constant.
+ * 
+ * This 16-bit constant provides Hamming Distance (HD) of 9 when used
+ * for link frame validation. The algorithm computes:
+ * link_check = link_msg * MB_FRAME_LINK_CHECK_CONSTANT
+ * 
+ * Where link_msg contains bytes 2 & 3 (frame_id and frame_type).
+ * See doc/comm/frame.md for detailed analysis.
+ */
+#define MB_FRAME_LINK_CHECK_CONSTANT ((uint16_t) 0xcba9)
 
 /**
 * @brief Compute the length check field.
@@ -151,7 +215,7 @@ enum mb_frame_service_type_e {
 * @return The value for the length_check field.
 */
 static inline uint8_t mb_frame_length_check(uint8_t length) {
-    return (uint8_t) ((length * (uint32_t) 0xd8d9) >> 11);
+    return (uint8_t) ((length * (uint32_t) MB_FRAME_LENGTH_CHECK_CONSTANT) >> MB_FRAME_LENGTH_CHECK_SHIFT);
 }
 
 /**
@@ -161,7 +225,7 @@ static inline uint8_t mb_frame_length_check(uint8_t length) {
 * @return The value for the link_check field.
 */
 static inline uint32_t mb_frame_link_check(uint16_t link_msg) {
-    return 0xcba9U * (uint32_t) link_msg;
+    return MB_FRAME_LINK_CHECK_CONSTANT * (uint32_t) link_msg;
 }
 
 /**

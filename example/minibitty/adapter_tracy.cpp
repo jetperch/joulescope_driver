@@ -416,12 +416,12 @@ void Profiler::Worker() {
     }
 }
 
+#define COUNTER_FMT  "%u "
+
 void Profiler::ProcessTraceMessage(jsdrvp_msg_s * msg) {
     const uint8_t * p8 = msg->payload.bin;
     const uint32_t * p32 = (const uint32_t *) p8;
     const uint32_t * p32_end = p32 + ((msg->value.size + 3) >> 2);
-    QueueType qtype_;
-    uint8_t qidx_;
 
     while (p32 < p32_end) {
         if (MB_TRACE_SOF != (p32[0] & 0xff)) {
@@ -460,7 +460,7 @@ void Profiler::ProcessTraceMessage(jsdrvp_msg_s * msg) {
                 JSDRV_LOGW("trace type invalid");
                 break;
             case MB_TRACE_TYPE_READY:
-                //printf(COUNTER_FMT "%s.%d ready\n", counter, obj_name, obj_id);
+                printf(COUNTER_FMT "%s.%d ready\n", counter, obj_name, obj_id);
                 break;
             case MB_TRACE_TYPE_ENTER: {
                 if (obj_type == MB_OBJ_TASK) {
@@ -514,11 +514,11 @@ void Profiler::ProcessTraceMessage(jsdrvp_msg_s * msg) {
                 }
                 break;
             case MB_TRACE_TYPE_ALLOC:
-                //printf(COUNTER_FMT "%s.%d alloc @ %d.%d\n", counter, obj_name, obj_id, file_id, line);
-                    break;
+                printf(COUNTER_FMT "%s.%d alloc @ %d.%d\n", counter, obj_name, obj_id, file_id, line);
+                break;
             case MB_TRACE_TYPE_FREE:
-                //printf(COUNTER_FMT "%s.%d free @ %d.%d\n", counter, obj_name, obj_id, file_id, line);
-                    break;
+                printf(COUNTER_FMT "%s.%d free @ %d.%d\n", counter, obj_name, obj_id, file_id, line);
+                break;
             case MB_TRACE_TYPE_RSV6: break;
             case MB_TRACE_TYPE_RSV7: break;
             case MB_TRACE_TYPE_TIMESYNC: break;
@@ -591,6 +591,7 @@ bool Profiler::HandleServerQuery() {
 } // namespace tracy
 
 void adapter_tracy_on_trace(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) topic;
     auto * self = (tracy::Profiler *) user_data;
     self->on_trace(value);
 }

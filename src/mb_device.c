@@ -56,7 +56,7 @@ enum events_e {
     EV_PUBSUB_FLUSH,
 
     EV_LINK_RESET_REQ,
-    EV_LINK_RESET_ACK,
+    EV_LINK_RESET_RSP,
     EV_LINK_DISCONNECT_REQ,
     EV_LINK_DISCONNECT_ACK,
 
@@ -150,7 +150,7 @@ static bool is_device_present(struct dev_s * self, uint8_t event) {
 
 static bool on_link_reset_req(struct dev_s * self, uint8_t event) {
     (void) event;
-    send_frame_ctrl_to_device(self, MB_FRAME_CTRL_RESET_ACK);
+    send_frame_ctrl_to_device(self, MB_FRAME_CTRL_RESET_RSP);
     return false;
 }
 
@@ -267,7 +267,7 @@ const struct state_machine_transition_s state_machine_ll_bulk_open[] = {
 
 const struct state_machine_transition_s state_machine_link_reset[] = {
     {EV_LINK_RESET_REQ, ST_INVALID, on_link_reset_req},  // respond with ack
-    {EV_LINK_RESET_ACK, ST_OPEN, guard_open_success},
+    {EV_LINK_RESET_RSP, ST_OPEN, guard_open_success},
     {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
     TRANSITION_END
 };
@@ -591,7 +591,7 @@ static void handle_stream_in_link_frame(struct dev_s * d, uint32_t * p_u32) {
     uint8_t event = 0;
     switch (ctrl) {
         case MB_FRAME_CTRL_RESET_REQ: event = EV_LINK_RESET_REQ; break;
-        case MB_FRAME_CTRL_RESET_ACK: event = EV_LINK_RESET_ACK; break;
+        case MB_FRAME_CTRL_RESET_RSP: event = EV_LINK_RESET_RSP; break;
         case MB_FRAME_CTRL_DISCONNECT_REQ: event = EV_LINK_DISCONNECT_REQ; break;
         case MB_FRAME_CTRL_DISCONNECT_ACK: event = EV_LINK_DISCONNECT_ACK; break;
         default:

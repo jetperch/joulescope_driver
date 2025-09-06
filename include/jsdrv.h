@@ -422,6 +422,15 @@ struct jsdrv_summary_entry_s {
     float max;                  ///< The minimum value over the window.
 };
 
+#ifdef __cplusplus
+// C++ does not support flexible array member
+// Use length 1 to avoid errors with pedantic
+#define JSDRV_VARIABLE_LENGTH_ARRAY 1
+#else
+// C flexible array member is [] without a number
+#define JSDRV_VARIABLE_LENGTH_ARRAY
+#endif
+
 /**
  * @brief The response to jsdrv_buffer_request_s produced by the memory buffer.
  *
@@ -459,7 +468,7 @@ struct jsdrv_buffer_response_s {
      * For response_type JSDRV_BUFFER_RESPONSE_SAMPLES, the data
      * is defined by info.element_type and info.element_size_bits.
      */
-    uint64_t data[];
+    uint64_t data[JSDRV_VARIABLE_LENGTH_ARRAY];
 };
 
 /// The subscriber flags for jsdrv_subscribe().
