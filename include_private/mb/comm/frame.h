@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2024 Jetperch LLC
+ * Copyright 2014-2025 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,31 +29,29 @@
 MB_CPP_GUARD_START
 
 /// The value for the first start of frame byte.
-#define MB_FRAMER_SOF1 ((uint8_t) 0x55)
+#define MB_FRAME_SOF1 ((uint8_t) 0x55)
 /// The value for the second start of frame nibble.
-#define MB_FRAMER_SOF2 ((uint8_t) 0x00)
-/// The mask for SOF2
-#define MB_FRAMER_SOF2_MASK ((uint8_t) 0xF0)
-/// The framer header size in total_bytes.
-#define MB_FRAMER_HEADER_SIZE (8)
+#define MB_FRAME_SOF2 ((uint8_t) 0x00)
+/// The mask for SOF2 for data frames
+#define MB_FRAME_SOF2_MASK ((uint8_t) 0xF0)
+/// The frame header size in total_bytes.
+#define MB_FRAME_HEADER_SIZE (8)
 /// The maximum payload length in words.
-#define MB_FRAMER_PAYLOAD_WORDS_MAX (256)
+#define MB_FRAME_PAYLOAD_WORDS_MAX (256)
 /// The maximum payload length in words.
-#define MB_FRAMER_PAYLOAD_BYTES_MAX (MB_FRAMER_PAYLOAD_WORDS_MAX * 4)
-/// The framer footer size in total_bytes.
-#define MB_FRAMER_FOOTER_SIZE (4)
-/// The framer total maximum data size in bytes
-#define MB_FRAMER_MAX_SIZE (\
-    MB_FRAMER_HEADER_SIZE + \
-    MB_FRAMER_PAYLOAD_MAX_SIZE + \
-    MB_FRAMER_FOOTER_SIZE)
-/// The framer link message (ACK) size in bytes
-#define MB_FRAMER_LINK_SIZE (8)
-#define MB_FRAMER_OVERHEAD_SIZE (MB_FRAMER_HEADER_SIZE + MB_FRAMER_FOOTER_SIZE)
-#define MB_FRAMER_FRAME_ID_MAX ((1U << 11) - 1U)
-
-// forward declaration
-struct mb_msg_s;
+#define MB_FRAME_PAYLOAD_BYTES_MAX (MB_FRAME_PAYLOAD_WORDS_MAX * 4)
+/// The frame footer size in total_bytes.
+#define MB_FRAME_FOOTER_SIZE (4)
+/// The frame total maximum data size in bytes
+#define MB_FRAME_MAX_SIZE (\
+    MB_FRAME_HEADER_SIZE + \
+    MB_FRAME_PAYLOAD_MAX_SIZE + \
+    MB_FRAME_FOOTER_SIZE)
+/// The frame link message (ACK) size in bytes
+#define MB_FRAME_LINK_SIZE (8)
+#define MB_FRAME_OVERHEAD_SIZE (MB_FRAME_HEADER_SIZE + MB_FRAME_FOOTER_SIZE)
+#define MB_FRAME_FRAME_ID_MAX ((1U << 11) - 1U)
+#define MB_FRAME_LENGTH_TO_CHECK_LENGTH(x)  (3 + 1 + (uint16_t) (x))
 
 /**
  * @brief The frame types.
@@ -84,37 +82,32 @@ enum mb_frame_control_e {
     MB_FRAME_CTRL_INVALID = 0x00,
 
     /**
-     * @brief Request link reset and connection.
+     * @brief Request link connection.
      *
      * The local instance uses this message to establish or reset
      * a connection with the remote.
-     * On success, the receiver moves to the disconnected state,
-     * discards all queued messages and replies with MB_FRAME_CTRL_RESET_RSP.
+     * On success, the receiver moves to the disconnected state and
+     * discards all queued messages.  It then replies with
+     * MB_FRAME_CTRL_CONNECT_ACK and IDENTITY.
+     *
+     * The transmitter expects to receive MB_FRAME_CTRL_CONNECT_ACK.
+     * It then expects an IDENTITY data frame with MB_FRAME_ST_LINK
+     * service type and MB_LINK_MSG_IDENTITY in metadata[7:0]
+     * as the first data message with frame_id 0.
      */
-    MB_FRAME_CTRL_RESET_REQ = 0x01,
+    MB_FRAME_CTRL_CONNECT_REQ = 0x01,
 
     /**
-     * @brief Acknowledge link reset request.
+     * @brief Acknowledge link connect.
      *
-     * When an instance receives MB_FRAME_CTRL_RESET_RSP after transmitting
-     * a MB_FRAME_CTRL_RESET_REQ, it becomes connected.  It immediately
-     * sends MB_FRAME_CTRL_RESET_DONE.  If the instance does not receive
-     * MB_FRAME_CTRL_RESET_RSP in a timeout after sending
-     * MB_FRAME_CTRL_RESET_REQ, it MUST retry the MB_FRAME_CTRL_RESET_RSP.
+     * The transmitter expects an IDENTITY data frame with MB_FRAME_ST_LINK
+     * service type and MB_LINK_MSG_IDENTITY in metadata[7:0]
+     * as the first data message with frame_id 0.
      */
-    MB_FRAME_CTRL_RESET_RSP = 0x02,
+    MB_FRAME_CTRL_CONNECT_ACK = 0x02,
 
-    /**
-     * @brief Acknowledge link reset and finalize connection establishment.
-     *
-     * After sending MB_FRAME_CTRL_RESET_RSP in response to a
-     * MB_FRAME_CTRL_RESET_REQ, it expects MB_FRAME_CTRL_RESET_DONE as the
-     * next frame.  Upon receipt, the connection is fully established.
-     * If the instance does not receive MB_FRAME_CTRL_RESET_DONE within
-     * a timeout of sending MB_FRAME_CTRL_RESET_RSP, it MUST re-establish
-     * the connection by sending MB_FRAME_CTRL_RESET_REQ.
-     */
-    MB_FRAME_CTRL_RESET_DONE = 0x03,
+    /// Reserved control 3.
+    MB_FRAME_CTRL_RESERVED_3 = 0x03,
 
     /**
      * @brief Request a link disconnect.
@@ -132,9 +125,11 @@ enum mb_frame_control_e {
      * Upon receiving MB_FRAME_CTRL_DISCONNECT_REQ, it replies with
      * MB_FRAME_CTRL_DISCONNECT_ACK.  This should purge the message queue
      * and prevent new message transmission until a successful
-     * MB_FRAME_CTRL_RESET_REQ / MB_FRAME_CTRL_RESET_ACK handshake.
+     * MB_FRAME_CTRL_CONNECT_REQ / MB_FRAME_CTRL_RESET_ACK handshake.
      */
     MB_FRAME_CTRL_DISCONNECT_ACK = 0x05,
+
+    // reserved controls 6 through 255
 };
 
 /**
@@ -145,27 +140,10 @@ enum mb_frame_control_e {
  */
 enum mb_frame_service_type_e {
     MB_FRAME_ST_INVALID = 0,             ///< reserved, additional differentiation from link frames
-    MB_FRAME_ST_LINK = 1,                ///< Link-layer message: see os/comm/link.h
-    MB_FRAME_ST_TRACE = 2,               ///< Trace messages, see trace documentation
-
-    /**
-     * @brief PubSub publish message.
-     *
-     * This message defines the fields as follows:
-     * - metadata[7:0]: 0x83=standardized binary message
-     *   - [7]: standardized message,
-     *   - [6:5]: 0 (reserved)
-     *   - [4]: 0 (no pointer values allowed)
-     *   - [3:0] mb_value_e
-     * - metadata[9:8]: size LSB
-     * - metadata[15:10]: reserved, set to 0
-     * - payload:
-     *   - topic: 32 bytes
-     *   - value: N bytes
-     */
-    MB_FRAME_ST_PUBSUB = 3,
-
-    MB_FRAME_ST_COMM_THROUGHPUT = 4,
+    MB_FRAME_ST_LINK = 1,                ///< Link-layer message: see mb/comm/link.h.
+    MB_FRAME_ST_TRACE = 2,               ///< Trace messages, see trace documentation.
+    MB_FRAME_ST_PUBSUB = 3,              ///< PubSub message, see mb/pubsub.h.
+    MB_FRAME_ST_STDMSG = 4,              ///< Standard message, see mb/stdmsg.h.
 
     /**
      * @brief Application-specific service type.
@@ -178,11 +156,11 @@ enum mb_frame_service_type_e {
 
 /**
  * @brief Length check computation constant.
- * 
+ *
  * This 16-bit constant provides Hamming Distance (HD) of 4 when used
  * for length validation. The algorithm computes:
  * length_check = (length * MB_FRAME_LENGTH_CHECK_CONSTANT) >> MB_FRAME_LENGTH_CHECK_SHIFT
- * 
+ *
  * This detects all 1, 2, and 3 bit errors, and 97.4% of 4 bit errors.
  * See doc/comm/frame.md for detailed analysis.
  */
@@ -190,7 +168,7 @@ enum mb_frame_service_type_e {
 
 /**
  * @brief Length check right shift amount.
- * 
+ *
  * Used with MB_FRAME_LENGTH_CHECK_CONSTANT to extract bits [18:11]
  * of the multiplication result for optimal error detection.
  */
@@ -198,11 +176,11 @@ enum mb_frame_service_type_e {
 
 /**
  * @brief Link check computation constant.
- * 
+ *
  * This 16-bit constant provides Hamming Distance (HD) of 9 when used
  * for link frame validation. The algorithm computes:
  * link_check = link_msg * MB_FRAME_LINK_CHECK_CONSTANT
- * 
+ *
  * Where link_msg contains bytes 2 & 3 (frame_id and frame_type).
  * See doc/comm/frame.md for detailed analysis.
  */
@@ -229,6 +207,15 @@ static inline uint32_t mb_frame_link_check(uint16_t link_msg) {
 }
 
 /**
+ * @brief Construct a new link frame.
+ *
+ * @param frame_type The mb_frame_type_e for the link frame.
+ * @param frame_id The frame ID (associated data) for the link frame
+ * @return The newly constructed link frame message.
+ */
+MB_API struct mb_msg_s * mb_frame_link_construct(uint8_t frame_type, uint16_t frame_id);
+
+/**
  * @brief Initialize a frame message header and footer.
  *
  * @param msg The message to initialize.
@@ -238,6 +225,27 @@ static inline uint32_t mb_frame_link_check(uint16_t link_msg) {
  * @return The payload to populate which is guaranteed 64-bit aligned.
  */
 MB_API uint32_t * mb_frame_init(struct mb_msg_s * msg, uint8_t service_type, size_t payload_size, uint16_t metadata);
+
+/**
+ * @brief Validate the start of a frame.
+ *
+ * @param msg The message containing the frame to validate.
+ * @return True if msg contains a valid start of frame, false otherwise.
+ *
+ * This function checks the following:
+ *   - SOF1
+ *   - SOF2
+ *   - for data frames
+ *     - validate length_check against length
+ *     - ensure frame has room for length, including frame overhead
+ *   - for all other frames, link_check
+ *
+ * This function does NOT do any of these additional checks
+ *   - frame_type validation
+ *   - frame_check validation for data frames
+ *   - msg->size validation against data frame length
+ */
+MB_API bool mb_frame_is_valid(struct mb_msg_s * msg);
 
 MB_CPP_GUARD_END
 

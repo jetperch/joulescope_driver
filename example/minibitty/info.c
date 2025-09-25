@@ -65,7 +65,7 @@ static void on_pub(void * user_data, const char * topic, const struct jsdrv_unio
 #endif
 
 static int device_info(struct app_s * self, const char * device) {
-    ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
+    ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 1000));
     printf("%s\n", device);
     if (self->verbose) {
         printf("metadata:\n");
@@ -75,7 +75,7 @@ static int device_info(struct app_s * self, const char * device) {
         printf("\n");
     }
 
-    return jsdrv_close(self->context, device, 0);
+    return jsdrv_close(self->context, device, 1000);
 }
 
 static int usage(void) {

@@ -52,13 +52,15 @@ enum events_e {
 
     EV_RESET,
     EV_ADVANCE,
+    EV_TIMEOUT,
 
     EV_PUBSUB_FLUSH,
 
-    EV_LINK_RESET_REQ,
-    EV_LINK_RESET_RSP,
+    EV_LINK_CONNECT_REQ,
+    EV_LINK_CONNECT_ACK,
     EV_LINK_DISCONNECT_REQ,
     EV_LINK_DISCONNECT_ACK,
+    EV_LINK_IDENTITY_RECEIVED,
 
     EV_BACKEND_OPEN_ACK,
     EV_BACKEND_OPEN_NACK,
@@ -71,13 +73,13 @@ enum events_e {
 };
 
 enum state_e {
-    ST_INVALID,
-    ST_NOT_PRESENT,
+    ST_INVALID,         // initial state, requires reset
     ST_CLOSED,
     ST_LL_OPEN,
     ST_LL_BULK_OPEN,
-    ST_LINK_RESET,
-    // todo state update / restore
+    ST_LINK_REQUEST,
+    ST_LINK_IDENTITY,
+    // todo pubsub state update / restore
     ST_OPEN,
 
     // graceful disconnect
@@ -85,8 +87,6 @@ enum state_e {
     ST_LINK_DISCONNECT,
     ST_LL_CLOSE_PEND,
     ST_LL_CLOSE,
-
-    ST_FINALIZED,
 };
 
 struct dev_s {
@@ -96,6 +96,7 @@ struct dev_s {
     uint16_t out_frame_id;
     uint16_t in_frame_id;
     uint64_t in_frame_count;
+    int64_t timeout_utc;  // <= 0 to disable timeout
 
     jsdrv_thread_t thread;
     volatile uint8_t state;  // state_e
@@ -103,6 +104,14 @@ struct dev_s {
 
     struct jsdrv_time_map_s time_map;
 };
+
+static void timeout_set(struct dev_s * self) {
+    self->timeout_utc = jsdrv_time_utc() + JSDRV_TIME_SECOND;
+}
+
+static void timeout_clear(struct dev_s * self) {
+    self->timeout_utc = 0;
+}
 
 typedef bool (*state_machine_fn)(struct dev_s * self, uint8_t event);
 struct state_machine_transition_s {
@@ -120,6 +129,8 @@ struct state_machine_state_s {
 
 static void send_to_frontend(struct dev_s * d, const char * subtopic, const struct jsdrv_union_s * value);
 static void publish_to_device(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value);
+static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e service_type, uint16_t metadata,
+                           const uint32_t * data, uint32_t length_u32);
 
 static void send_frame_ctrl_to_device(struct dev_s * d, uint8_t ctrl) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_USBBK_MSG_BULK_OUT_DATA, &jsdrv_union_i32(0));
@@ -131,27 +142,12 @@ static void send_frame_ctrl_to_device(struct dev_s * d, uint8_t ctrl) {
     uint16_t * data_u16 =  (uint16_t *) data_u8;
     uint32_t * data_u32 =  (uint32_t *) data_u8;
 
-    data_u8[0] = MB_FRAMER_SOF1;
-    data_u8[1] = MB_FRAMER_SOF2;
+    data_u8[0] = MB_FRAME_SOF1;
+    data_u8[1] = MB_FRAME_SOF2;
     data_u8[2] = ctrl;
     data_u8[3] = MB_FRAME_FT_CONTROL << 3;
     data_u32[1] = mb_frame_link_check(data_u16[1]);
     msg_queue_push(d->ll.cmd_q, m);
-}
-
-static bool is_device_not_present(struct dev_s * self, uint8_t event) {
-    (void) event;
-    return self->state == ST_NOT_PRESENT;
-}
-
-static bool is_device_present(struct dev_s * self, uint8_t event) {
-    return !is_device_not_present(self, event);
-}
-
-static bool on_link_reset_req(struct dev_s * self, uint8_t event) {
-    (void) event;
-    send_frame_ctrl_to_device(self, MB_FRAME_CTRL_RESET_RSP);
-    return false;
 }
 
 static bool on_ll_open(struct dev_s * self, uint8_t event) {
@@ -171,15 +167,37 @@ static bool on_ll_bulk_open(struct dev_s * self, uint8_t event) {
     return true;
 }
 
-static bool on_link_reset(struct dev_s * self, uint8_t event) {
+static bool on_link_request(struct dev_s * self, uint8_t event) {
     (void) event;
-    send_frame_ctrl_to_device(self, MB_FRAME_CTRL_RESET_REQ);
+    send_frame_ctrl_to_device(self, MB_FRAME_CTRL_CONNECT_REQ);
+    timeout_set(self);
     return true;
 }
 
-static bool on_open(struct dev_s * self, uint8_t event) {
+static bool on_link_identify(struct dev_s * self, uint8_t event) {
     (void) self;
     (void) event;
+
+    struct mb_link_identity_s identity = {
+        .mb_version = 0,
+        .app_version = 0,
+        .vendor_id = 0,
+        .product_id = 0,
+        .subtype = 0,
+        .pubsub_prefix = 'h',
+        .rsv1_u16 = 0,
+    };
+
+    send_to_device(self, MB_FRAME_ST_LINK, MB_LINK_MSG_IDENTITY,
+        (uint32_t *) &identity, sizeof(identity) >> 2);
+    timeout_set(self);
+    return true;
+}
+
+static bool on_open_enter(struct dev_s * self, uint8_t event) {
+    (void) event;
+    timeout_clear(self);
+    send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
     return true;
 }
 
@@ -203,23 +221,6 @@ static bool on_ll_close(struct dev_s * self, uint8_t event) {
     return true;
 }
 
-static bool guard_is_finalizing(struct dev_s * self, uint8_t event) {
-    (void) event;
-    return self->finalize_pending;
-}
-
-static bool guard_open_fail(struct dev_s * self, uint8_t event) {
-    (void) event;
-    send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(1));
-    return true;
-}
-
-static bool guard_close_fail(struct dev_s * self, uint8_t event) {
-    (void) event;
-    send_to_frontend(self, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(1));
-    return true;
-}
-
 static bool guard_open_success(struct dev_s * self, uint8_t event) {
     (void) event;
     send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
@@ -228,21 +229,16 @@ static bool guard_open_success(struct dev_s * self, uint8_t event) {
 
 static bool guard_close_success(struct dev_s * self, uint8_t event) {
     (void) event;
-    send_to_frontend(self, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(0));
+    if (!self->finalize_pending) {
+        send_to_frontend(self, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(0));
+    }
     return true;
 }
 
 #define TRANSITION_END {0, 0, NULL}
 
 const struct state_machine_transition_s state_machine_global[] = {
-    {EV_RESET, ST_NOT_PRESENT, is_device_not_present},
-    {EV_RESET, ST_CLOSED, is_device_present},
-    TRANSITION_END
-};
-
-const struct state_machine_transition_s state_machine_not_present[] = {
-    {EV_API_OPEN_REQUEST, ST_NOT_PRESENT, guard_open_fail},
-    {EV_API_CLOSE_REQUEST, ST_NOT_PRESENT, guard_close_fail},
+    {EV_RESET, ST_CLOSED, NULL},
     TRANSITION_END
 };
 
@@ -259,21 +255,29 @@ const struct state_machine_transition_s state_machine_ll_open[] = {
 };
 
 const struct state_machine_transition_s state_machine_ll_bulk_open[] = {
-    {EV_BACKEND_OPEN_BULK_ACK, ST_LINK_RESET, NULL},
+    {EV_BACKEND_OPEN_BULK_ACK, ST_LINK_REQUEST, NULL},
     {EV_BACKEND_OPEN_BULK_NACK, ST_LL_CLOSE, NULL},
     {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
     TRANSITION_END
 };
 
-const struct state_machine_transition_s state_machine_link_reset[] = {
-    {EV_LINK_RESET_REQ, ST_INVALID, on_link_reset_req},  // respond with ack
-    {EV_LINK_RESET_RSP, ST_OPEN, guard_open_success},
+const struct state_machine_transition_s state_machine_link_request[] = {
+    {EV_LINK_CONNECT_ACK, ST_LINK_IDENTITY, NULL},
+    {EV_TIMEOUT, ST_LINK_REQUEST, NULL},
+    {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
+    TRANSITION_END
+};
+
+const struct state_machine_transition_s state_machine_link_identity[] = {
+    {EV_LINK_IDENTITY_RECEIVED, ST_OPEN, guard_open_success},
+    {EV_TIMEOUT, ST_LINK_REQUEST, NULL},
     {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_open[] = {
     {EV_API_CLOSE_REQUEST, ST_PUBSUB_FLUSH, NULL},
+    // todo handle detect link lost
     TRANSITION_END
 };
 
@@ -296,7 +300,6 @@ const struct state_machine_transition_s state_machine_ll_close_pend[] = {
 };
 
 const struct state_machine_transition_s state_machine_ll_close[] = {
-    {EV_BACKEND_CLOSE_ACK, ST_FINALIZED, guard_is_finalizing},
     {EV_BACKEND_CLOSE_ACK, ST_CLOSED, guard_close_success},
     // todo timeout
     TRANSITION_END
@@ -308,17 +311,16 @@ const struct state_machine_transition_s state_machine_end[] = {
 
 const struct state_machine_state_s state_machine_states[] = {
     {ST_INVALID, "invalid", NULL, NULL, state_machine_global},
-    {ST_NOT_PRESENT, "not_present", NULL, NULL, state_machine_not_present},
     {ST_CLOSED, "closed", NULL, NULL, state_machine_closed},
     {ST_LL_OPEN, "ll_open", on_ll_open, NULL, state_machine_ll_open},
     {ST_LL_BULK_OPEN, "ll_bulk_open", on_ll_bulk_open, NULL, state_machine_ll_bulk_open},
-    {ST_LINK_RESET, "link_reset", on_link_reset, NULL, state_machine_link_reset},
-    {ST_OPEN, "open", on_open, NULL, state_machine_open},
-       {ST_PUBSUB_FLUSH, "pubsub_flush", on_pubsub_flush, NULL, state_machine_pubsub_flush},
+    {ST_LINK_REQUEST, "link_request", on_link_request, NULL, state_machine_link_request},
+    {ST_LINK_IDENTITY, "link_identify", on_link_identify, NULL, state_machine_link_identity},
+    {ST_OPEN, "open", on_open_enter, NULL, state_machine_open},
+    {ST_PUBSUB_FLUSH, "pubsub_flush", on_pubsub_flush, NULL, state_machine_pubsub_flush},
     {ST_LINK_DISCONNECT, "link_disconnect", on_link_disconnect, NULL, state_machine_link_disconnect},
     {ST_LL_CLOSE_PEND, "ll_close_pend", NULL, NULL, state_machine_ll_close_pend},
     {ST_LL_CLOSE, "ll_close", on_ll_close, NULL, state_machine_ll_close},
-    {ST_FINALIZED, "finalized", NULL, NULL, state_machine_end},
     {0, NULL, NULL, NULL, NULL},
 };
 
@@ -396,10 +398,10 @@ static struct jsdrvp_msg_s * msg_alloc_send_to_device(struct dev_s * d, enum mb_
     uint16_t * data_u16 = (uint16_t *) data_u8;
     uint32_t * data_u32 =  (uint32_t *) data_u8;
 
-    data_u8[0] = MB_FRAMER_SOF1;
-    data_u8[1] = MB_FRAMER_SOF2 | service_type;
-    data_u16[1] = (MB_FRAME_FT_DATA << 11) | (d->out_frame_id & MB_FRAMER_FRAME_ID_MAX);
-    d->out_frame_id = (d->out_frame_id + 1) & MB_FRAMER_FRAME_ID_MAX;
+    data_u8[0] = MB_FRAME_SOF1;
+    data_u8[1] = MB_FRAME_SOF2 | service_type;
+    data_u16[1] = (MB_FRAME_FT_DATA << 11) | (d->out_frame_id & MB_FRAME_FRAME_ID_MAX);
+    d->out_frame_id = (d->out_frame_id + 1) & MB_FRAME_FRAME_ID_MAX;
     data_u8[4] = length_u32 - 1;
     data_u8[5] = mb_frame_length_check(length_u32 - 1);
     data_u16[3] = metadata;
@@ -453,9 +455,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     if (!msg) {
         return false;
     }
-    if (d->state == ST_NOT_PRESENT) {
-        JSDRV_LOGE("handle_cmd but not present");
-    }
+    JSDRV_LOGI("topic %s", msg->topic);
 
     const char * topic = prefix_match_and_strip(d->ll.prefix, msg->topic);
     if (msg->topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
@@ -517,6 +517,10 @@ static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data,
         case MB_LINK_MSG_PONG:
             send_to_frontend(d, "h/link/!pong", &jsdrv_union_bin((uint8_t *) data, length * 4));
             break;
+        case MB_LINK_MSG_IDENTITY:
+            // todo store identity information?
+            state_machine_process(d, EV_LINK_IDENTITY_RECEIVED);
+            break;
         default:
             JSDRV_LOGW("link msg: unknown %d", msg_type);
             break;
@@ -528,34 +532,30 @@ static void handle_in_trace(struct dev_s * d, uint16_t metadata, uint32_t * data
     send_to_frontend(d, "h/!trace", &jsdrv_union_bin((uint8_t *) data, length * 4));
 }
 
-static void handle_in_throughput(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
-    (void) d;
-    (void) metadata;
-    (void) data;
-    (void) length;
-    // todo
-}
-
 static void handle_in_pubsub(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
     // process metadata and size
-    uint8_t value_type = metadata & 0x00ffU;
+    uint8_t extended_value_type = metadata & 0x00ffU;
+    uint8_t value_type = extended_value_type & 0x0fU;
     uint8_t size_lsb = (metadata >> 8) & 0x0003U;
-    uint32_t size = (((uint32_t) length) << 2) - MB_TOPIC_SIZE_MAX;
+    uint32_t value_size = (((uint32_t) length) << 2) - MB_TOPIC_SIZE_MAX;
     if (size_lsb) {
-        size = size - 4 + size_lsb;
+        value_size = value_size - 4 + size_lsb;
     }
+
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
 
     // process topic
     struct jsdrv_topic_s topic;
     jsdrv_topic_set(&topic, d->ll.prefix);
     jsdrv_topic_append(&topic, (const char * ) data);
+    jsdrv_cstr_copy(m->topic, topic.topic, sizeof(m->topic));
     data += (MB_TOPIC_SIZE_MAX >> 2);
 
     // process value
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, topic.topic, &jsdrv_union_bin(NULL, 0));
-    m->value.size = size;
+    m->value.size = value_size;
+    m->value.type = value_type;
     if ((value_type == JSDRV_UNION_STR) || (value_type == JSDRV_UNION_JSON) || (value_type == JSDRV_UNION_BIN)) {
-        JSDRV_ASSERT(size <= JSDRV_PAYLOAD_LENGTH_MAX);  // always true
+        JSDRV_ASSERT(value_size <= JSDRV_PAYLOAD_LENGTH_MAX);  // always true
         m->value.value.bin = m->payload.bin;
         memcpy(m->payload.bin, data, m->value.size);
     } else {
@@ -590,8 +590,8 @@ static void handle_stream_in_link_frame(struct dev_s * d, uint32_t * p_u32) {
     uint8_t ctrl = p_u8[2];
     uint8_t event = 0;
     switch (ctrl) {
-        case MB_FRAME_CTRL_RESET_REQ: event = EV_LINK_RESET_REQ; break;
-        case MB_FRAME_CTRL_RESET_RSP: event = EV_LINK_RESET_RSP; break;
+        case MB_FRAME_CTRL_CONNECT_REQ: event = EV_LINK_CONNECT_REQ; break;
+        case MB_FRAME_CTRL_CONNECT_ACK: event = EV_LINK_CONNECT_ACK; break;
         case MB_FRAME_CTRL_DISCONNECT_REQ: event = EV_LINK_DISCONNECT_REQ; break;
         case MB_FRAME_CTRL_DISCONNECT_ACK: event = EV_LINK_DISCONNECT_ACK; break;
         default:
@@ -605,16 +605,16 @@ static void handle_stream_in_link_frame(struct dev_s * d, uint32_t * p_u32) {
 static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
     uint8_t * p_u8 = (uint8_t *) p_u32;
     uint16_t * p_u16 = (uint16_t *) p_u32;
-    if (p_u8[0] != MB_FRAMER_SOF1) {
+    if (p_u8[0] != MB_FRAME_SOF1) {
         JSDRV_LOGW("frame SOF1 mismatch: 0x%02x", p_u8[0]);
         return;
     }
-    if ((p_u8[1] & MB_FRAMER_SOF2_MASK) != MB_FRAMER_SOF2) {
+    if ((p_u8[1] & MB_FRAME_SOF2_MASK) != MB_FRAME_SOF2) {
         JSDRV_LOGW("frame SOF2 mismatch: 0x%02x", p_u8[1]);
         return;
     }
-    uint8_t service_type = p_u8[1] & ~MB_FRAMER_SOF2_MASK;
-    uint16_t frame_id = p_u16[1] & MB_FRAMER_FRAME_ID_MAX;
+    uint8_t service_type = p_u8[1] & ~MB_FRAME_SOF2_MASK;
+    uint16_t frame_id = p_u16[1] & MB_FRAME_FRAME_ID_MAX;
     uint8_t frame_type = p_u8[3] >> 3;
 
     switch (frame_type) {
@@ -635,7 +635,7 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         JSDRV_LOGW("in frame_id mismatch %d != %d", (int) d->in_frame_id, (int) frame_id);
         // todo keep statistics
     }
-    d->in_frame_id = (frame_id + 1) & MB_FRAMER_FRAME_ID_MAX;
+    d->in_frame_id = (frame_id + 1) & MB_FRAME_FRAME_ID_MAX;
     ++d->in_frame_count;
 
     uint8_t length = p_u8[4];
@@ -659,9 +659,10 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         case MB_FRAME_ST_PUBSUB:
             handle_in_pubsub(d, metadata, p_u32 + 2, length + 1);
             break;
-        case MB_FRAME_ST_COMM_THROUGHPUT:
-            handle_in_throughput(d, metadata, p_u32 + 2, length + 1);
-            break;
+        // todo restore throughput test
+        //case MB_FRAME_ST_COMM_THROUGHPUT:
+        //    handle_in_throughput(d, metadata, p_u32 + 2, length + 1);
+        //    break;
         default:
             JSDRV_LOGW("unsupported service type %d", (int) service_type);
             break;
@@ -684,7 +685,7 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         return false;
     }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
-        JSDRV_LOGD3("stream_in_data sz=%d", (int) msg->value.size);
+        JSDRV_LOGI("stream_in_data sz=%d", (int) msg->value.size);  // todo D3
         handle_stream_in(d, msg);
         msg_queue_push(d->ll.cmd_q, msg);  // return
         return true;
@@ -716,6 +717,21 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
+static uint32_t thread_timeout_duration_ms(struct dev_s * d) {
+    int64_t timeout_duration_t64 = 0;
+    if (d->timeout_utc > 0) {
+        timeout_duration_t64 = d->timeout_utc - jsdrv_time_utc();
+        if (timeout_duration_t64 < 0) {
+            return 0;
+        }
+        if (timeout_duration_t64 < (5 * JSDRV_TIME_SECOND)) {
+            return JSDRV_TIME_TO_MILLISECONDS(timeout_duration_t64);
+        }
+    }
+    return 5000;
+}
+
+
 static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
     struct dev_s *d = (struct dev_s *) lpParam;
     JSDRV_LOGI("JS220 USB upper-level thread started for %s", d->ll.prefix);
@@ -735,10 +751,14 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
     fds[1].events = POLLIN;
 #endif
 
-    while (d->state != ST_FINALIZED) {
+    while (true) {
+        if ((d->finalize_pending) && (d->state == ST_CLOSED)) {
+            break;
+        }
 #if _WIN32
-        WaitForMultipleObjects(handle_count, handles, false, 5000);
+        WaitForMultipleObjects(handle_count, handles, false, thread_timeout_duration_ms(d));
 #else
+        // todo support timeout_duration_ms
         poll(fds, 2, 2);
 #endif
         JSDRV_LOGD2("ul thread tick");
@@ -761,7 +781,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
 
 static void join(struct jsdrvp_ul_device_s * device) {
     struct dev_s * d = (struct dev_s *) device;
-    jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, "");
+    jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, JSDRV_MSG_FINALIZE);
     // and wait for thread to exit.
     jsdrv_thread_join(&d->thread, 1000);
     jsdrv_free(d);

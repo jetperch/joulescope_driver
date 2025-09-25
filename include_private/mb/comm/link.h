@@ -17,7 +17,7 @@
 /**
  * @file
  *
- * @brief Message communication frame format.
+ * @brief Communication link layer.
  */
 
 #ifndef MB_COMM_LINK_H_
@@ -31,7 +31,7 @@ MB_CPP_GUARD_START
  * @ingroup mb_comm
  * @defgroup mb_comm_link Link
  *
- * @brief OS communication link layer.
+ * @brief Communication link layer.
 */
 
 
@@ -45,7 +45,22 @@ enum mb_link_msg_e {
     MB_LINK_MSG_INVALID = 0,
     MB_LINK_MSG_PING = 1,           // ping test, response with pong
     MB_LINK_MSG_PONG = 2,           // response to ping
+    MB_LINK_MSG_IDENTITY = 3,       // send identity information on connection
 };
+
+/**
+ * @brief The link identity information sent on connection.
+ */
+struct mb_link_identity_s {
+    uint32_t mb_version;        ///< The major.minor.patch MiniBitty version.
+    uint32_t app_version;       ///< The major.minor.patch application version.
+    uint16_t vendor_id;         ///< The personality vendor_id.
+    uint16_t product_id;        ///< The personality product_id.
+    uint8_t subtype;            ///< The personality subtype.
+    char pubsub_prefix;         ///< The pubsub character prefix.
+    uint16_t rsv1_u16;          ///< Reserved for future use, write 0.
+};
+
 
 MB_CPP_GUARD_END
 
