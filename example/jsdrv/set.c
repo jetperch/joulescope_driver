@@ -22,12 +22,49 @@
 #include <stdio.h>
 #include <string.h>
 
-static int usage() {
-    printf("usage: jsdrv_util set device_path \"topic=value\" ...\n");
+const char USAGE[] =
+    "\n"
+    "usage: jsdrv_util set device_path \"topic=value\" ...\n"
+    "    topic: The hierarchical topic relative to device_path separated by /.\n"
+    "    value: The value to publish to topic.\n"
+    "           String values must start and end with \".\n"
+    "           Boolean values are true or false.\n"
+    "           Otherwise 32-bit integer values.\n"
+    "              0x prefix for hex.\n"
+    "              - prefix for negative numbers.\n"
+    "\n";
+
+
+static int usage(void) {
+    printf("%s", USAGE);
     return 1;
 }
 
 #define VALIDATE(topic__, rc__)  if (!(rc__)) {printf("%s invalid\n", (topic__)); return 1; }
+
+
+static const char * const true_table_[] = {"ON", "TRUE", "YES", "ENABLE", "ENABLED", NULL};
+static const char * const false_table[] = {"OFF", "FALSE", "NO", "DISABLE", "DISABLED", "NULL", "NONE", NULL};
+int to_bool(char const * s, bool * value) {
+    char buffer[16]; // longer than any entry
+    int index;
+    if ((s == NULL) || (NULL == value)) {
+        return 1;
+    }
+    jsdrv_cstr_array_copy(buffer, s);
+    jsdrv_cstr_toupper(buffer);
+    if (0 == jsdrv_cstr_to_index(buffer, true_table_, &index)) {
+        *value = true;
+        return 0;
+    }
+    if (0 == jsdrv_cstr_to_index(buffer, false_table, &index)) {
+        *value = false;
+        return 0;
+    }
+    return 1;
+}
+
+
 
 static int set_arg(struct app_s * self, char * device_path, char * arg) {
     struct jsdrv_topic_s topic;
@@ -49,8 +86,30 @@ static int set_arg(struct app_s * self, char * device_path, char * arg) {
         jsdrv_topic_append(&topic, arg);
     }
     printf("%s => %s\n", topic.topic, value);
-    struct jsdrv_union_s v = jsdrv_union_str(value);
-    int32_t rc = jsdrv_publish(self->context, topic.topic, &v, JSDRV_TIMEOUT_MS_DEFAULT);
+
+    size_t slen = strlen(value);
+    struct jsdrv_union_s v;
+    bool v_bool;
+    int32_t v_i32;
+    uint32_t v_u32;
+
+    if (0 == slen) {
+        v = jsdrv_union_null();
+    } else if (value[0] == '"') {
+        value[slen - 1] = 0;
+        v = jsdrv_union_str(value);
+    } else if (!to_bool(value, &v_bool)) {
+        v = jsdrv_union_u32(v_bool ? 1 : 0);
+    } else if ((value[0] == '-') && !jsdrv_cstr_to_i32(value, &v_i32)) {
+        v = jsdrv_union_i32(v_i32);
+    } else if (!jsdrv_cstr_to_u32(value, &v_u32)) {
+        v = jsdrv_union_u32(v_u32);
+    } else {
+        printf("Could not parse value: %s\n", value);
+        return 1;
+    }
+
+    int32_t rc = jsdrv_publish(self->context, topic.topic, &v, 0);
     if (rc) {
         printf("publish failed with %d : %s\n", rc, jsdrv_error_code_description(rc));
     }
@@ -69,7 +128,7 @@ int on_set(struct app_s * self, int argc, char * argv[]) {
                 return usage();
             }
             ROE(app_match(self, device_filter));
-            ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
+            ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, 1000));
             ARG_CONSUME();
         } else {
             if (set_arg(self, self->device.topic, argv[0])) {
@@ -80,7 +139,7 @@ int on_set(struct app_s * self, int argc, char * argv[]) {
     }
 
     if (self->device.topic[0]) {
-        jsdrv_close(self->context, self->device.topic, 0);
+        jsdrv_close(self->context, self->device.topic, 1000);
     }
 
     return 0;
