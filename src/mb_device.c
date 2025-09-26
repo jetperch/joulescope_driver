@@ -26,6 +26,7 @@
 #include "jsdrv_prv/thread.h"
 #include <inttypes.h>
 #include <jsdrv/cstr.h>
+#include <stdio.h>
 
 #include "mb/comm/frame.h"
 #include "mb/comm/link.h"
@@ -101,6 +102,8 @@ struct dev_s {
     jsdrv_thread_t thread;
     volatile uint8_t state;  // state_e
     volatile bool finalize_pending;
+
+    FILE * file_in;
 
     struct jsdrv_time_map_s time_map;
 };
@@ -485,6 +488,13 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         if (0 == strcmp("h/link/!ping", topic)) {
             send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING,
                 (uint32_t *) msg->value.value.bin, (msg->value.size + 3) >> 2);
+        } else if (0 == strcmp("h/in/frecord", topic)) {
+            if (NULL != d->file_in) {
+                fclose(d->file_in);
+            }
+            if (msg->value.size) {
+                d->file_in = fopen(msg->value.value.str, "wb");
+            }
         } else {
             JSDRV_LOGE("topic invalid: %s", msg->topic);
         }
@@ -676,6 +686,9 @@ static void handle_stream_in(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         uint32_t * p_u32 = (uint32_t *) &msg->value.value.bin[i * FRAME_SIZE_U8];
         handle_stream_in_frame(d, p_u32);
     }
+    if (NULL != d->file_in) {
+        fwrite(msg->value.value.bin, 1, msg->value.size, d->file_in);
+    }
 }
 
 static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
@@ -773,6 +786,10 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         if (d->state == ST_LL_CLOSE_PEND) {
             state_machine_process(d, EV_ADVANCE);
         }
+    }
+
+    if (NULL != d->file_in) {
+        fclose(d->file_in);
     }
 
     JSDRV_LOGI("JS220 USB upper-level thread done %s", d->ll.prefix);

@@ -114,7 +114,12 @@ static int link_lookback(struct app_s * self, const char * device) {
     jsdrv_topic_append(&topic, "c/comm/usbd/0/rx/!stat");
     jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_device_stats, NULL, 0);
 
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/in/frecord");
+    // jsdrv_publish(self->context, topic.topic, &jsdrv_union_cstr("out.bin"), 0);
+
     fflush(stdout);
+
 
     while (!quit_) {
         ResetEvent(loopback_.event);
