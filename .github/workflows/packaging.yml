@@ -40,7 +40,7 @@ jobs:
           - {shared: ON, target: jsdrv}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build
         run: |
@@ -67,7 +67,7 @@ jobs:
         run: Compress-Archive -Path cmake_build/src/Release/jsdrv.* -Destination artifacts/jsdrv_dll.zip
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: windows-latest-${{ matrix.shared }}
           path: artifacts/*
@@ -79,13 +79,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "ubuntu-arm-latest", "macos-latest"]
+        os: ["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest"]
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Ubuntu dependencies
-        if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-arm-latest'
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm'
         run: |
           sudo apt update
           sudo apt install -y libudev-dev
@@ -102,7 +102,7 @@ jobs:
         run: cmake --build cmake_build_static --target test
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.os }}
           path: cmake_build_static/example/jsdrv
@@ -126,10 +126,10 @@ jobs:
           sudo apt install -y libudev-dev
 
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -143,7 +143,7 @@ jobs:
         run: python -m build --sdist
 
       - name: Upload python source package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: python_sdist
           path: dist/*.tar.gz
@@ -157,12 +157,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "ubuntu-arm-latest", "windows-latest", "macos-latest"]
-        python_version: ["cp310", "cp311", "cp312", "cp313"]
+        os: ["ubuntu-latest", "ubuntu-24.04-arm", "windows-latest", "macos-latest"]
+        python_version: ["cp311", "cp312", "cp313", "cp314"]
 
     steps:
       - name: Download sdist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: python_sdist
           path: dist/
@@ -173,7 +173,7 @@ jobs:
         run: echo "filename=$(ls dist/*.tar.gz)" >> $GITHUB_OUTPUT
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.23.2
+        uses: pypa/cibuildwheel@v3.3
         env:
           CIBW_ARCHS_MACOS: universal2
           CIBW_ARCHS_WINDOWS: native
@@ -190,7 +190,7 @@ jobs:
           package-dir: ${{ steps.find_sdist_filename.outputs.filename }}
 
       - name: Upload python wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: python_wheel-${{ matrix.os }}-${{ matrix.python_version }}
           path: wheelhouse/*.whl
@@ -210,7 +210,7 @@ jobs:
 
     steps:
       - name: Download python sdist artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: python_sdist
           path: dist/
@@ -223,7 +223,7 @@ jobs:
           path: dist/
 
       - name: Download windows binary artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           pattern: windows-latest-*
           merge-multiple: true
@@ -234,12 +234,12 @@ jobs:
         run: ls dist/*
 
       - name: Publish packages to PyPi
-        uses: pypa/gh-action-pypi-publish@v1.12.4
+        uses: pypa/gh-action-pypi-publish@v1.13.0
         with:
           print-hash: true
 
       - name: Publish Release assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*
@@ -251,14 +251,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "ubuntu-arm-latest", "windows-latest", "macos-latest"]
+        os: ["ubuntu-latest", "ubuntu-24.04-arm", "windows-latest", "macos-latest"]
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Ubuntu dependencies
-        if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-arm-latest'
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm'
         run: |
           sudo apt update
           sudo apt install -y libudev-dev          
@@ -272,7 +272,7 @@ jobs:
           prebuildify --napi --strip --target 20.12.2
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: node_js_native-${{ matrix.os }}
           path: node_api/prebuilds/*
@@ -286,10 +286,10 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download node.js native build files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           pattern: node_js_native-*
           merge-multiple: true
@@ -303,7 +303,7 @@ jobs:
           npm pack --pack-destination ../package
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: node_js
           path: package/*
@@ -321,7 +321,7 @@ jobs:
 
     steps:
       - name: Download node package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: node_js
           path: dist/
@@ -332,7 +332,7 @@ jobs:
         run: echo "filename=$(ls ./dist/*.tgz)" >> $GITHUB_OUTPUT
 
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'

@@ -53,7 +53,7 @@
  * added.  Any changes that break backwards compatibility should
  * not adversely affect performance.
  */
-#define JSDRV_VERSION_MINOR 10
+#define JSDRV_VERSION_MINOR 11
 
 /**
  * @brief The Joulescope driver patch version.
