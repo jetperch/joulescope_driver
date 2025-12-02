@@ -10,6 +10,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 * Added Python 3.14 support and dropped Python 3.10 support.
 * Update build dependencies.
+* Added time64.as_isostr()
 
 
 ## 1.10.0
