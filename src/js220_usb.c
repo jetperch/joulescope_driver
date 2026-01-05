@@ -87,6 +87,7 @@
 #define SAMPLING_FREQUENCY         (2000000U)
 #define FS_MIN_ON_INSTRUMENT       (1000U)
 #define STREAM_PAYLOAD_FULL        (JSDRV_STREAM_DATA_SIZE - JSDRV_STREAM_HEADER_SIZE - JS220_USB_FRAME_LENGTH)
+#define PUB_RATE_DEFAULT           (20U) // Hz
 
 extern const struct jsdrvp_param_s js220_params[];
 
@@ -128,6 +129,27 @@ static const char * sampling_frequency_meta = "{"
         "[100000, \"100 kHz\"],"
         "[50000, \"50 kHz\"],"
         "[20000, \"20 kHz\"],"
+        "[10000, \"10 kHz\"],"
+        "[5000, \"5 kHz\"],"
+        "[2000, \"2 kHz\"],"
+        "[1000, \"1 kHz\"],"
+        "[500, \"500 Hz\"],"
+        "[200, \"200 Hz\"],"
+        "[100, \"100 Hz\"],"
+        "[50, \"50 Hz\"],"
+        "[20, \"20 Hz\"],"
+        "[10, \"10 Hz\"],"
+        "[5, \"5 Hz\"],"
+        "[2, \"2 Hz\"],"
+        "[1, \"1 Hz\"]"
+    "]"
+"}";
+
+static const char * publish_rate_meta = "{"
+    "\"dtype\": \"u32\","
+    "\"brief\": \"The approximate sample publish frequency.\","
+    "\"default\": 20,"
+    "\"options\": ["
         "[10000, \"10 kHz\"],"
         "[5000, \"5 kHz\"],"
         "[2000, \"2 kHz\"],"
@@ -254,6 +276,7 @@ struct dev_s {
     uint32_t fs;  // sampling frequency
     uint32_t signal_downsample_filter;
     uint32_t gpi_downsample_filter;
+    uint32_t publish_rate;
 
     struct port_s ports[PORTS_LENGTH]; // one for each port
     enum break_e ll_await_break_on;
@@ -1058,6 +1081,16 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
     return 0;
 }
 
+static int32_t on_publish_rate(struct dev_s * d,  const struct jsdrv_union_s * value) {
+    struct jsdrv_union_s v = *value;
+    if (jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+        JSDRV_LOGW("Could not process sampling frequency");
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    d->publish_rate = v.value.u32;
+    return 0;
+}
+
 static int32_t on_filter(struct dev_s * d,  const struct jsdrv_union_s * value) {
     struct jsdrv_union_s v = *value;
     if (jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
@@ -1135,6 +1168,9 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             send_return_code_to_frontend(d, topic, 0);
         } else if (0 == strcmp("h/fs", topic)) {
             rc = on_sampling_frequency(d, &msg->value);
+            send_return_code_to_frontend(d, topic, rc);
+        } else if (0 == strcmp("h/fp", topic)) {
+            rc = on_publish_rate(d, &msg->value);
             send_return_code_to_frontend(d, topic, rc);
         } else if (0 == strcmp("h/filter", topic)) {
             rc = on_filter(d, &msg->value);
@@ -1365,7 +1401,7 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
 
     // determine if need to send
     uint64_t sample_id_delta = port->sample_id_next - s->sample_id;
-    uint32_t element_count_max = SAMPLING_FREQUENCY / (20 * downsample_factor);
+    uint32_t element_count_max = SAMPLING_FREQUENCY / (d->publish_rate * downsample_factor);
     if (element_count_max < 1) {
         element_count_max = 1;
     }
@@ -1474,6 +1510,7 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
             send_to_frontend(d, "c/fw/version$", &jsdrv_union_cjson_r(fw_ver_meta));
             send_to_frontend(d, "c/hw/version$", &jsdrv_union_cjson_r(hw_ver_meta));
             send_to_frontend(d, "h/fs$", &jsdrv_union_cjson_r(sampling_frequency_meta));
+            send_to_frontend(d, "h/fp$", &jsdrv_union_cjson_r(publish_rate_meta));
             if (has_on_instrument_downsample(d)) {
                 send_to_frontend(d, "h/filter$", &jsdrv_union_cjson_r(signal_downsample_filter));
             }
@@ -1877,6 +1914,7 @@ int32_t jsdrvp_ul_js220_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     *device = NULL;
     struct dev_s * d = jsdrv_alloc_clr(sizeof(struct dev_s));
     JSDRV_LOGD3("jsdrvp_ul_js220_usb_factory %p", d);
+    d->publish_rate = PUB_RATE_DEFAULT;  // Hz
     d->i_scale = 1.0f;
     d->v_scale = 1.0f;
     on_sampling_frequency(d, &jsdrv_union_u32_r(SAMPLING_FREQUENCY));

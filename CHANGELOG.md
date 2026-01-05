@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 1.12.0
+
+2026 Jan 5
+
+* Added JS220 sample publish rate h/fp.
+
+
 ## 1.11.0
 
 2025 Dec 2
