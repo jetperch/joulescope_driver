@@ -189,6 +189,9 @@ int jsdrv_cstr_to_u32(const char * src, uint32_t * value) {
                 nibble = c - 'a' + 10;
             } else if ((c >= 'A') && (c <= 'F')) {
                 nibble = c - 'A' + 10;
+            } else if (c == '_') {
+                ++src;
+                continue;
             } else {
                 break;
             }

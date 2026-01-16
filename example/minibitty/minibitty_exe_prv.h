@@ -92,6 +92,7 @@ int on_help(struct app_s * self, int argc, char * argv[]);
 int on_hotplug(struct app_s * self, int argc, char * argv[]);
 int on_info(struct app_s * self, int argc, char * argv[]);
 int on_loopback(struct app_s * self, int argc, char * argv[]);
+int on_stream(struct app_s * self, int argc, char * argv[]);
 int on_throughput(struct app_s * self, int argc, char * argv[]);
 int on_version(struct app_s * self, int argc, char * argv[]);
 

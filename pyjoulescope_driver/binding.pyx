@@ -239,6 +239,10 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                     shape[0] = <np.npy_intp> ((stream[0].element_count + 7) / 8)
                     ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> stream[0].data)
                     v['data'] = ndarray.copy()
+                elif el == (c_jsdrv.JSDRV_DATA_TYPE_INT, 32):  # int32
+                    shape[0] = <np.npy_intp> stream[0].element_count
+                    ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_INT32, <void *> stream[0].data)
+                    v['data'] = ndarray.copy()
                 elif el == (c_jsdrv.JSDRV_DATA_TYPE_INT, 16):  # int16
                     shape[0] = <np.npy_intp> stream[0].element_count
                     ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_INT16, <void *> stream[0].data)

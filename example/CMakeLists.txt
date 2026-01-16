@@ -68,6 +68,7 @@ add_executable(minibitty_exe
         minibitty/hotplug.c
         minibitty/info.c
         minibitty/loopback.c
+        minibitty/stream.c
         minibitty/throughput.c
         minibitty/version.c
         minibitty/adapter_tracy.cpp

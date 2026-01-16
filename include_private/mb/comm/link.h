@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2024 Jetperch LLC
+ * Copyright 2014-2025 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,9 +43,20 @@ MB_CPP_GUARD_START
  */
 enum mb_link_msg_e {
     MB_LINK_MSG_INVALID = 0,
-    MB_LINK_MSG_PING = 1,           // ping test, response with pong
-    MB_LINK_MSG_PONG = 2,           // response to ping
-    MB_LINK_MSG_IDENTITY = 3,       // send identity information on connection
+
+    /**
+     * @brief Identity information exchanged during link connection.
+     *
+     * @see mb_link_identity_s
+     *
+     * This message is exchanged during link connection
+     * to identify the far end.  A host may then use the identity
+     * to connect the correct "driver" for the device.
+     */
+    MB_LINK_MSG_IDENTITY = 1,
+
+    MB_LINK_MSG_PING = 2,           ///< ping message, respond with pong
+    MB_LINK_MSG_PONG = 3,           ///< pong message, response to ping
 };
 
 /**
@@ -61,6 +72,17 @@ struct mb_link_identity_s {
     uint16_t rsv1_u16;          ///< Reserved for future use, write 0.
 };
 
+/**
+ * @brief Construct the identity message frame for this instance.
+ *
+ * @param msg The optional message to populate.  If not provided, allocates
+ *      a new message of minimal size.
+ * @return The identity message.
+ * @note This function does not compute frame check, since the algorithm
+ *      varies based on the link.  Each link must compute and populate
+ *      frame check as needed.
+ */
+struct mb_msg_s * mb_comm_link_identity(struct mb_msg_s * msg);
 
 MB_CPP_GUARD_END
 

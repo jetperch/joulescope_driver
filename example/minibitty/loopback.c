@@ -25,7 +25,7 @@
 
 #define MB_TOPIC_LENGTH_MAX (32U)
 #define LINK_PING_SIZE_U32 ((512U - 12U) >> 2)
-#define PUBSUB_PING_SIZE_U32 ((512U - 12U - MB_TOPIC_LENGTH_MAX) >> 2)
+#define PUBSUB_PING_SIZE_U32 ((512U - 12U - 8U - MB_TOPIC_LENGTH_MAX) >> 2)  // frame, stdmsg, publish
 
 
 enum loopback_location_e {

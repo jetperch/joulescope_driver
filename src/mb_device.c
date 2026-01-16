@@ -30,6 +30,7 @@
 
 #include "mb/comm/frame.h"
 #include "mb/comm/link.h"
+#include "mb/stdmsg.h"
 
 
 #define FRAME_SIZE_U8           (512U)
@@ -383,7 +384,7 @@ static const char * prefix_match_and_strip(const char * prefix, const char * top
  * @param d The target device.
  * @param service_type The mb_frame_service_type_e
  * @param length_u32 The payload length in u32 words.
- * @param metadata The 16-bit metadata value.
+ * @param metadata The 12-bit metadata value.
  * @return The allocated message or NULL on failure.
  */
 static struct jsdrvp_msg_s * msg_alloc_send_to_device(struct dev_s * d, enum mb_frame_service_type_e service_type, uint8_t length_u32, uint16_t metadata) {
@@ -402,12 +403,12 @@ static struct jsdrvp_msg_s * msg_alloc_send_to_device(struct dev_s * d, enum mb_
     uint32_t * data_u32 =  (uint32_t *) data_u8;
 
     data_u8[0] = MB_FRAME_SOF1;
-    data_u8[1] = MB_FRAME_SOF2 | service_type;
+    data_u8[1] = MB_FRAME_SOF2;
     data_u16[1] = (MB_FRAME_FT_DATA << 11) | (d->out_frame_id & MB_FRAME_FRAME_ID_MAX);
     d->out_frame_id = (d->out_frame_id + 1) & MB_FRAME_FRAME_ID_MAX;
     data_u8[4] = length_u32 - 1;
     data_u8[5] = mb_frame_length_check(length_u32 - 1);
-    data_u16[3] = metadata;
+    data_u16[3] = (metadata & 0x0fff) | (((uint16_t) service_type) << 12);
     data_u32[length_u32 + 2] = 0;  // no frame_check on USB
     return m;
 }
@@ -426,17 +427,29 @@ static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e servic
 
 static void publish_to_device(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
     uint32_t value_size = (value->size < 8) ? 8 : value->size;  // keep things simple
-    uint32_t length_u8 = MB_TOPIC_SIZE_MAX + value_size;  // topic and value
+    uint32_t length_u8 = sizeof(struct mb_stdmsg_header_s) + MB_TOPIC_SIZE_MAX + value_size;  // topic and value
     uint32_t length_u32 = (length_u8 + 3) >> 2;  // round up
-    uint16_t metadata = ((value->type) & 0x00ffU) | ((length_u8 & 0x0003U) << 8);
-    struct jsdrvp_msg_s * m = msg_alloc_send_to_device(d, MB_FRAME_ST_PUBSUB, length_u32, metadata);
+    struct jsdrvp_msg_s * m = msg_alloc_send_to_device(d, MB_FRAME_ST_STDMSG, length_u32, 0);
     if (!m) {
         return;
     }
 
-    // populate topic
     uint8_t * data_u8 = &m->payload.bin[FRAME_HEADER_SIZE_U8];
-    memset(data_u8, 0, MB_TOPIC_SIZE_MAX);
+
+    // Populate stdmsg header
+    struct mb_stdmsg_header_s hdr;
+    hdr.version = 0;
+    hdr.type = MB_STDMSG_PUBLISH;
+    hdr.rsv_u8 = 0;
+    hdr.metadata = 0
+        | (((uint32_t) 'h') << 16)      // pubsub prefix
+        | (0 << 8)                      // tracking id
+        | ((length_u8 & 0x0003U) << 6)  // size LSB
+        | (value->type & 0x000fU);
+    jsdrv_memcpy(data_u8, &hdr, sizeof(hdr));
+    data_u8 += sizeof(hdr);
+
+    // populate topic
     jsdrv_cstr_copy((char *) data_u8, topic, MB_TOPIC_SIZE_MAX);
     data_u8 += MB_TOPIC_SIZE_MAX;
 
@@ -542,24 +555,22 @@ static void handle_in_trace(struct dev_s * d, uint16_t metadata, uint32_t * data
     send_to_frontend(d, "h/!trace", &jsdrv_union_bin((uint8_t *) data, length * 4));
 }
 
-static void handle_in_pubsub(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
-    // process metadata and size
-    uint8_t extended_value_type = metadata & 0x00ffU;
-    uint8_t value_type = extended_value_type & 0x0fU;
-    uint8_t size_lsb = (metadata >> 8) & 0x0003U;
-    uint32_t value_size = (((uint32_t) length) << 2) - MB_TOPIC_SIZE_MAX;
+static void handle_in_publish(struct dev_s * d, uint32_t metadata, struct mb_stdmsg_publish_s * publish, uint8_t length) {
+    uint8_t value_type = (uint8_t) (metadata & 0x0000000fU);
+    uint8_t size_lsb = (uint8_t) ((metadata & 0x000000C0U) >> 6);
+    uint32_t length_u32 = ((uint32_t) length) << 2;
     if (size_lsb) {
-        value_size = value_size - 4 + size_lsb;
+        length_u32 = length_u32 - 4 + size_lsb;
     }
+    uint32_t value_size = length_u32 - MB_TOPIC_SIZE_MAX;
 
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
 
     // process topic
     struct jsdrv_topic_s topic;
     jsdrv_topic_set(&topic, d->ll.prefix);
-    jsdrv_topic_append(&topic, (const char * ) data);
+    jsdrv_topic_append(&topic, publish->topic);
     jsdrv_cstr_copy(m->topic, topic.topic, sizeof(m->topic));
-    data += (MB_TOPIC_SIZE_MAX >> 2);
 
     // process value
     m->value.size = value_size;
@@ -567,9 +578,9 @@ static void handle_in_pubsub(struct dev_s * d, uint16_t metadata, uint32_t * dat
     if ((value_type == JSDRV_UNION_STR) || (value_type == JSDRV_UNION_JSON) || (value_type == JSDRV_UNION_BIN)) {
         JSDRV_ASSERT(value_size <= JSDRV_PAYLOAD_LENGTH_MAX);  // always true
         m->value.value.bin = m->payload.bin;
-        memcpy(m->payload.bin, data, m->value.size);
+        memcpy(m->payload.bin, publish->value.bin, m->value.size);
     } else {
-        m->value.value.u64 = *((uint64_t *) data);
+        m->value.value.u64 = publish->value.u64;
     }
 
     if (jsdrv_cstr_ends_with(topic.topic, "/./!pong")
@@ -580,6 +591,188 @@ static void handle_in_pubsub(struct dev_s * d, uint16_t metadata, uint32_t * dat
     } else {
         jsdrvp_backend_send(d->context, m);
     }
+}
+
+static void handle_in_stdmsg(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
+    (void) metadata;  // do not use frame metadata
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) data;
+    data += sizeof(struct mb_stdmsg_header_s) / sizeof(uint32_t);
+
+    switch (hdr->type) {
+        case MB_STDMSG_PUBLISH:
+            handle_in_publish(d, hdr->metadata, (struct mb_stdmsg_publish_s *) data, length - 2);
+            break;
+        case MB_STDMSG_PUBSUB_RESPONSE:
+            // todo
+            break;
+        case MB_STDMSG_TIMESYNC_SYNC:
+            // todo
+            break;
+        case MB_STDMSG_TIMESYNC_MAP:
+            // todo
+            break;
+        case MB_STDMSG_COMM_STATS:
+            // todo
+            break;
+        case MB_STDMSG_THROUGHPUT:
+            // todo recreate throughput test handle_in_throughput(d, metadata, p_u32 + 2, length + 1);
+            break;
+        default:
+            break;
+    }
+}
+
+static void signal_adc(struct jsdrv_stream_signal_s * signal) {
+    signal->field_id = JSDRV_FIELD_RAW;
+    signal->index = 0;
+    signal->element_type = JSDRV_DATA_TYPE_INT;
+    signal->element_size_bits = 32;
+    signal->sample_rate = 1000000;
+    signal->decimate_factor = 1;
+}
+
+static void signal_float(struct dev_s * d, struct jsdrv_stream_signal_s * signal, uint8_t field_id) {
+    (void) d;
+    signal->field_id = field_id;
+    signal->index = 0;
+    signal->element_type = JSDRV_DATA_TYPE_FLOAT;
+    signal->element_size_bits = 32;
+    signal->sample_rate = 1000000;
+    signal->decimate_factor = 1;  // todo
+}
+
+static void signal_gpi(struct dev_s * d, struct jsdrv_stream_signal_s * signal, uint8_t channel) {
+    (void) d;
+    signal->field_id = JSDRV_FIELD_GPI;
+    signal->index = channel;
+    signal->element_type = JSDRV_DATA_TYPE_UINT;
+    signal->element_size_bits = 1;
+    signal->sample_rate = 1000000;
+    signal->decimate_factor = 1;  // todo
+}
+
+static void handle_in_app(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
+    uint8_t channel = metadata & 0x000fU;
+    uint8_t source = (metadata >> 4) & 0x000fU;
+    //uint8_t data_type = (metadata >> 8) & 0x000fU;
+    //uint8_t compression_type = (metadata >> 12) & 0x000fU;
+
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
+    const char * subtopic = NULL;
+
+    if (channel == 14) {  // statistics are different
+        return;  // todo
+    }
+
+    // process value
+    m->value.type = JSDRV_UNION_BIN;
+    m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
+    m->value.value.bin = m->payload.bin;
+    struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) m->payload.bin;
+    signal->sample_id = *((uint64_t *) data);
+    data += 2;
+    uint32_t length_u32 = (length - 2);  // sample_id is 8 bytes
+    m->value.size = length_u32 << 2;
+    signal->element_count = length_u32;
+
+    switch (channel) {
+        case 0:
+            subtopic = "s/adc/0/!data";
+            signal_adc(signal);
+            signal->index = 0x00 | source;
+            signal->element_count = length_u32;
+            break;
+        case 1:
+            subtopic = "s/adc/1/!data";
+            signal_adc(signal);
+            signal->element_count = length - 2;
+            signal->index = 0x10 | source;
+            break;
+        case 2:
+            if (source > 1) {
+                JSDRV_LOGW("unsupported source for range channel: %d", source);
+            } else {
+                subtopic = source ? "s/v/range/!data" : "s/i/range/!data";
+                signal->field_id = JSDRV_FIELD_RANGE;
+                signal->index = source;
+                signal->element_type = JSDRV_DATA_TYPE_UINT;
+                signal->element_size_bits = 4;
+                signal->element_count *= 8;  // nibbles (32 / 4)
+                signal->sample_rate = 1000000;
+                signal->decimate_factor = 1;
+            }
+            break;
+        case 4:
+            break; // reserved
+        case 5:
+            subtopic = "s/i/!data";
+            signal_float(d, signal, JSDRV_FIELD_CURRENT);
+            break;
+        case 6:
+            subtopic = "s/v/!data";
+            signal_float(d, signal, JSDRV_FIELD_VOLTAGE);
+            break;
+        case 7:
+            subtopic = "s/p/!data";
+            signal_float(d, signal, JSDRV_FIELD_POWER);
+            break;
+        case 8:
+            subtopic = "s/gpi/0/!data";
+            signal_gpi(d, signal, 0);
+            signal->element_count *= 32;
+            break;
+        case 9:
+            subtopic = "s/gpi/1/!data";
+            signal_gpi(d, signal, 1);
+            signal->element_count *= 32;
+            break;
+        case 10:
+            subtopic = "s/gpi/2/!data";
+            signal_gpi(d, signal, 2);
+            signal->element_count *= 32;
+            break;
+        case 11:
+            subtopic = "s/gpi/3/!data";
+            signal_gpi(d, signal, 3);
+            signal->element_count *= 32;
+            break;
+        case 12:
+            subtopic = "s/gpi/7/!data";
+            signal_gpi(d, signal, 7);
+            signal->element_count *= 32;
+            break;
+        case 13:
+            subtopic = "s/uart/!data";
+            signal->field_id = JSDRV_FIELD_UART;
+            signal->index = 0;
+            signal->element_type = JSDRV_DATA_TYPE_UINT;
+            signal->element_size_bits = 8;
+            signal->element_count *= 4;
+            signal->sample_rate = 0;
+            signal->decimate_factor = 1;
+            break;
+        case 14:
+            break;  // handled separately above
+        case 15:
+            break;  // reserved
+    }
+
+    if (NULL == subtopic) {
+        JSDRV_LOGW("unsupported app channel: %d", channel);
+        jsdrvp_msg_free(d->context, m);
+        return;
+    }
+
+    // todo signal->time_map
+
+    // process topic
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, d->ll.prefix);
+    jsdrv_topic_append(&topic, subtopic);
+    jsdrv_cstr_copy(m->topic, topic.topic, sizeof(m->topic));
+
+    memcpy(signal->data, data, m->value.size);
+    jsdrvp_backend_send(d->context, m);
 }
 
 static void handle_stream_in_link_frame(struct dev_s * d, uint32_t * p_u32) {
@@ -619,11 +812,10 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         JSDRV_LOGW("frame SOF1 mismatch: 0x%02x", p_u8[0]);
         return;
     }
-    if ((p_u8[1] & MB_FRAME_SOF2_MASK) != MB_FRAME_SOF2) {
+    if (p_u8[1] != MB_FRAME_SOF2) {
         JSDRV_LOGW("frame SOF2 mismatch: 0x%02x", p_u8[1]);
         return;
     }
-    uint8_t service_type = p_u8[1] & ~MB_FRAME_SOF2_MASK;
     uint16_t frame_id = p_u16[1] & MB_FRAME_FRAME_ID_MAX;
     uint8_t frame_type = p_u8[3] >> 3;
 
@@ -632,7 +824,7 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
             break;
         case MB_FRAME_FT_ACK_ALL:           /* intentional fall-through */
         case MB_FRAME_FT_ACK_ONE:           /* intentional fall-through */
-        case MB_FRAME_FT_NACK_FRAME_ID:     /* intentional fall-through */
+        case MB_FRAME_FT_NACK:              /* intentional fall-through */
         case MB_FRAME_FT_RESERVED:          /* intentional fall-through */
         case MB_FRAME_FT_CONTROL:           /* intentional fall-through */
             handle_stream_in_link_frame(d, p_u32);
@@ -654,7 +846,8 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
     if (length_check_expect != length_check_actual) {
         JSDRV_LOGW("frame length check mismatch: 0x%02x != 0x%02x", length_check_expect, length_check_actual);
     }
-    uint16_t metadata = p_u16[3];
+    uint16_t metadata = p_u16[3] & 0x0fffU;
+    uint8_t service_type = p_u8[7] >> 4;
 
     switch (service_type) {
         case MB_FRAME_ST_INVALID:
@@ -666,13 +859,12 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         case MB_FRAME_ST_TRACE:
             handle_in_trace(d, metadata, p_u32 + 2, length + 1);
             break;
-        case MB_FRAME_ST_PUBSUB:
-            handle_in_pubsub(d, metadata, p_u32 + 2, length + 1);
+        case MB_FRAME_ST_STDMSG:
+            handle_in_stdmsg(d, metadata, p_u32 + 2, length + 1);
             break;
-        // todo restore throughput test
-        //case MB_FRAME_ST_COMM_THROUGHPUT:
-        //    handle_in_throughput(d, metadata, p_u32 + 2, length + 1);
-        //    break;
+        case MB_FRAME_ST_APP:
+            handle_in_app(d, metadata, p_u32 + 2, length + 1);
+            break;
         default:
             JSDRV_LOGW("unsupported service type %d", (int) service_type);
             break;
@@ -698,7 +890,7 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         return false;
     }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
-        JSDRV_LOGI("stream_in_data sz=%d", (int) msg->value.size);  // todo D3
+        JSDRV_LOGD3("stream_in_data sz=%d", (int) msg->value.size);
         handle_stream_in(d, msg);
         msg_queue_push(d->ll.cmd_q, msg);  // return
         return true;

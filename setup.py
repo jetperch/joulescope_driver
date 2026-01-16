@@ -144,6 +144,7 @@ extensions = [
                                      'src/json.c',
                                      'src/log.c',
                                      'src/pubsub.c',
+                                     'src/mb_device.c',
                                      'src/meta.c',
                                      'src/sample_buffer_f32.c',
                                      'src/statistics.c',

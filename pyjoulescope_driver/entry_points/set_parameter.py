@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
+import binascii
 
 
 """
@@ -32,14 +33,21 @@ python -m pyjoulescope_driver set u/js220/000000 --open defaults
 NAME = 'set'
 
 def _args_validate(v):
-    topic, value = v.split('=')
-    try:
-        if value.startswith('0x'):
-            value = int(value[2:], 16)
+    topic, value = v.split('=', 1)
+    if '=' in value:
+        vtype, value = value.split('=', 1)
+        if vtype == 'hexlify':
+            value = binascii.unhexlify(value)
         else:
-            value = int(value)
-    except ValueError:
-        pass
+            raise ValueError(f'Invalid value type {vtype}')
+    else:
+        try:
+            if value.startswith('0x'):
+                value = int(value[2:], 16)
+            else:
+                value = int(value)
+        except ValueError:
+            pass
     return [topic, value]
 
 

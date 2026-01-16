@@ -32,8 +32,6 @@ MB_CPP_GUARD_START
 #define MB_FRAME_SOF1 ((uint8_t) 0x55)
 /// The value for the second start of frame nibble.
 #define MB_FRAME_SOF2 ((uint8_t) 0x00)
-/// The mask for SOF2 for data frames
-#define MB_FRAME_SOF2_MASK ((uint8_t) 0xF0)
 /// The frame header size in total_bytes.
 #define MB_FRAME_HEADER_SIZE (8)
 /// The maximum payload length in words.
@@ -52,6 +50,7 @@ MB_CPP_GUARD_START
 #define MB_FRAME_OVERHEAD_SIZE (MB_FRAME_HEADER_SIZE + MB_FRAME_FOOTER_SIZE)
 #define MB_FRAME_FRAME_ID_MAX ((1U << 11) - 1U)
 #define MB_FRAME_LENGTH_TO_CHECK_LENGTH(x)  (3 + 1 + (uint16_t) (x))
+#define MB_FRAME_METADATA_MASK (0x0fffU)
 
 /**
  * @brief The frame types.
@@ -63,7 +62,7 @@ enum mb_frame_type_e {
     MB_FRAME_FT_DATA = 0x00,                // data frame
     MB_FRAME_FT_ACK_ALL = 0x0F,             // ack all frames through frame_id
     MB_FRAME_FT_ACK_ONE = 0x17,             // ack just frame_id
-    MB_FRAME_FT_NACK_FRAME_ID = 0x1B,       // nack just frame_id
+    MB_FRAME_FT_NACK = 0x1B,                // nack just frame_id
     MB_FRAME_FT_RESERVED = 0x1D,            // reserved for future use
     MB_FRAME_FT_CONTROL = 0x1E,             // frame_id contains details
 };
@@ -81,6 +80,9 @@ enum mb_frame_control_e {
      */
     MB_FRAME_CTRL_INVALID = 0x00,
 
+    /// Reserved control 1.
+    MB_FRAME_CTRL_RESERVED_1 = 0x01,
+
     /**
      * @brief Request link connection.
      *
@@ -95,7 +97,7 @@ enum mb_frame_control_e {
      * service type and MB_LINK_MSG_IDENTITY in metadata[7:0]
      * as the first data message with frame_id 0.
      */
-    MB_FRAME_CTRL_CONNECT_REQ = 0x01,
+    MB_FRAME_CTRL_CONNECT_REQ = 0x02,
 
     /**
      * @brief Acknowledge link connect.
@@ -104,10 +106,7 @@ enum mb_frame_control_e {
      * service type and MB_LINK_MSG_IDENTITY in metadata[7:0]
      * as the first data message with frame_id 0.
      */
-    MB_FRAME_CTRL_CONNECT_ACK = 0x02,
-
-    /// Reserved control 3.
-    MB_FRAME_CTRL_RESERVED_3 = 0x03,
+    MB_FRAME_CTRL_CONNECT_ACK = 0x03,
 
     /**
      * @brief Request a link disconnect.
@@ -116,6 +115,16 @@ enum mb_frame_control_e {
      * While each side of a connection must handle when the other party
      * becomes unresponsive, this explicit disconnect allows for a graceful
      * disconnection free from warnings or errors.
+     *
+     * The use of REQ and ACK allows the disconnect requestor to ensure that the
+     * receiver has processed the disconnection before tearing down the link.
+     * This "flush" functionality is especially useful for communication links
+     * where the sender has weak guarantees on message flushing, such as USB.
+     *
+     * If the requestor does not receive MB_FRAME_CTRL_DISCONNECT_ACK by
+     * timeout, it should simply transition to closed with a warning.
+     * The requestion should NOT retry as the system is designed to
+     * fully recover even without DISCONNECT messages.
      */
     MB_FRAME_CTRL_DISCONNECT_REQ = 0x04,
 
@@ -142,8 +151,7 @@ enum mb_frame_service_type_e {
     MB_FRAME_ST_INVALID = 0,             ///< reserved, additional differentiation from link frames
     MB_FRAME_ST_LINK = 1,                ///< Link-layer message: see mb/comm/link.h.
     MB_FRAME_ST_TRACE = 2,               ///< Trace messages, see trace documentation.
-    MB_FRAME_ST_PUBSUB = 3,              ///< PubSub message, see mb/pubsub.h.
-    MB_FRAME_ST_STDMSG = 4,              ///< Standard message, see mb/stdmsg.h.
+    MB_FRAME_ST_STDMSG = 3,              ///< Standard message, see mb/stdmsg.h.
 
     /**
      * @brief Application-specific service type.
@@ -187,6 +195,21 @@ enum mb_frame_service_type_e {
 #define MB_FRAME_LINK_CHECK_CONSTANT ((uint16_t) 0xcba9)
 
 /**
+ * @brief The frame header structure.
+ *
+ * @see doc/frame.md for details.
+ */
+struct mb_frame_header_s {
+    uint8_t sof1;               ///< MB_FRAME_SOF1
+    uint8_t sof2;               ///< MB_FRAME_SOF2
+    uint8_t frame_id0;          ///< frame_id[7:0]
+    uint8_t frame_id1;          ///< 7:3 mb_frame_type_e, 2:0 frame_id[10:8]
+    uint8_t length;             ///< The length in u32 - 1
+    uint8_t length_check;       ///< The check value for the length field
+    uint16_t metadata;          ///< 11:0 arbitrary 12-bit metadata, 15:12 service_type
+};
+
+/**
 * @brief Compute the length check field.
 *
 * @param length The length field value, which is ((size + 3) >> 2) - 1.
@@ -207,6 +230,15 @@ static inline uint32_t mb_frame_link_check(uint16_t link_msg) {
 }
 
 /**
+ * @brief Construct a new link frame in the provided memory
+ *
+ * @param frame_type The mb_frame_type_e for the link frame.
+ * @param frame_id The frame ID (associated data) for the link frame
+ * @param mem[inout]  The u32 memory pointer, which must be at least two works
+ */
+MB_API void mb_frame_link_construct_mem(uint8_t frame_type, uint16_t frame_id, uint32_t * mem);
+
+/**
  * @brief Construct a new link frame.
  *
  * @param frame_type The mb_frame_type_e for the link frame.
@@ -225,6 +257,7 @@ MB_API struct mb_msg_s * mb_frame_link_construct(uint8_t frame_type, uint16_t fr
  * @return The payload to populate which is guaranteed 64-bit aligned.
  */
 MB_API uint32_t * mb_frame_init(struct mb_msg_s * msg, uint8_t service_type, size_t payload_size, uint16_t metadata);
+
 
 /**
  * @brief Validate the start of a frame.
