@@ -190,6 +190,8 @@ int32_t jsdrv_union_to_bool(const struct jsdrv_union_s * value, bool * rv) {
         case JSDRV_UNION_STR:  return jsdrv_cstr_to_bool(value->value.str, rv) ? JSDRV_ERROR_PARAMETER_INVALID : 0;
         case JSDRV_UNION_JSON: return jsdrv_cstr_to_bool(value->value.str, rv) ? JSDRV_ERROR_PARAMETER_INVALID : 0;
         case JSDRV_UNION_BIN: *rv = false; return JSDRV_ERROR_PARAMETER_INVALID;
+        case JSDRV_UNION_STDMSG: *rv = false; return JSDRV_ERROR_PARAMETER_INVALID;
+        case JSDRV_UNION_FRAME: *rv = false; return JSDRV_ERROR_PARAMETER_INVALID;
         case JSDRV_UNION_F32: *rv = value->value.f32 != 0.0f; return 0;
         case JSDRV_UNION_F64: *rv = value->value.f64 != 0.0; return 0;
         case JSDRV_UNION_U8:  *rv = value->value.u8 != 0;  return 0;
@@ -206,22 +208,22 @@ int32_t jsdrv_union_to_bool(const struct jsdrv_union_s * value, bool * rv) {
 
 const char * jsdrv_union_type_to_str(uint8_t type) {
     switch (type) {
-        case JSDRV_UNION_NULL: return "nul";
-        case JSDRV_UNION_STR:  return "str";
-        case JSDRV_UNION_JSON: return "jsn";
-        case JSDRV_UNION_BIN:  return "bin";
-        case JSDRV_UNION_RSV0: return "rsv";
-        case JSDRV_UNION_RSV1: return "rsv";
-        case JSDRV_UNION_F32:  return "f32";
-        case JSDRV_UNION_F64:  return "f64";
-        case JSDRV_UNION_U8:   return " u8";
-        case JSDRV_UNION_U16:  return "u16";
-        case JSDRV_UNION_U32:  return "u32";
-        case JSDRV_UNION_U64:  return "u64";
-        case JSDRV_UNION_I8:   return " i8";
-        case JSDRV_UNION_I16:  return "i16";
-        case JSDRV_UNION_I32:  return "i32";
-        case JSDRV_UNION_I64:  return "i64";
+        case JSDRV_UNION_NULL:   return "nul";
+        case JSDRV_UNION_STR:    return "str";
+        case JSDRV_UNION_JSON:   return "jsn";
+        case JSDRV_UNION_BIN:    return "bin";
+        case JSDRV_UNION_STDMSG: return "std";
+        case JSDRV_UNION_FRAME:  return "frm";
+        case JSDRV_UNION_F32:    return "f32";
+        case JSDRV_UNION_F64:    return "f64";
+        case JSDRV_UNION_U8:     return " u8";
+        case JSDRV_UNION_U16:    return "u16";
+        case JSDRV_UNION_U32:    return "u32";
+        case JSDRV_UNION_U64:    return "u64";
+        case JSDRV_UNION_I8:     return " i8";
+        case JSDRV_UNION_I16:    return "i16";
+        case JSDRV_UNION_I32:    return "i32";
+        case JSDRV_UNION_I64:    return "i64";
         default: return "inv";
     }
 }
@@ -261,8 +263,8 @@ int32_t jsdrv_union_value_to_str(const struct jsdrv_union_s * value, char * str,
         case JSDRV_UNION_STR:  jsdrv_cstr_copy(str, value->value.str, str_len); return 0;
         case JSDRV_UNION_JSON: jsdrv_cstr_copy(str, value->value.str, str_len); return 0;
         case JSDRV_UNION_BIN:  tfp_snprintf(str, str_len, "size=%d", (int) value->size); return 0;
-        case JSDRV_UNION_RSV0: return 0;
-        case JSDRV_UNION_RSV1: return 0;
+        case JSDRV_UNION_STDMSG: tfp_snprintf(str, str_len, "size=%d", (int) value->size); return 0;
+        case JSDRV_UNION_FRAME: tfp_snprintf(str, str_len, "size=%d", (int) value->size); return 0;
         case JSDRV_UNION_F32:  return 0;
         case JSDRV_UNION_F64:  return 0;
         case JSDRV_UNION_U8:   tfp_snprintf(str, str_len, "%" PRIu32, (uint32_t) value->value.u8); return 0;

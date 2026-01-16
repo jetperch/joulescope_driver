@@ -123,7 +123,13 @@ static void on_trace_print(void * user_data, const char * topic, const struct js
             case MB_TRACE_TYPE_FAULT: break;
             case MB_TRACE_TYPE_VALUE: break;
             case MB_TRACE_TYPE_LOG:
-                printf(COUNTER_FMT "LOG @ %d.%d\n", counter, file_id, line);
+                switch (length) {
+                    case 2: printf(COUNTER_FMT "LOG @ %d.%d 0x%08x\n", counter, file_id, line, p32[1]); break;
+                    case 3: printf(COUNTER_FMT "LOG @ %d.%d 0x%08x 0x%08x\n", counter, file_id, line, p32[1], p32[2]); break;
+                    case 4: printf(COUNTER_FMT "LOG @ %d.%d 0x%08x 0x%08x 0x%08x\n", counter, file_id, line, p32[1], p32[2], p32[3]); break;
+                    case 5: printf(COUNTER_FMT "LOG @ %d.%d 0x%08x 0x%08x 0x%08x 0x%08x\n", counter, file_id, line, p32[1], p32[2], p32[3], p32[4]); break;
+                    default: printf(COUNTER_FMT "LOG @ %d.%d\n", counter, file_id, line); break;
+                }
                 break;
             case MB_TRACE_TYPE_RSV13: break;
             case MB_TRACE_TYPE_RSV14: break;

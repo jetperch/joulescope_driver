@@ -42,8 +42,8 @@ cdef extern from "jsdrv/union.h":
         JSDRV_UNION_STR = 1   # UTF-8 string value, null terminated.
         JSDRV_UNION_JSON = 2  # UTF-8 JSON string value, null terminated.
         JSDRV_UNION_BIN = 3   # Raw binary value
-        JSDRV_UNION_RSV0 = 4  # Reserved, do not use
-        JSDRV_UNION_RSV1 = 5  # Reserved, do not use
+        JSDRV_UNION_STDMSG = 4  # mb_stdmsg_s constant binary message, see mb/stdmsg.h
+        JSDRV_UNION_FRAME = 5  # Comm frame binary message, see doc/comm/frame.md and mb/comm/frame.h.
         JSDRV_UNION_F32 = 6   # 32-bit IEEE 754 floating point
         JSDRV_UNION_F64 = 7   # 64-bit IEEE 754 floating point
         JSDRV_UNION_U8 = 8    # Unsigned 8-bit integer value.

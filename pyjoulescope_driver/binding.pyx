@@ -204,6 +204,9 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
     cdef np.npy_intp shape[1]
     cdef uint8_t[:] u8_mem
     cdef int32_t idx
+    cdef uint16_t * u16_ptr;
+    cdef uint32_t * u32_ptr;
+    cdef uint64_t * u64_ptr;
     t = value[0].type
     try:
         if t == c_jsdrv.JSDRV_UNION_STR:
@@ -342,6 +345,26 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 v = _parse_buffer_rsp(<c_jsdrv.jsdrv_buffer_response_s *> &(value[0].value.bin[0]))
             else:
                 v = value[0].value.bin[:value[0].size]
+        elif t == c_jsdrv.JSDRV_UNION_STDMSG:
+            u16_ptr = <uint16_t *> &value[0].value.bin[0]
+            u32_ptr = <uint32_t *> &value[0].value.bin[0]
+            u64_ptr = <uint64_t *> &value[0].value.bin[0]
+            v = {
+                'dtype': 'stdmsg',
+                'version': u16_ptr[0],
+                'version_major': value[0].value.bin[0],
+                'version_minor': value[0].value.bin[1],
+                'metadata': u32_ptr[1],
+            }
+            if value[0].value.bin[2] == 0x05: # MB_STDMSG_COMM_STATS
+                v['stdmsg_type'] = 'comm_stats'
+                v['counter_start'] = u64_ptr[1]
+                v['counter_end'] = u64_ptr[2]
+                v['frames'] = u32_ptr[6]
+                v['bytes'] = u32_ptr[7]
+                v['frame_error'] = u32_ptr[8]
+                v['link_error'] = u32_ptr[9]
+                v['app_error'] = u32_ptr[10]
         elif t == c_jsdrv.JSDRV_UNION_F32:
             v = value[0].value.f32
         elif t == c_jsdrv.JSDRV_UNION_F64:

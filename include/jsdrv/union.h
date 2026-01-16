@@ -41,22 +41,22 @@ JSDRV_CPP_GUARD_START
 
 /// The allowed data types.
 enum jsdrv_union_e {
-    JSDRV_UNION_NULL = 0,   ///< NULL value.  Also used to clear existing value.
-    JSDRV_UNION_STR  = 1,   ///< UTF-8 string value, null terminated.
-    JSDRV_UNION_JSON = 2,   ///< UTF-8 JSON string value, null terminated.
-    JSDRV_UNION_BIN  = 3,   ///< Raw binary value
-    JSDRV_UNION_RSV0 = 4,   ///< Reserved, do not use
-    JSDRV_UNION_RSV1 = 5,   ///< Reserved, do not use
-    JSDRV_UNION_F32  = 6,   ///< 32-bit IEEE 754 floating point
-    JSDRV_UNION_F64  = 7,   ///< 64-bit IEEE 754 floating point
-    JSDRV_UNION_U8   = 8,   ///< Unsigned 8-bit integer value.
-    JSDRV_UNION_U16  = 9,   ///< Unsigned 16-bit integer value.
-    JSDRV_UNION_U32  = 10,  ///< Unsigned 32-bit integer value.
-    JSDRV_UNION_U64  = 11,  ///< Unsigned 64-bit integer value.
-    JSDRV_UNION_I8   = 12,  ///< Signed 8-bit integer value.
-    JSDRV_UNION_I16  = 13,  ///< Signed 16-bit integer value.
-    JSDRV_UNION_I32  = 14,  ///< Signed 32-bit integer value.
-    JSDRV_UNION_I64  = 15,  ///< Signed 64-bit integer value.
+    JSDRV_UNION_NULL   = 0,   ///< NULL value.  Also used to clear existing value.
+    JSDRV_UNION_STR    = 1,   ///< UTF-8 string value, null terminated.
+    JSDRV_UNION_JSON   = 2,   ///< UTF-8 JSON string value, null terminated.
+    JSDRV_UNION_BIN    = 3,   ///< Raw binary value
+    JSDRV_UNION_STDMSG = 4,   ///< mb_stdmsg_s constant binary message, see mb/stdmsg.h
+    JSDRV_UNION_FRAME  = 5,   ///< Comm frame binary message, see doc/comm/frame.md and mb/comm/frame.h.
+    JSDRV_UNION_F32    = 6,   ///< 32-bit IEEE 754 floating point
+    JSDRV_UNION_F64    = 7,   ///< 64-bit IEEE 754 floating point
+    JSDRV_UNION_U8     = 8,   ///< Unsigned 8-bit integer value.
+    JSDRV_UNION_U16    = 9,   ///< Unsigned 16-bit integer value.
+    JSDRV_UNION_U32    = 10,  ///< Unsigned 32-bit integer value.
+    JSDRV_UNION_U64    = 11,  ///< Unsigned 64-bit integer value.
+    JSDRV_UNION_I8     = 12,  ///< Signed 8-bit integer value.
+    JSDRV_UNION_I16    = 13,  ///< Signed 16-bit integer value.
+    JSDRV_UNION_I32    = 14,  ///< Signed 32-bit integer value.
+    JSDRV_UNION_I64    = 15,  ///< Signed 64-bit integer value.
 };
 
 /**

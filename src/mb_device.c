@@ -575,7 +575,12 @@ static void handle_in_publish(struct dev_s * d, uint32_t metadata, struct mb_std
     // process value
     m->value.size = value_size;
     m->value.type = value_type;
-    if ((value_type == JSDRV_UNION_STR) || (value_type == JSDRV_UNION_JSON) || (value_type == JSDRV_UNION_BIN)) {
+    if (    0
+            || (value_type == JSDRV_UNION_STR)
+            || (value_type == JSDRV_UNION_JSON)
+            || (value_type == JSDRV_UNION_BIN)
+            || (value_type == JSDRV_UNION_STDMSG)
+            || (value_type == JSDRV_UNION_FRAME)) {
         JSDRV_ASSERT(value_size <= JSDRV_PAYLOAD_LENGTH_MAX);  // always true
         m->value.value.bin = m->payload.bin;
         memcpy(m->payload.bin, publish->value.bin, m->value.size);
@@ -930,7 +935,7 @@ static uint32_t thread_timeout_duration_ms(struct dev_s * d) {
             return 0;
         }
         if (timeout_duration_t64 < (5 * JSDRV_TIME_SECOND)) {
-            return JSDRV_TIME_TO_MILLISECONDS(timeout_duration_t64);
+            return (uint32_t) JSDRV_TIME_TO_MILLISECONDS(timeout_duration_t64);
         }
     }
     return 5000;
