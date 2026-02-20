@@ -632,8 +632,8 @@ static void signal_adc(struct jsdrv_stream_signal_s * signal) {
     signal->index = 0;
     signal->element_type = JSDRV_DATA_TYPE_INT;
     signal->element_size_bits = 32;
-    signal->sample_rate = 1000000;
-    signal->decimate_factor = 1;
+    signal->sample_rate = 16000000;  // 16 MHz
+    signal->decimate_factor = 16;    // to 1 MHz
 }
 
 static void signal_float(struct dev_s * d, struct jsdrv_stream_signal_s * signal, uint8_t field_id) {
@@ -642,8 +642,8 @@ static void signal_float(struct dev_s * d, struct jsdrv_stream_signal_s * signal
     signal->index = 0;
     signal->element_type = JSDRV_DATA_TYPE_FLOAT;
     signal->element_size_bits = 32;
-    signal->sample_rate = 1000000;
-    signal->decimate_factor = 1;  // todo
+    signal->sample_rate = 16000000;  // 16 MHz
+    signal->decimate_factor = 16;    // to 1 MHz
 }
 
 static void signal_gpi(struct dev_s * d, struct jsdrv_stream_signal_s * signal, uint8_t channel) {
@@ -652,8 +652,8 @@ static void signal_gpi(struct dev_s * d, struct jsdrv_stream_signal_s * signal, 
     signal->index = channel;
     signal->element_type = JSDRV_DATA_TYPE_UINT;
     signal->element_size_bits = 1;
-    signal->sample_rate = 1000000;
-    signal->decimate_factor = 1;  // todo
+    signal->sample_rate = 16000000;  // 16 MHz
+    signal->decimate_factor = 16;    // to 1 MHz
 }
 
 static void handle_in_app(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
@@ -690,8 +690,8 @@ static void handle_in_app(struct dev_s * d, uint16_t metadata, uint32_t * data, 
         case 1:
             subtopic = "s/adc/1/!data";
             signal_adc(signal);
-            signal->element_count = length - 2;
             signal->index = 0x10 | source;
+            signal->element_count = length_u32;
             break;
         case 2:
             if (source > 1) {
@@ -703,8 +703,8 @@ static void handle_in_app(struct dev_s * d, uint16_t metadata, uint32_t * data, 
                 signal->element_type = JSDRV_DATA_TYPE_UINT;
                 signal->element_size_bits = 4;
                 signal->element_count *= 8;  // nibbles (32 / 4)
-                signal->sample_rate = 1000000;
-                signal->decimate_factor = 1;
+                signal->sample_rate = 16000000;  // 16 MHz
+                signal->decimate_factor = 16;    // to 1 MHz
             }
             break;
         case 4:

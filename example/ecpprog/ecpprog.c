@@ -113,7 +113,7 @@ enum flash_cmd {
 // ---------------------------------------------------------
 
 /*
- * JTAG performrs all shifts LSB first, our FLSAH is expeting bytes MSB first,
+ * JTAG performs all shifts LSB first, our FLSAH is expecting bytes MSB first,
  * There are a few ways to fix this, for now we just bit-reverse all the input data to the JTAG core
  */
 uint8_t bit_reverse(uint8_t in){
