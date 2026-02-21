@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2018-2024 Jetperch LLC
+# Copyright 2018-2025 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -150,6 +150,7 @@ extensions = [
                                      'src/statistics.c',
                                      'src/time.c',
                                      'src/time_map_filter.c',
+                                     'src/tmap.c',
                                      'src/topic.c',
                                      'src/union.c',
                                      'src/version.c',
@@ -288,9 +289,9 @@ setuptools.setup(
     },
 
     project_urls={
-        'Bug Reports': 'https://github.com/jetperch/pyjoulescope_driver/issues',
+        'Bug Reports': 'https://github.com/jetperch/joulescope_driver/issues',
         'Funding': 'https://www.joulescope.com',
         'Twitter': 'https://twitter.com/joulescope',
-        'Source': 'https://github.com/jetperch/pyjoulescope_driver/',
+        'Source': 'https://github.com/jetperch/joulescope_driver/',
     },
 )

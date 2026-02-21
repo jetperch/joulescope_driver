@@ -1,5 +1,5 @@
 /*
-* Copyright 2023 Jetperch LLC
+* Copyright 2023-2025 Jetperch LLC
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@
 #include "jsdrv/time.h"
 #include "jsdrv_prv/js220_i128.h"
 #include "jsdrv_prv/statistics.h"
+#include "jsdrv/tmap.h"
 #include <inttypes.h>
 #include <math.h>
 #include <float.h>
@@ -66,10 +67,13 @@ void jsdrv_bufsig_alloc(struct bufsig_s * self, uint64_t N, uint64_t r0, uint64_
         ++self->level_count;
     }
 
+    if (NULL == self->tmap) {
+        self->tmap = jsdrv_tmap_alloc(0);
+    } else {
+        jsdrv_tmap_clear(self->tmap);
+    }
+
     double size_in_utc = ((double) N) / (self->hdr.sample_rate / self->hdr.decimate_factor);
-    self->time_map.offset_time = 0;
-    self->time_map.offset_counter = 0;
-    self->time_map.counter_rate = ((double) self->hdr.sample_rate) / self->hdr.decimate_factor;
     self->size_in_utc = JSDRV_F64_TO_TIME(size_in_utc);
 
     if (JSDRV_DATA_TYPE_FLOAT == self->hdr.element_type) {
@@ -122,20 +126,19 @@ void jsdrv_bufsig_free(struct bufsig_s * self) {
     self->N = 0;
     self->level_count = 0;
     self->sample_id_head = 0;
-    self->time_map.offset_time = 0;
-    self->time_map.offset_counter = 0;
-    self->time_map.counter_rate = 0.0;
+    jsdrv_tmap_ref_decr(self->tmap);
+    self->tmap = NULL;
 }
 
 static void samples_to_utc(struct bufsig_s * self,
         struct jsdrv_time_range_samples_s const * samples,
         struct jsdrv_time_range_utc_s * utc) {
     uint64_t length = samples->length;
-    utc->start = jsdrv_time_from_counter(&self->time_map, samples->start);
+    jsdrv_tmap_sample_id_to_timestamp(self->tmap, samples->start, &utc->start);
     if (samples->end == 0) {
         utc->end = 0;
     } else {
-        utc->end = jsdrv_time_from_counter(&self->time_map, samples->end);
+        jsdrv_tmap_sample_id_to_timestamp(self->tmap, samples->end, &utc->end);
     }
     utc->length = length;
 }
@@ -144,11 +147,11 @@ static void utc_to_samples(struct bufsig_s * self,
                            struct jsdrv_time_range_utc_s const * utc,
                            struct jsdrv_time_range_samples_s * samples) {
     uint64_t length = utc->length;
-    samples->start = jsdrv_time_to_counter(&self->time_map, utc->start);
+    jsdrv_tmap_timestamp_to_sample_id(self->tmap, utc->start, &samples->start);
     if (utc->end == 0) {
         samples->end = 0;
     } else {
-        samples->end = jsdrv_time_to_counter(&self->time_map, utc->end);
+        jsdrv_tmap_timestamp_to_sample_id(self->tmap, utc->end, &samples->end);
     }
     samples->length = length;
 }
@@ -163,7 +166,6 @@ bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
     info->index = self->hdr.index;
     info->element_type = self->hdr.element_type;
     info->element_size_bits = self->hdr.element_size_bits;
-    info->size_in_utc = self->size_in_utc;
     info->size_in_samples = self->N;
     jsdrv_cstr_copy(info->topic, self->topic, sizeof(info->topic));
     info->size_in_utc = self->size_in_utc;
@@ -181,7 +183,17 @@ bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
         info->time_range_samples.length = self->level0_size;
         samples_to_utc(self, &info->time_range_samples, &info->time_range_utc);
     }
-    info->time_map = self->time_map;
+    info->decimate_factor = self->hdr.decimate_factor;
+
+    info->tmap = NULL;
+    if (NULL != self->tmap) {
+        size_t tmap_sz = jsdrv_tmap_length(self->tmap);
+        if (tmap_sz) {
+            jsdrv_tmap_get(self->tmap, tmap_sz - 1, &info->time_map);
+            jsdrv_tmap_ref_incr(self->tmap);
+            info->tmap = self->tmap;
+        }
+    }
     return true;
 }
 
@@ -242,8 +254,7 @@ static void clear(struct bufsig_s * self, uint64_t sample_id) {
     self->level0_head = 0;
     self->level0_size = 0;
     self->sample_id_head = sample_id;
-    self->time_map.offset_counter = sample_id;
-    self->time_map.offset_time = jsdrv_time_utc();
+    jsdrv_tmap_clear(self->tmap);
 }
 
 void jsdrv_bufsig_clear(struct bufsig_s * self) {
@@ -344,9 +355,12 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
         //           self->topic, sample_id, sample_id_end, sample_id_expect);
     }
 
-    self->time_map.offset_time = s->time_map.offset_time;
-    self->time_map.offset_counter = s->time_map.offset_counter / s->decimate_factor;
-    self->time_map.counter_rate = s->time_map.counter_rate / s->decimate_factor;
+    struct jsdrv_time_map_s time_map = {
+        .offset_time = s->time_map.offset_time,
+        .offset_counter = s->time_map.offset_counter / s->decimate_factor,
+        .counter_rate = s->time_map.counter_rate / s->decimate_factor,
+    };
+    jsdrv_tmap_add(self->tmap, &time_map);
 
     // JSDRV_LOGI("bufsig_recv_data: sample_id=%" PRIu64 " length=%" PRIu64, s->sample_id, length);
     self->sample_id_head = sample_id;
@@ -558,6 +572,7 @@ static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index
         y->std = (float) js220_i128_compute_std(x1, x2, incr, 0);
         y->min = y_min;
         y->max = y_max;
+        sample_count = incr;
     }
     return sample_count;
 }
@@ -612,7 +627,7 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     uint64_t incr = range_req / entries_length;
     entries_length = range_req / incr;
     rsp->info.time_range_samples.length = entries_length;
-    rsp->info.time_range_samples.end = sample_id_start + incr * entries_length;
+    rsp->info.time_range_samples.end = sample_id_start + incr * entries_length - 1;
 
     if (self->level0_size == 0) {
         JSDRV_LOGI("summary request: buffer empty");
@@ -788,7 +803,11 @@ int32_t jsdrv_bufsig_process_request(
     rsp->rsv2_u8 = 0;
     rsp->rsv3_u32 = 0;
     rsp->rsp_id = req->rsp_id;
-    jsdrv_bufsig_info(self, &rsp->info);
+
+    if (!jsdrv_bufsig_info(self, &rsp->info)) {
+        JSDRV_LOGW("jsdrv_bufsig_process_request info unavailable");
+        return JSDRV_ERROR_UNAVAILABLE;
+    }
 
     if (!self->active) {
         JSDRV_LOGW("jsdrv_bufsig_process_request inactive");
@@ -820,6 +839,7 @@ int32_t jsdrv_bufsig_process_request(
         return JSDRV_ERROR_PARAMETER_INVALID;
     }
     rsp->info.time_range_samples = req->time.samples;
+    samples_to_utc(self, &rsp->info.time_range_samples, &rsp->info.time_range_utc);
     struct jsdrv_time_range_samples_s * r = &rsp->info.time_range_samples;
     uint64_t interval = r->end - r->start + 1;
     if (r->length && r->end) {

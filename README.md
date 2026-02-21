@@ -90,7 +90,13 @@ For Ubuntu:
 
     sudo apt install cmake build-essential ninja-build libudev-dev
 
-You will also need to install the udev rules:
+You will also need to install the udev rules. If you are using a modern Linux distribution managed by systemd, using tag-based rules is most likely the right choice:
+
+    $ wget https://raw.githubusercontent.com/jetperch/joulescope_driver/main/72-joulescope.rules
+    $ sudo cp 72-joulescope.rules /etc/udev/rules.d/
+    $ sudo udevadm control --reload-rules
+
+If your system is not managed by systemd or your user is not assigned a proper login seat (as may be the case when logging in via SSH), using group-based rules is necessery (note that the plugdev group must exist/be created and your user must belong to it):
 
     $ wget https://raw.githubusercontent.com/jetperch/joulescope_driver/main/99-joulescope.rules
     $ sudo cp 99-joulescope.rules /etc/udev/rules.d/

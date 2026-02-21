@@ -14,8 +14,11 @@
  * limitations under the License.
  */
 
-const addon = require('node-gyp-build')(__dirname);
 
+const path = require('path')
+const nodeGypBuild = require('node-gyp-build')
+
+const addon = nodeGypBuild(__dirname)
 
 class JoulescopeDriver {
     constructor() {

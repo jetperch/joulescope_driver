@@ -153,7 +153,7 @@ $ = metadata response
 # 1: configurable user B
 # 31: 5 A & 10 A protection, always on
 # 30: shunt resistor power rating, time=100 ms, FPGA controls enable
-{p}/s/fuse/{N}/T        : unsigned 8Q24 threshold level
-{p}/s/fuse/{N}/K        : unsigned 8Q24 decay level
+{p}/s/fuse/{N}/F        : unsigned 4q14 fuse accumulation constant
+{p}/s/fuse/{N}/K        : unsigned 8q10 fuse dissipation constant
 {p}/s/fuse/{N}/en       : fuse enable: 1=on, 0=off
 {p}/s/fuse/{N}/engaged  : 1=engaged, 0=reset

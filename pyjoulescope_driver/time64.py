@@ -98,6 +98,18 @@ def as_datetime(t):
     return datetime.datetime.fromtimestamp(t, tz=datetime.timezone.utc)
 
 
+def as_isostr(t):
+    """Convert a time to an ISO 8601 string.
+
+    :param t: The time in any format.
+    :return: The time string.
+
+    @see https://en.wikipedia.org/wiki/ISO_8601
+    """
+    t = as_datetime(t)
+    return t.isoformat(timespec='microseconds').replace('+00:00', 'Z')
+
+
 def filename(extension=None, t=None):
     """Construct a filename from the time.
 

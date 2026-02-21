@@ -11,6 +11,103 @@ This file contains the list of changes made to the Joulescope driver.
 * Added Minibitty support for 3rd generation Joulescope products.
 
 
+## 1.12.0
+
+2026 Jan 5
+
+* Added JS220 sample publish rate h/fp.
+* Updated node package versions to address flagged security vulnerabilities.
+
+
+## 1.11.0
+
+2025 Dec 2
+
+* Added Python 3.14 support and dropped Python 3.10 support.
+* Update build dependencies.
+* Added time64.as_isostr()
+
+
+## 1.10.0
+
+2025 Jul 15
+
+* Added Typescript support.  Thanks @biosbob !
+
+
+## 1.9.4
+
+2025 Jul 7
+
+* Fixed tmap NULL pointer reference  (Joulescope UI 321).
+
+
+## 1.9.3
+
+2025 May 19
+
+* Implemented "--set" option to record entry point.
+* Changed "UTC add is not monotonically increasing" log errors to warnings 
+  and reduced frequency.
+
+
+## 1.9.2
+
+2025 May 6
+
+* Fixed self->tmap NULL pointer access in jsdrv_bufsig_info.
+* Added NULL pointer handling to tmap.
+
+
+## 1.9.1
+
+2025 Apr 9
+
+* Handle 500 ksps on-instrument downsampling by forcing to 250 ksps.
+* Fixed time sync inaccuracy by including FPGA 1.3.3
+  * handle large update gaps
+  * bound error on sampling rate
+
+
+## 1.9.0
+
+2025 Mar 29
+
+* Fixed TimeMap.get() in Python binding. 
+* Deprecated jsdrv_buffer_info_s.time_map.  Use tmap.
+* Renamed jsdrv_tmap_size to jsdrv_tmap_length.
+* Changed jsdrv_tmap_get() signature.
+
+
+## 1.8.0
+
+2025 Mar 27
+
+* Added improved time mapping to keep buffer time map consistent.
+  * Added jsdrv/tmap.h, tmap.c and tmap_test.c.
+  * Added jsdrv_buffer_info_s.tmap field.
+  * Added jsdrv_buffer_info_s.decimate_factor field.
+  * Maintained jsdrv_buffer_response_s.info.time_map functionality.
+* Added Linux ARM64 builds.
+
+
+## 1.7.4
+
+2025 Mar 4
+
+* Fixed memory leak on every JS220 command.
+* Increased JSDRV_STREAM_DATA_SIZE from 64 kB to 256 kB to support
+  larger buffer requests.
+
+
+## 1.7.3
+
+2025 Jan 7
+
+* Fixed memory leak on JS220 repeated open without close.
+* Fixed setup.py links (fixes PyPi links).
+
+
 ## 1.7.2
 
 2024 Dec 10

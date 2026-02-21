@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2022 Jetperch LLC
+ * Copyright 2014-2025 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@
 #include "jsdrv/cmacro_inc.h"
 #include "jsdrv/union.h"
 #include "jsdrv/time.h"
+#include "jsdrv/tmap.h"
 #include <stdint.h>
 
 /**
@@ -127,7 +128,7 @@
 /// The header size of jsdrv_stream_signal_s before the data field.
 #define JSDRV_STREAM_HEADER_SIZE        (48U)
 /// The size of data in jsdrv_stream_signal_s.
-#define JSDRV_STREAM_DATA_SIZE          (1024 * 64)    // 64 kB max
+#define JSDRV_STREAM_DATA_SIZE          (1024 * 256)    // 256 kB max
 
 /**
  * @defgroup jsdrv_topis Topics
@@ -353,11 +354,42 @@ struct jsdrv_buffer_info_s {
     uint8_t element_type;                   ///< jsdrv_element_type_e
     uint8_t element_size_bits;              ///< The element size in bits
     char topic[JSDRV_TOPIC_LENGTH_MAX];     ///< The source topic that provides jsdrv_stream_signal_s.
-    int64_t size_in_utc;                    ///< The total buffer size in UTC time.
+    int64_t size_in_utc;                    ///< The total buffer size in UTC time based on nominal sample rate.
     uint64_t size_in_samples;               ///< The total buffer size in samples.
-    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time.
+    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time based on tmap (not deprecated time_map).
     struct jsdrv_time_range_samples_s time_range_samples;  ///< In sample time.
-    struct jsdrv_time_map_s time_map;       ///< The map between samples and utc time.
+
+    /**
+     * @brief The simple time map for the response.
+     * @see tmap
+     *
+     * This field contains the most recent time map between sample ids and
+     * UTC wall-clock time.  It does not preserve past history and will
+     * adjust the UTC time for old samples.  For an invariant time map,
+     * use tmap.
+     */
+    struct jsdrv_time_map_s time_map;
+
+    /**
+     * @brief The decimation factor from source sample_id.
+     *
+     * The time_range_samples has already been decimated by this amount.
+     * You can reconstruct the source sample id by multiplying by this
+     * factor which can allow comparison across different signals from
+     * the same source that operate with different decimate_factor values.
+     */
+    uint32_t decimate_factor;
+
+    /**
+     * @brief The time map for the response.
+     * @see time_map
+     *
+     * This instance is reference counted.  Call jsdrv_tmap_ref_incr()
+     * to hold onto this instance and jsdrv_tmap_ref_decr() to release it.
+     * Use jsdrv_tmap_reader_enter() and jsdrv_tmap_reader_exit()
+     * to actively access the time map functions.
+     */
+    struct jsdrv_tmap_s * tmap;             ///< The time map for the response.
 };
 
 /**
