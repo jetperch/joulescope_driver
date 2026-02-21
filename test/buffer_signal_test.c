@@ -317,6 +317,76 @@ static void test_summary_wrap(void **state) {
 }
 
 
+static void test_summary_response_end_inclusive(void **state) {
+    initialize();
+    insert_samples(&b, 1000, 1000);
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = 1000;
+    req.time.samples.end = 1099;
+    req.time.samples.length = 1;
+    uint64_t rsp_u64[1 << 12];
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
+    jsdrv_bufsig_process_request(&b, &req, rsp);
+    assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
+    // end must be inclusive, matching the codebase convention
+    assert_int_equal(1099, rsp->info.time_range_samples.end);
+    assert_int_equal(1000, rsp->info.time_range_samples.start);
+    assert_int_equal(1, rsp->info.time_range_samples.length);
+    jsdrv_bufsig_free(&b);
+}
+
+static void test_summary_single_entry_time_range(void **state) {
+    initialize();
+    insert_samples(&b, 1000, 1000);
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = 1000;
+    req.time.samples.end = 1001;
+    req.time.samples.length = 1;
+    uint64_t rsp_u64[1 << 12];
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
+    jsdrv_bufsig_process_request(&b, &req, rsp);
+    assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
+    // Range [1000, 1001] = 2 samples, 1 entry
+    assert_int_equal(1000, rsp->info.time_range_samples.start);
+    assert_int_equal(1001, rsp->info.time_range_samples.end);
+    assert_int_equal(1, rsp->info.time_range_samples.length);
+    struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
+    // avg of samples 1000 and 1001: (1000/1e6 + 1001/1e6) / 2 = 1000.5/1e6
+    assert_float_equal(1000.5 / 1000000.0, entries[0].avg, 1e-9);
+    jsdrv_bufsig_free(&b);
+}
+
+static void test_summary_integration_accuracy(void **state) {
+    initialize();
+    insert_const_samples(&b, 1000, 1000, 1.0f);
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = 1000;
+    req.time.samples.end = 1099;
+    req.time.samples.length = 1;
+    uint64_t rsp_u64[1 << 12];
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
+    jsdrv_bufsig_process_request(&b, &req, rsp);
+    assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
+    struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
+    assert_float_equal(1.0, entries[0].avg, 1e-9);
+    // Integration = avg * sample_count / sample_rate
+    // sample_count = end - start + 1 (inclusive end convention)
+    uint64_t sample_count = rsp->info.time_range_samples.end - rsp->info.time_range_samples.start + 1;
+    assert_int_equal(100, sample_count);
+    double integration = entries[0].avg * (double) sample_count / 1000000.0;
+    assert_float_equal(100.0 / 1000000.0, integration, 1e-12);
+    jsdrv_bufsig_free(&b);
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_initialize_finalize),
@@ -328,6 +398,9 @@ int main(void) {
             cmocka_unit_test(test_summary_level1),
             cmocka_unit_test(test_summary_nan_on_out_of_range),
             cmocka_unit_test(test_summary_wrap),
+            cmocka_unit_test(test_summary_response_end_inclusive),
+            cmocka_unit_test(test_summary_single_entry_time_range),
+            cmocka_unit_test(test_summary_integration_accuracy),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

@@ -572,6 +572,7 @@ static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index
         y->std = (float) js220_i128_compute_std(x1, x2, incr, 0);
         y->min = y_min;
         y->max = y_max;
+        sample_count = incr;
     }
     return sample_count;
 }
@@ -626,7 +627,7 @@ static void summary_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     uint64_t incr = range_req / entries_length;
     entries_length = range_req / incr;
     rsp->info.time_range_samples.length = entries_length;
-    rsp->info.time_range_samples.end = sample_id_start + incr * entries_length;
+    rsp->info.time_range_samples.end = sample_id_start + incr * entries_length - 1;
 
     if (self->level0_size == 0) {
         JSDRV_LOGI("summary request: buffer empty");
