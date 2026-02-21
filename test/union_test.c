@@ -176,8 +176,8 @@ static void test_type_to_str(void ** state) {
     assert_string_equal("str", jsdrv_union_type_to_str(JSDRV_UNION_STR));
     assert_string_equal("jsn", jsdrv_union_type_to_str(JSDRV_UNION_JSON));
     assert_string_equal("bin", jsdrv_union_type_to_str(JSDRV_UNION_BIN));
-    assert_string_equal("rsv", jsdrv_union_type_to_str(JSDRV_UNION_RSV0));
-    assert_string_equal("rsv", jsdrv_union_type_to_str(JSDRV_UNION_RSV1));
+    assert_string_equal("std", jsdrv_union_type_to_str(JSDRV_UNION_STDMSG));
+    assert_string_equal("frm", jsdrv_union_type_to_str(JSDRV_UNION_FRAME));
     assert_string_equal("f32", jsdrv_union_type_to_str(JSDRV_UNION_F32));
     assert_string_equal("f64", jsdrv_union_type_to_str(JSDRV_UNION_F64));
     assert_string_equal(" u8", jsdrv_union_type_to_str(JSDRV_UNION_U8));

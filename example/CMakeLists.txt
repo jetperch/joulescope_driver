@@ -65,6 +65,7 @@ add_definitions(
 add_executable(minibitty_exe
         minibitty/main.cpp
         minibitty/adapter.c
+        minibitty/fpga_mem.c
         minibitty/hotplug.c
         minibitty/info.c
         minibitty/loopback.c

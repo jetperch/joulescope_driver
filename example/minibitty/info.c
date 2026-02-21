@@ -38,8 +38,8 @@ static void on_pub(void * user_data, const char * topic, const struct jsdrv_unio
         case JSDRV_UNION_STR:  printf("str %s", value->value.str); break;
         case JSDRV_UNION_JSON: printf("str %s", value->value.str); break;
         case JSDRV_UNION_BIN:  printf("bin length=%d", value->size); break;
-        case JSDRV_UNION_RSV0: printf("rsv0"); break;
-        case JSDRV_UNION_RSV1: printf("rsv1"); break;
+        case JSDRV_UNION_STDMSG: printf("std"); break;
+        case JSDRV_UNION_FRAME: printf("frm"); break;
         case JSDRV_UNION_F32:  printf("f32 %g", (double) value->value.f32); break;
         case JSDRV_UNION_F64:  printf("f64 %g", value->value.f64); break;
         case JSDRV_UNION_U8:   printf("u8  %" PRIu8 , value->value.u8); break;

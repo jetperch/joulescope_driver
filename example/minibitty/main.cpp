@@ -127,6 +127,7 @@ int32_t app_match(struct app_s * self, const char * filter) {
 
 const struct command_s COMMANDS[] = {
         {"adapter", on_adapter, "MiniBitty adapter"},
+        {"fpga_mem", on_fpga_mem, "Program FPGA flash memory"},
         {"hotplug", on_hotplug, "Monitor device insertion and removal"},
         {"info", on_info, "List connected devices and display device details"},
         {"loopback", on_loopback, "Loopback data to test throughput and error rate"},
