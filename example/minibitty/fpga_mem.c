@@ -60,6 +60,7 @@ struct fpga_mem_s {
 };
 
 static struct fpga_mem_s fpga_mem_;
+static int verbose_;
 
 
 static const char * op_name(uint8_t op) {
@@ -84,22 +85,24 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
     }
 
     uint32_t data_size = value->size - (uint32_t) sizeof(struct jtag_mem_s);
-    printf("RSP: op=%s status=%d offset=0x%06X length=%u value_size=%u data_size=%u\n",
-           op_name(rsp->operation), rsp->status, rsp->offset, rsp->length, value->size, data_size);
-    uint32_t raw_dump = (value->size > 32) ? 32 : value->size;
-    printf("  RAW[%u]:", value->size);
-    for (uint32_t i = 0; i < raw_dump; ++i) {
-        printf(" %02X", ((const uint8_t *) value->value.bin)[i]);
-    }
-    printf("\n");
-
-    if (rsp->operation == JTAG_MEM_OP_READ && data_size > 0) {
-        uint32_t dump = (data_size > 16) ? 16 : data_size;
-        printf("  READ data[0:%u]:", dump);
-        for (uint32_t i = 0; i < dump; ++i) {
-            printf(" %02X", rsp->data[i]);
+    if (verbose_) {
+        printf("RSP: op=%s status=%d offset=0x%06X length=%u value_size=%u data_size=%u\n",
+               op_name(rsp->operation), rsp->status, rsp->offset, rsp->length, value->size, data_size);
+        uint32_t raw_dump = (value->size > 32) ? 32 : value->size;
+        printf("  RAW[%u]:", value->size);
+        for (uint32_t i = 0; i < raw_dump; ++i) {
+            printf(" %02X", ((const uint8_t *) value->value.bin)[i]);
         }
         printf("\n");
+
+        if (rsp->operation == JTAG_MEM_OP_READ && data_size > 0) {
+            uint32_t dump = (data_size > 16) ? 16 : data_size;
+            printf("  READ data[0:%u]:", dump);
+            for (uint32_t i = 0; i < dump; ++i) {
+                printf(" %02X", rsp->data[i]);
+            }
+            printf("\n");
+        }
     }
 
     fpga_mem_.rsp_status = rsp->status;
@@ -219,7 +222,9 @@ static uint8_t * file_read(const char * path, uint32_t * size_out) {
 static int setup(struct app_s * self) {
     struct jsdrv_topic_s topic;
 
-    printf("sizeof(jtag_mem_s) = %u\n", (uint32_t) sizeof(struct jtag_mem_s));
+    if (verbose_) {
+        printf("sizeof(jtag_mem_s) = %u\n", (uint32_t) sizeof(struct jtag_mem_s));
+    }
 
     memset(&fpga_mem_, 0, sizeof(fpga_mem_));
     fpga_mem_.app = self;
@@ -279,7 +284,9 @@ static int do_erase(struct app_s * self, uint32_t offset, uint32_t size) {
     for (uint32_t block = 0; block < num_blocks; ++block) {
         if (quit_) { return 1; }
         uint32_t addr = offset + block * FLASH_BLOCK_64K;
-        printf("  Erase block %u/%u (offset 0x%06X)\n", block + 1, num_blocks, addr);
+        if (verbose_) {
+            printf("  Erase block %u/%u (offset 0x%06X)\n", block + 1, num_blocks, addr);
+        }
         int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_ERASE_64K, addr, 0, NULL, 0, 5000);
         if (rc) {
             printf("ERROR: erase failed at offset 0x%06X\n", addr);
@@ -305,7 +312,9 @@ static int do_write(struct app_s * self, uint32_t offset, uint32_t size) {
         for (uint32_t i = 0; i < FLASH_PAGE_SIZE; ++i) {
             page_buf[i] = (uint8_t) ((addr + i) & 0xFF);
         }
-        printf("  Write page %u/%u (offset 0x%06X)\n", page + 1, num_pages, addr);
+        if (verbose_) {
+            printf("  Write page %u/%u (offset 0x%06X)\n", page + 1, num_pages, addr);
+        }
         int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_WRITE, addr, FLASH_PAGE_SIZE, page_buf, FLASH_PAGE_SIZE, 1000);
         if (rc) {
             printf("ERROR: write failed at offset 0x%06X\n", addr);
@@ -359,11 +368,13 @@ static int do_program(struct app_s * self, const char * image_path) {
         return 1;
     }
     printf("Image: %s, %u bytes\n", image_path, image_size);
-    printf("Image first 16 bytes:");
-    for (uint32_t i = 0; i < 16 && i < image_size; ++i) {
-        printf(" %02X", image[i]);
+    if (verbose_) {
+        printf("Image first 16 bytes:");
+        for (uint32_t i = 0; i < 16 && i < image_size; ++i) {
+            printf(" %02X", image[i]);
+        }
+        printf("\n");
     }
-    printf("\n");
 
     // ERASE
     uint32_t num_blocks = (image_size + FLASH_BLOCK_64K - 1) / FLASH_BLOCK_64K;
@@ -371,7 +382,9 @@ static int do_program(struct app_s * self, const char * image_path) {
     for (uint32_t block = 0; block < num_blocks; ++block) {
         if (quit_) { rc = 1; goto done; }
         uint32_t offset = block * FLASH_BLOCK_64K;
-        printf("  Erase block %u/%u (offset 0x%06X)\n", block + 1, num_blocks, offset);
+        if (verbose_) {
+            printf("  Erase block %u/%u (offset 0x%06X)\n", block + 1, num_blocks, offset);
+        }
         rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_ERASE_64K, offset, 0, NULL, 0, 5000);
         if (rc) {
             printf("ERROR: erase failed at offset 0x%06X\n", offset);
@@ -394,7 +407,7 @@ static int do_program(struct app_s * self, const char * image_path) {
             memset(page_buf + chunk, 0xFF, FLASH_PAGE_SIZE - chunk);
         }
         const uint8_t * src = (chunk < FLASH_PAGE_SIZE) ? page_buf : image + offset;
-        if ((page % 64) == 0) {
+        if (verbose_ && ((page % 64) == 0)) {
             printf("  Write page %u/%u (offset 0x%06X)\n", page + 1, num_pages, offset);
         }
         rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_WRITE, offset, FLASH_PAGE_SIZE, src, FLASH_PAGE_SIZE, 1000);
@@ -425,7 +438,7 @@ static int do_program(struct app_s * self, const char * image_path) {
         if (chunk < FLASH_PAGE_SIZE) {
             memset(expect_buf + chunk, 0xFF, FLASH_PAGE_SIZE - chunk);
         }
-        if ((page % 64) == 0) {
+        if (verbose_ && ((page % 64) == 0)) {
             printf("  Verify page %u/%u (offset 0x%06X)\n", page + 1, num_pages, offset);
         }
         rc = jtag_mem_read(&fpga_mem_, offset, verify_buf, FLASH_PAGE_SIZE);
@@ -468,7 +481,10 @@ done:
 
 static int usage(void) {
     printf(
-        "usage: minibitty fpga_mem <subcommand> [args] [device_filter]\n"
+        "usage: minibitty fpga_mem [-v] <subcommand> [args] [device_filter]\n"
+        "\n"
+        "Options:\n"
+        "  -v, --verbose            Show per-transaction details\n"
         "\n"
         "Subcommands:\n"
         "  erase <offset> <size>    Erase flash (size rounded up to 64 KB blocks)\n"
@@ -494,6 +510,17 @@ static int parse_u32(const char * str, uint32_t * out) {
 int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
     char * device_filter = NULL;
     int rc;
+    verbose_ = 0;
+
+    while (argc > 0 && argv[0][0] == '-') {
+        if (0 == strcmp(argv[0], "-v") || 0 == strcmp(argv[0], "--verbose")) {
+            verbose_ = 1;
+            ARG_CONSUME();
+        } else {
+            printf("unknown option: %s\n", argv[0]);
+            return usage();
+        }
+    }
 
     if (argc < 1) {
         return usage();
