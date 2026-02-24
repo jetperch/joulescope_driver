@@ -136,27 +136,27 @@ const char * jsdrv_cstr_starts_with(const char * s, const char * prefix) {
     }
 }
 
-const char * jsdrv_cstr_ends_with(const char * s, const char * prefix) {
-    if (!prefix || !*prefix || !s) {
+const char * jsdrv_cstr_ends_with(const char * s, const char * suffix) {
+    if (!suffix || !*suffix || !s) {
         return s;
     }
     const char * s_end = s;
-    const char * prefix_end = prefix;
+    const char * suffix_end = suffix;
 
     while (*s_end) {
         ++s_end;
     }
 
-    while (*prefix_end) {
-        ++prefix_end;
+    while (*suffix_end) {
+        ++suffix_end;
     }
 
-    if ((s_end - s) < (prefix_end - prefix)) {
+    if ((s_end - s) < (suffix_end - suffix)) {
         return 0;  // s too short to match
     }
 
-    while (prefix_end >= prefix) {
-        if (*prefix_end-- != *s_end--) {
+    while (suffix_end >= suffix) {
+        if (*suffix_end-- != *s_end--) {
             return 0;
         }
     }

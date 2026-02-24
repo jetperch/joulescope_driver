@@ -131,7 +131,7 @@
 #define JSDRV_STREAM_DATA_SIZE          (1024 * 256)    // 256 kB max
 
 /**
- * @defgroup jsdrv_topis Topics
+ * @defgroup jsdrv_topics Topics
  *
  * @brief Topic characters, commands, suffixes, and prefixes.
  *
@@ -171,7 +171,7 @@
 /// The local topic prefix (handled by host, no distributed pubsub).
 #define JSDRV_TOPIC_PREFIX_LOCAL          '_'
 
-/// The driver commad prefix (handled by host, no distributed pubsub).
+/// The driver command prefix (handled by host, no distributed pubsub).
 #define JSDRV_TOPIC_PREFIX_COMMAND        '@'
 
 // driver-level commands
@@ -507,7 +507,7 @@ struct jsdrv_buffer_response_s {
 enum jsdrv_subscribe_flag_e {
     /// No flags (always 0).
     JSDRV_SFLAG_NONE = 0,
-    /// Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.
+    /// Immediately forward retained PUB and/or METADATA, depending upon JSDRV_SFLAG_PUB and JSDRV_SFLAG_METADATA_RSP.
     JSDRV_SFLAG_RETAIN = (1 << 0),
     /// Receive normal topic publish.
     JSDRV_SFLAG_PUB = (1 << 1),
@@ -713,10 +713,10 @@ JSDRV_API int32_t jsdrv_close(struct jsdrv_context_s * context, const char * dev
 /**
  * @brief Compute the calibration hash.
  *
- * @param msg[in] The calibration message.
- * @param length[in] The length of message in bytes which must be
+ * @param[in] msg The calibration message.
+ * @param[in] length The length of message in bytes which must be
  *      a multiple of 32 bytes.
- * @param hash[out] The u32[16] hash of the message.
+ * @param[out] hash The u32[16] hash of the message.
  *      The total length is u32 x 16 = 64-byte = 512 bit.
  */
 JSDRV_API void jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash);

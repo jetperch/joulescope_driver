@@ -50,7 +50,7 @@
 
 #if defined(__cplusplus) && !defined(__CDT_PARSER__)
 #define JSDRV_CPP_GUARD_START extern "C" {
-#define JSDRV_CPP_GUARD_END };
+#define JSDRV_CPP_GUARD_END }
 #else
 #define JSDRV_CPP_GUARD_START
 #define JSDRV_CPP_GUARD_END
@@ -73,7 +73,6 @@
  */
 
 #ifdef __GNUC__
-#define JSDRV_STRUCT_PACKED __attribute__((packed))
 #define JSDRV_USED __attribute__((used))
 #define JSDRV_FORMAT __attribute__((format))
 #define JSDRV_INLINE_FN __attribute__((always_inline)) static inline
@@ -81,7 +80,6 @@
 #define JSDRV_COMPILER_ALLOC(free_fn) __attribute__((malloc))
 //#define JSDRV_COMPILER_ALLOC(free_fn) __attribute__((malloc, malloc(free_fn, 1)))  // gcc 11
 #else
-#define JSDRV_STRUCT_PACKED
 #define JSDRV_USED
 #define JSDRV_FORMAT
 #define JSDRV_INLINE_FN static inline

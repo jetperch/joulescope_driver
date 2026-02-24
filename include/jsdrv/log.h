@@ -166,7 +166,7 @@ JSDRV_API void jsdrv_log_level_set(int8_t level);
  *
  * @return The maximum jsdrv_log_level_e to process to callbacks.
  */
-JSDRV_API int8_t jsdrv_log_level_get();
+JSDRV_API int8_t jsdrv_log_level_get(void);
 
 /**
  * @brief Initialize the singleton log handler.
@@ -180,14 +180,14 @@ JSDRV_API int8_t jsdrv_log_level_get();
  *
  * Note that the log services ALL active jsdrv_context_s instances.
  */
-JSDRV_API void jsdrv_log_initialize();
+JSDRV_API void jsdrv_log_initialize(void);
 
 /**
  * @brief Finalize the singleton log handler.
  *
  * This function releases resources based upon reference counting.
  */
-JSDRV_API void jsdrv_log_finalize();
+JSDRV_API void jsdrv_log_finalize(void);
 
 /**
  * @brief Convert a log level to a user-meaningful string description.

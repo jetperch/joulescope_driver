@@ -91,20 +91,23 @@ Skipped due to blast radius across `cstr.c` and all callers.
 
 ---
 
-## 3. Documentation Quality (remaining)
+## 3. Documentation Quality
 
 **Overall assessment**: Excellent. Nearly 100% Doxygen coverage.
 
-| Severity | Location | Issue |
-|----------|----------|-------|
-| SUGGESTION | `jsdrv.h:134` | Typo: "topis" should be "topics" in `@defgroup` |
-| SUGGESTION | `jsdrv.h:174` | Typo: "commad" should be "command" |
-| WARNING | `time.h:162,188` | "IEEE 747" should be "IEEE 754" |
-| WARNING | `cstr.h:100` | Parameter named `prefix` but it represents a suffix (`jsdrv_cstr_ends_with`) |
-| WARNING | `jsdrv.h:510` | References `JSDRV_PUBSUB_SFLAG_PUB` and `JSDRV_PUBSUB_SFLAG_METADATA_RSP` — should be `JSDRV_SFLAG_PUB` and `JSDRV_SFLAG_METADATA_RSP` |
-| WARNING | `tmap.h:149,196` | References `jsdrv_tmap_size()` — should be `jsdrv_tmap_length()` |
-| WARNING | `jsdrv.h:717-720` | Doxygen `@param` syntax wrong: `msg[in]` should be `@param[in] msg` |
-| SUGGESTION | `time.h:321,345,349` | `@param x` says "32-bit unsigned" but macros accept any integer |
+All items fixed:
+
+| Status | Location | Issue |
+|--------|----------|-------|
+| [FIXED] | `jsdrv.h` | Typo: "topis" → "topics" in `@defgroup` |
+| [FIXED] | `jsdrv.h` | Typo: "commad" → "command" |
+| [FIXED] | `time.h` | "IEEE 747" → "IEEE 754" (both occurrences) |
+| [FIXED] | `cstr.h` + `cstr.c` | Parameter renamed `prefix` → `suffix` in `jsdrv_cstr_ends_with` |
+| [FIXED] | `jsdrv.h` | `JSDRV_PUBSUB_SFLAG_*` → `JSDRV_SFLAG_*` in `JSDRV_SFLAG_RETAIN` doc |
+| [FIXED] | `tmap.h` | `jsdrv_tmap_size()` → `jsdrv_tmap_length()` (both occurrences) |
+| [FIXED] | `jsdrv.h` | Doxygen `@param msg[in]` → `@param[in] msg` (calibration_hash) |
+| [FIXED] | `tmap.h` | Doxygen `@param timestamp[out]` etc. → `@param[out] timestamp` |
+| [FIXED] | `time.h` | `@param x` removed "32-bit unsigned" from SECONDS/MILLI/MICRO/NANOSECONDS_TO_TIME; also fixed "microseconds" → "nanoseconds" in NANOSECONDS_TO_TIME doc |
 
 ---
 
@@ -124,23 +127,22 @@ Skipped due to blast radius across `cstr.c` and all callers.
 
 ---
 
-## 5. Safety & Portability (remaining)
+## 5. Safety & Portability
 
-### WARNING — Empty parameter lists in C
-**`log.h:169,183,190`**
+### [FIXED] WARNING — Empty parameter lists in C
 
-`jsdrv_log_level_get()`, `jsdrv_log_initialize()`, and `jsdrv_log_finalize()` use `()`
-instead of `(void)`. In C, `()` means unspecified parameters. Should be `(void)`.
+Changed `jsdrv_log_level_get()`, `jsdrv_log_initialize()`, and `jsdrv_log_finalize()`
+from `()` to `(void)` in both `log.h` declarations and `log.c` definitions.
 
-### SUGGESTION — MSVC packed struct support
+### N/A — MSVC packed struct support
 
-`JSDRV_STRUCT_PACKED` uses `__attribute__((packed))` for GCC and is empty for MSVC.
-If packed structs are needed on MSVC, add `#pragma pack` support.
+`JSDRV_STRUCT_PACKED` is defined but never used anywhere in the codebase.
+No action needed.
 
-### SUGGESTION — `JSDRV_CPP_GUARD_END` trailing semicolon
+### [FIXED] SUGGESTION — `JSDRV_CPP_GUARD_END` trailing semicolon
 
-`cmacro_inc.h:53`: `};` includes a semicolon after `extern "C" { }`. Harmless but
-unnecessary.
+Removed trailing semicolon from `JSDRV_CPP_GUARD_END` in `cmacro_inc.h`
+(`};` → `}`).
 
 ---
 

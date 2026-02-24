@@ -159,7 +159,7 @@ JSDRV_CPP_GUARD_START
  * @brief Convert the 64-bit fixed point time to a double.
  *
  * @param x The 64-bit signed fixed point time.
- * @return The time as a double p.  Note that IEEE 747 doubles only have
+ * @return The time as a double.  Note that IEEE 754 doubles only have
  *      52 bits of precision, so the result will be truncated for very
  *      small deltas.
  */
@@ -185,7 +185,7 @@ JSDRV_INLINE_FN int64_t JSDRV_F64_TO_TIME(double x) {
  * @brief Convert the 64-bit fixed point time to single precision float.
  *
  * @param x The 64-bit signed fixed point time.
- * @return The time as a float p in seconds.  Note that IEEE 747 singles only
+ * @return The time as a float in seconds.  Note that IEEE 754 singles only
  *      have 23 bits of precision, so the result will likely be truncated.
  */
 #define JSDRV_TIME_TO_F32(x) (((float) (x)) * (1.0f / ((float) JSDRV_TIME_SECOND)))
@@ -321,7 +321,7 @@ JSDRV_INLINE_FN int64_t JSDRV_COUNTER_TO_TIME(uint64_t x, uint64_t z) {
 /**
  * @brief Convert to 64-bit signed fixed point time.
  *
- * @param x he 32-bit unsigned time in seconds.
+ * @param x The 32-bit unsigned time in seconds.
  * @return The 64-bit signed fixed point time.
  */
 #define JSDRV_SECONDS_TO_TIME(x) (((int64_t) (x)) << JSDRV_TIME_Q)
@@ -345,7 +345,7 @@ JSDRV_INLINE_FN int64_t JSDRV_COUNTER_TO_TIME(uint64_t x, uint64_t z) {
 /**
  * @brief Convert to 64-bit signed fixed point time.
  *
- * @param x The 32-bit unsigned time in microseconds.
+ * @param x The 32-bit unsigned time in nanoseconds.
  * @return The 64-bit signed fixed point time.
  */
 #define JSDRV_NANOSECONDS_TO_TIME(x) JSDRV_COUNTER_TO_TIME(x, 1000000000ll)

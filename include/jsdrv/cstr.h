@@ -97,11 +97,11 @@ JSDRV_API const char * jsdrv_cstr_starts_with(const char * s, const char * prefi
  * @brief Determine if a string ends with another string.
  *
  * @param s The string to search.
- * @param prefix The case-sensitive string suffix to match in s.
+ * @param suffix The case-sensitive string suffix to match in s.
  * @return 0 on no match.  On match, return the pointer to s at the location of
  *     the first character matching the suffix.
  */
-JSDRV_API const char * jsdrv_cstr_ends_with(const char * s, const char * prefix);
+JSDRV_API const char * jsdrv_cstr_ends_with(const char * s, const char * suffix);
 
 /**
  * @brief Convert a string to an unsigned 32-bit integer.

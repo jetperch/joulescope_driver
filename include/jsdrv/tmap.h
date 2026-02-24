@@ -146,7 +146,7 @@ JSDRV_API void jsdrv_tmap_expire_by_sample_id(struct jsdrv_tmap_s * self, uint64
  * multiple concurrent readers.  Readers indicate that they are
  * active by calling this function before calling any of the
  * following functions:
- * - jsdrv_tmap_size()
+ * - jsdrv_tmap_length()
  * - jsdrv_tmap_sample_id_to_timestamp()
  * - jsdrv_tmap_timestamp_to_sample_id()
  * - jsdrv_tmap_get()
@@ -171,7 +171,7 @@ JSDRV_API void jsdrv_tmap_reader_exit(struct jsdrv_tmap_s * self);
  *
  * @param self The instance.
  * @param sample_id The sample id to map
- * @param timestamp[out] The timestamp corresponding to sample id.
+ * @param[out] timestamp The timestamp corresponding to sample id.
  * @return 0 or JSDRV_ERROR_UNAVAILABLE.
  * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
  */
@@ -182,7 +182,7 @@ JSDRV_API int32_t jsdrv_tmap_sample_id_to_timestamp(struct jsdrv_tmap_s * self, 
  *
  * @param self The instance.
  * @param timestamp The timestamp to map.
- * @param sample_id[out] The sample id corresponding to timestamp.
+ * @param[out] sample_id The sample id corresponding to timestamp.
  * @return 0 or JSDRV_ERROR_UNAVAILABLE.
  * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
  */
@@ -192,8 +192,8 @@ JSDRV_API int32_t jsdrv_tmap_timestamp_to_sample_id(struct jsdrv_tmap_s * self, 
  * @brief Get an entry from the tmap instance.
  *
  * @param self The instance.
- * @param index The entry index. 0 is oldest.  jsdrv_tmap_size() - 1 is newest.
- * @param time_map[out] The  entry for the corresponding index.
+ * @param index The entry index. 0 is oldest.  jsdrv_tmap_length() - 1 is newest.
+ * @param[out] time_map The entry for the corresponding index.
  * @return 0 or JSDRV_ERROR_UNAVAILABLE.
  * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
  */
