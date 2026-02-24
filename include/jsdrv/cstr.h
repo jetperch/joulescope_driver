@@ -236,7 +236,7 @@ JSDRV_API int jsdrv_cstr_to_bool(char const * s, bool * value);
  * @brief Convert a hex character to a 4-bit nibble.
  *
  * @param v The ASCII character value to convert.
- * @return The nibble value (0 to 16) or 0 on error.
+ * @return The nibble value (0 to 15) or 0 on error.
  */
 JSDRV_API uint8_t jsdrv_cstr_hex_to_u4(char v);
 

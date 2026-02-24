@@ -64,11 +64,11 @@ struct jsdrv_tmap_s;
  *
  * tmap instances are designed for thread safety with a single writer
  * and multiple readers.  Each time the writer shares this instance
- * with a reader, the writer must call jsdrv_tmp_ref_incr().
+ * with a reader, the writer must call jsdrv_tmap_ref_incr().
  * The reader then calls jsdrv_tmap_reader_enter() and jsdrv_tmap_reader_exit()
  * whenever it wants to use the reader methods.  When the reader is done
- * with the instance, it must call jsdrv_tmp_ref_decr.
- * When the writer finalizes, it also must call jsdrv_tmp_ref_decr().
+ * with the instance, it must call jsdrv_tmap_ref_decr.
+ * When the writer finalizes, it also must call jsdrv_tmap_ref_decr().
  */
 struct jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size);
 

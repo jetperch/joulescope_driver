@@ -91,8 +91,8 @@
  * Topics with the following suffix characters have special meanings:
  * - '%': metadata request (value should be NULL)
  * - '$': metadata response
- * - '?': query request (value should be NULL)
- * - '&': query response
+ * - '&': query request (value should be NULL)
+ * - '?': query response
  * - '#': return code.  Value is i32 return code. 0=success.
  *
  * Note that the topic owner will respond to jsdrv_publish
@@ -182,7 +182,7 @@
 #define JSDRV_MSG_INITIALIZE            "@/!init"       // CAUTION: internal use only
 #define JSDRV_MSG_FINALIZE              "@/!final"      // CAUTION: internal use only
 #define JSDRV_MSG_VERSION               "@/version"     ///< Driver version: subscribe only JSDRV version (u32)
-#define JSDRV_MSG_TIMEOUT               "@/timeout"     ///< UnhandledDriver version: subscribe only JSDRV version (u32)
+#define JSDRV_MSG_TIMEOUT               "@/timeout"     ///< Explict timeout command for testing.
 
 
 // device-specific commands in format {device}/{command}
@@ -450,8 +450,8 @@ enum jsdrv_buffer_response_type_e {
 struct jsdrv_summary_entry_s {
     float avg;                  ///< The average (mean) over the window.
     float std;                  ///< The standard deviation over the window.
-    float min;                  ///< The maximum value over the window.
-    float max;                  ///< The minimum value over the window.
+    float min;                  ///< The minimum value over the window.
+    float max;                  ///< The maximum value over the window.
 };
 
 #ifdef __cplusplus

@@ -107,30 +107,43 @@ struct jsdrv_union_s {
     union jsdrv_union_inner_u value;
 };
 
-// Convenience value creation macros
+// Static assert: this library assumes little-endian byte order.
+// All union convenience macros use the widest member (.u64/.i64) to ensure
+// the full 8 bytes are zero-extended or sign-extended, which is only correct
+// on little-endian architectures.
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__)
+#error "jsdrv requires a little-endian target"
+#elif defined(_MSC_VER) && !defined(_M_IX86) && !defined(_M_X64) && !defined(_M_ARM) && !defined(_M_ARM64)
+#error "jsdrv requires a little-endian target"
+#endif
+
+// Convenience value creation macros.
+// All integer macros write through the widest union member (.u64 or .i64)
+// to ensure the full 8-byte value field is properly cleared and any
+// width view of the union reads the correct value on little-endian targets.
 #define jsdrv_union_null() ((struct jsdrv_union_s){.type=JSDRV_UNION_NULL, .op=0, .flags=0, .app=0, .value={.u64=0}, .size=0})
-#define jsdrv_union_null_r() ((struct jsdrv_union_s){.type=JSDRV_UNION_NULL, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u32=0}, .size=0})
+#define jsdrv_union_null_r() ((struct jsdrv_union_s){.type=JSDRV_UNION_NULL, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=0}, .size=0})
 #define jsdrv_union_f32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F32, .op=0, .flags=0, .app=0, .value={.f32=_value}, .size=0})
 #define jsdrv_union_f32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F32, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.f32=_value}, .size=0})
 #define jsdrv_union_f64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F64, .op=0, .flags=0, .app=0, .value={.f64=_value}, .size=0})
-#define jsdrv_union_f64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F64, .op=0, .app=0, .flags=JSDRV_UNION_FLAG_RETAIN, .value={.f64=_value}, .size=0})
-#define jsdrv_union_u8(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U8, .op=0, .flags=0, .app=0, .value={.u8=_value}, .size=0})
-#define jsdrv_union_u8_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U8, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=_value}, .size=0})
-#define jsdrv_union_u16(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U16, .op=0, .flags=0, .app=0, .value={.u16=_value}, .size=0})
-#define jsdrv_union_u16_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U16, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=_value}, .size=0})
-#define jsdrv_union_u32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U32, .op=0, .flags=0, .app=0, .value={.u32=_value}, .size=0})
-#define jsdrv_union_u32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U32, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=_value}, .size=0})
-#define jsdrv_union_u64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U64, .op=0, .flags=0, .app=0, .value={.u64=_value}, .size=0})
-#define jsdrv_union_u64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=_value}, .size=0})
+#define jsdrv_union_f64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.f64=_value}, .size=0})
+#define jsdrv_union_u8(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U8, .op=0, .flags=0, .app=0, .value={.u64=(uint8_t)(_value)}, .size=0})
+#define jsdrv_union_u8_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U8, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=(uint8_t)(_value)}, .size=0})
+#define jsdrv_union_u16(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U16, .op=0, .flags=0, .app=0, .value={.u64=(uint16_t)(_value)}, .size=0})
+#define jsdrv_union_u16_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U16, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=(uint16_t)(_value)}, .size=0})
+#define jsdrv_union_u32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U32, .op=0, .flags=0, .app=0, .value={.u64=(uint32_t)(_value)}, .size=0})
+#define jsdrv_union_u32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U32, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=(uint32_t)(_value)}, .size=0})
+#define jsdrv_union_u64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U64, .op=0, .flags=0, .app=0, .value={.u64=(_value)}, .size=0})
+#define jsdrv_union_u64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=(_value)}, .size=0})
 
-#define jsdrv_union_i8(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I8, .op=0, .flags=0, .app=0, .value={.i8=_value}, .size=0})
-#define jsdrv_union_i8_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I8, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=_value}, .size=0})
-#define jsdrv_union_i16(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I16, .op=0, .flags=0, .app=0, .value={.i16=_value}, .size=0})
-#define jsdrv_union_i16_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I16, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=_value}, .size=0})
-#define jsdrv_union_i32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I32, .op=0, .flags=0, .app=0, .value={.i32=_value}, .size=0})
-#define jsdrv_union_i32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I32, .op=0, .flags= JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=_value}, .size=0})
-#define jsdrv_union_i64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I64, .op=0, .flags=0, .app=0, .value={.i64=_value}, .size=0})
-#define jsdrv_union_i64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=_value}, .size=0})
+#define jsdrv_union_i8(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I8, .op=0, .flags=0, .app=0, .value={.i64=(int8_t)(_value)}, .size=0})
+#define jsdrv_union_i8_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I8, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=(int8_t)(_value)}, .size=0})
+#define jsdrv_union_i16(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I16, .op=0, .flags=0, .app=0, .value={.i64=(int16_t)(_value)}, .size=0})
+#define jsdrv_union_i16_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I16, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=(int16_t)(_value)}, .size=0})
+#define jsdrv_union_i32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I32, .op=0, .flags=0, .app=0, .value={.i64=(int32_t)(_value)}, .size=0})
+#define jsdrv_union_i32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I32, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=(int32_t)(_value)}, .size=0})
+#define jsdrv_union_i64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I64, .op=0, .flags=0, .app=0, .value={.i64=(_value)}, .size=0})
+#define jsdrv_union_i64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=(_value)}, .size=0})
 
 #define jsdrv_union_str(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=0, .flags=0, .app=0, .value={.str=_value}, .size=0})
 #define jsdrv_union_cstr(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=0, .flags=JSDRV_UNION_FLAG_CONST, .app=0, .value={.str=_value}, .size=0})

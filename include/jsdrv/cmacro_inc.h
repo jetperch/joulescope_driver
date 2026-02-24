@@ -64,8 +64,6 @@
  */
 #if defined(WIN32) && defined(JSDRV_EXPORT)
 #define JSDRV_API __declspec(dllexport)
-#elif defined(WIN32) && defined(JSDRV_EXPORT)
-#define JSDRV_API __declspec(dllimport)
 #else
 #define JSDRV_API
 #endif
