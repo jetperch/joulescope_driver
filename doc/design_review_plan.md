@@ -56,39 +56,38 @@ A compile-time endianness check was added to enforce the little-endian assumptio
 
 ---
 
-## 2. Consistency & Convention Issues (remaining)
+## 2. Consistency & Convention Issues
 
-### WARNING — Missing `JSDRV_API` on public functions
+### [FIXED] WARNING — Missing `JSDRV_API` on public functions
 
-Several public functions lack the `JSDRV_API` export macro, meaning they won't be
-DLL-exported on Windows:
-
-- **`cstr.h:162-173`**: `jsdrv_cstr_to_u64()` and `jsdrv_cstr_to_i64()`
-- **`tmap.h`**: Nearly every function — `jsdrv_tmap_alloc`, `jsdrv_tmap_ref_incr/decr`,
+Added `JSDRV_API` to:
+- `cstr.h`: `jsdrv_cstr_to_u64()` and `jsdrv_cstr_to_i64()`
+- `tmap.h`: All 12 public functions (`jsdrv_tmap_alloc`, `jsdrv_tmap_ref_incr/decr`,
   `jsdrv_tmap_clear`, `jsdrv_tmap_length`, `jsdrv_tmap_add`,
   `jsdrv_tmap_expire_by_sample_id`, `jsdrv_tmap_reader_enter/exit`,
-  `jsdrv_tmap_sample_id_to_timestamp`, `jsdrv_tmap_timestamp_to_sample_id`, `jsdrv_tmap_get`
+  `jsdrv_tmap_sample_id_to_timestamp`, `jsdrv_tmap_timestamp_to_sample_id`, `jsdrv_tmap_get`)
 
-### SUGGESTION — Include guard naming inconsistency
+### [FIXED] SUGGESTION — Doxygen tag style mismatch
+
+`version.h` now uses `@brief`, `@param`, `@return` consistent with all other files.
+Also fixed `\returns` → `@return` for consistency.
+
+### DEFERRED — Include guard naming inconsistency
 
 Mixed conventions: double underscore (`JSDRV_TIME_H__`), single (`JSDRV_CSTR_H_`),
 and custom (`JSDRV_LOG_INCLUDE_H_`). Single underscore is more C-standards-correct
-since double underscores are technically reserved.
+since double underscores are technically reserved. Low risk, deferred.
 
-### SUGGESTION — Enum prefix mismatch
+### DEFERRED — Enum prefix mismatch
 
 `enum jsdrv_element_type_e` members use `JSDRV_DATA_TYPE_*` prefix instead of
-`JSDRV_ELEMENT_TYPE_*`, mismatching the enum name.
+`JSDRV_ELEMENT_TYPE_*`. Skipped due to ~40 references across C, Python, and Node.js
+bindings. The existing names are well-established.
 
-### SUGGESTION — Return type `int` vs `int32_t`
+### DEFERRED — Return type `int` vs `int32_t`
 
 `cstr.h` functions return `int` while the rest of the API uses `int32_t`.
-`int32_t` is more explicit for a cross-platform C library.
-
-### SUGGESTION — Doxygen tag style mismatch
-
-`version.h` uses `\brief`, `\param`, `\return` while all other files use
-`@brief`, `@param`, `@return`.
+Skipped due to blast radius across `cstr.c` and all callers.
 
 ---
 

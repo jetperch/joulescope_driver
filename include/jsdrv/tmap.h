@@ -70,7 +70,7 @@ struct jsdrv_tmap_s;
  * with the instance, it must call jsdrv_tmap_ref_decr.
  * When the writer finalizes, it also must call jsdrv_tmap_ref_decr().
  */
-struct jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size);
+JSDRV_API struct jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size);
 
 /**
  * @brief Increment the reference count on this instance.
@@ -85,7 +85,7 @@ struct jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size);
  * The receiving reader must call jsdrv_tmap_ref_decr() when
  * it is done with the instance.
  */
-void jsdrv_tmap_ref_incr(struct jsdrv_tmap_s * self);
+JSDRV_API void jsdrv_tmap_ref_incr(struct jsdrv_tmap_s * self);
 
 /**
  * @brief Decrement the reference count on this instance.
@@ -95,7 +95,7 @@ void jsdrv_tmap_ref_incr(struct jsdrv_tmap_s * self);
  * is freed.  The caller must not hold on to the instance pointer
  * after calling jsdrv_tmap_ref_decr().
  */
-void jsdrv_tmap_ref_decr(struct jsdrv_tmap_s * self);
+JSDRV_API void jsdrv_tmap_ref_decr(struct jsdrv_tmap_s * self);
 
 /**
  * @brief Clear all data from this instance.
@@ -103,7 +103,7 @@ void jsdrv_tmap_ref_decr(struct jsdrv_tmap_s * self);
  * @param self The instance.
  * @note Unlike other writer functions, this function blocks on the reader mutex.
  */
-void jsdrv_tmap_clear(struct jsdrv_tmap_s * self);
+JSDRV_API void jsdrv_tmap_clear(struct jsdrv_tmap_s * self);
 
 /**
  * @brief Get the current number of entries in the time map.
@@ -112,7 +112,7 @@ void jsdrv_tmap_clear(struct jsdrv_tmap_s * self);
  * @return The number of entries in this instance.
  * @note Readers should call this from within jsdrv_tmap_reader_enter().
  */
-size_t jsdrv_tmap_length(struct jsdrv_tmap_s * self);
+JSDRV_API size_t jsdrv_tmap_length(struct jsdrv_tmap_s * self);
 
 /**
  * @brief Add a new time map entry to this instance.
@@ -123,7 +123,7 @@ size_t jsdrv_tmap_length(struct jsdrv_tmap_s * self);
  * This function does not block, but the update will be deferred
  * until no readers are actively using this instance.
  */
-void jsdrv_tmap_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s * time_map);
+JSDRV_API void jsdrv_tmap_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s * time_map);
 
 /**
  * @brief Expire old time map entries.
@@ -134,7 +134,7 @@ void jsdrv_tmap_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s * 
  * This function does not block, but the update will be deferred
  * until no readers are actively using this instance.
  */
-void jsdrv_tmap_expire_by_sample_id(struct jsdrv_tmap_s * self, uint64_t sample_id);
+JSDRV_API void jsdrv_tmap_expire_by_sample_id(struct jsdrv_tmap_s * self, uint64_t sample_id);
 
 /**
  * @brief Indicate that a reader is actively using this instance.
@@ -156,7 +156,7 @@ void jsdrv_tmap_expire_by_sample_id(struct jsdrv_tmap_s * self, uint64_t sample_
  * sections as short as possible.
  * Call jsdrv_tmap_reader_exit() when done.
  */
-void jsdrv_tmap_reader_enter(struct jsdrv_tmap_s * self);
+JSDRV_API void jsdrv_tmap_reader_enter(struct jsdrv_tmap_s * self);
 
 /**
  * @brief Indicate that a reader is done using this instance.
@@ -164,7 +164,7 @@ void jsdrv_tmap_reader_enter(struct jsdrv_tmap_s * self);
  * @param self The instance.
  * @see jsdrv_tmap_reader_enter
  */
-void jsdrv_tmap_reader_exit(struct jsdrv_tmap_s * self);
+JSDRV_API void jsdrv_tmap_reader_exit(struct jsdrv_tmap_s * self);
 
 /**
  * @brief Map sample id to a UTC timestamp.
@@ -175,7 +175,7 @@ void jsdrv_tmap_reader_exit(struct jsdrv_tmap_s * self);
  * @return 0 or JSDRV_ERROR_UNAVAILABLE.
  * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
  */
-int32_t jsdrv_tmap_sample_id_to_timestamp(struct jsdrv_tmap_s * self, uint64_t sample_id, int64_t * timestamp);
+JSDRV_API int32_t jsdrv_tmap_sample_id_to_timestamp(struct jsdrv_tmap_s * self, uint64_t sample_id, int64_t * timestamp);
 
 /**
  * @brief Map UTC timestamp to a sample id.
@@ -186,7 +186,7 @@ int32_t jsdrv_tmap_sample_id_to_timestamp(struct jsdrv_tmap_s * self, uint64_t s
  * @return 0 or JSDRV_ERROR_UNAVAILABLE.
  * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
  */
-int32_t jsdrv_tmap_timestamp_to_sample_id(struct jsdrv_tmap_s * self, int64_t timestamp, uint64_t * sample_id);
+JSDRV_API int32_t jsdrv_tmap_timestamp_to_sample_id(struct jsdrv_tmap_s * self, int64_t timestamp, uint64_t * sample_id);
 
 /**
  * @brief Get an entry from the tmap instance.
@@ -197,7 +197,7 @@ int32_t jsdrv_tmap_timestamp_to_sample_id(struct jsdrv_tmap_s * self, int64_t ti
  * @return 0 or JSDRV_ERROR_UNAVAILABLE.
  * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
  */
-int32_t jsdrv_tmap_get(struct jsdrv_tmap_s * self, size_t index, struct jsdrv_time_map_s * time_map);
+JSDRV_API int32_t jsdrv_tmap_get(struct jsdrv_tmap_s * self, size_t index, struct jsdrv_time_map_s * time_map);
 
 JSDRV_CPP_GUARD_END
 

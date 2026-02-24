@@ -159,7 +159,7 @@ JSDRV_API int jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * v
  *      modified.  To allow default values on parsing errors, set value
  *      before calling this function.
  */
-int jsdrv_cstr_to_u64(const char * src, uint64_t * value);
+JSDRV_API int jsdrv_cstr_to_u64(const char * src, uint64_t * value);
 
 /**
  * @brief Convert a string to an signed 64-bit integer.
@@ -170,7 +170,7 @@ int jsdrv_cstr_to_u64(const char * src, uint64_t * value);
  *      modified.  To allow default values on parsing errors, set value
  *      before calling this function.
  */
-int jsdrv_cstr_to_i64(const char * src, int64_t * value);
+JSDRV_API int jsdrv_cstr_to_i64(const char * src, int64_t * value);
 
 /**
  * @brief Convert a string to a floating point number.
