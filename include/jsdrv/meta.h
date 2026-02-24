@@ -21,8 +21,8 @@
  * @brief Metadata handling
  */
 
-#ifndef JSDRV_META_H__
-#define JSDRV_META_H__
+#ifndef JSDRV_META_H_
+#define JSDRV_META_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include "jsdrv/union.h"
@@ -79,4 +79,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_META_H__ */
+#endif  /* JSDRV_META_H_ */

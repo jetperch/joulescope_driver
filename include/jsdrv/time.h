@@ -20,8 +20,8 @@
  * @brief JSDRV time representation.
  */
 
-#ifndef JSDRV_TIME_H__
-#define JSDRV_TIME_H__
+#ifndef JSDRV_TIME_H_
+#define JSDRV_TIME_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include <stdint.h>
@@ -440,4 +440,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif /* JSDRV_TIME_H__ */
+#endif /* JSDRV_TIME_H_ */

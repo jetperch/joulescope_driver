@@ -21,8 +21,8 @@
  * @brief Topic construction and manipulation.
  */
 
-#ifndef JSDRV_TOPIC_H__
-#define JSDRV_TOPIC_H__
+#ifndef JSDRV_TOPIC_H_
+#define JSDRV_TOPIC_H_
 
 #include "jsdrv.h"
 #include <stdint.h>
@@ -125,4 +125,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_TOPIC_H__ */
+#endif  /* JSDRV_TOPIC_H_ */

@@ -20,8 +20,8 @@
  * @brief Joulescope host driver logging facility.
  */
 
-#ifndef JSDRV_LOG_INCLUDE_H_
-#define JSDRV_LOG_INCLUDE_H_
+#ifndef JSDRV_LOG_H_
+#define JSDRV_LOG_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include <stdint.h>
@@ -210,4 +210,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_LOG_INCLUDE_H_ */
+#endif  /* JSDRV_LOG_H_ */

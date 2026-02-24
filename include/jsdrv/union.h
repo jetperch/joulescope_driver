@@ -21,8 +21,8 @@
  * @brief Union type.
  */
 
-#ifndef JSDRV_UNION_TYPE_H__
-#define JSDRV_UNION_TYPE_H__
+#ifndef JSDRV_UNION_H_
+#define JSDRV_UNION_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include <stdint.h>
@@ -268,4 +268,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_UNION_TYPE_H__ */
+#endif  /* JSDRV_UNION_H_ */

@@ -21,8 +21,8 @@
  * @brief JLS timestamp <-> sample_id mapping for FSR channels.
  */
 
-#ifndef JSDRV_TMAP_H__
-#define JSDRV_TMAP_H__
+#ifndef JSDRV_TMAP_H_
+#define JSDRV_TMAP_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include "jsdrv/time.h"
@@ -203,4 +203,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_TMAP_H__ */
+#endif  /* JSDRV_TMAP_H_ */

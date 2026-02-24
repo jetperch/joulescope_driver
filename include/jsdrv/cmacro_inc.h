@@ -20,8 +20,8 @@
  * @brief Commonly used C macros for the Joulescope driver.
  */
 
-#ifndef JSDRV_CMACRO_INC_H__
-#define JSDRV_CMACRO_INC_H__
+#ifndef JSDRV_CMACRO_INC_H_
+#define JSDRV_CMACRO_INC_H_
 
 /**
  * @ingroup jsdrv
@@ -90,4 +90,4 @@
 
 /** @} */
 
-#endif /* JSDRV_CMACRO_INC_H__ */
+#endif /* JSDRV_CMACRO_INC_H_ */
