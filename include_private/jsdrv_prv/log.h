@@ -20,8 +20,8 @@
  * \brief Trivial logging support.
  */
 
-#ifndef JSDRV_LOG_H_
-#define JSDRV_LOG_H_
+#ifndef JSDRV_PRV_LOG_H_
+#define JSDRV_PRV_LOG_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include "jsdrv/log.h"
@@ -224,4 +224,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif /* JSDRV_LOG_H_ */
+#endif /* JSDRV_PRV_LOG_H_ */
