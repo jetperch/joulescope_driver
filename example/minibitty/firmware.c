@@ -32,7 +32,9 @@ enum fw_cmd_op_e {
     FW_CMD_OP_ALLOCATE = 1,
     FW_CMD_OP_WRITE    = 2,
     FW_CMD_OP_READ     = 3,
-    FW_CMD_OP_BOOT     = 4,
+    FW_CMD_OP_UPDATE   = 4,
+    FW_CMD_OP_LAUNCH   = 5,
+    FW_CMD_OP_ERASE    = 6,
 };
 
 struct fw_cmd_s {
@@ -67,7 +69,9 @@ static const char * op_name(uint8_t op) {
         case FW_CMD_OP_ALLOCATE: return "ALLOCATE";
         case FW_CMD_OP_WRITE:    return "WRITE";
         case FW_CMD_OP_READ:     return "READ";
-        case FW_CMD_OP_BOOT:     return "BOOT";
+        case FW_CMD_OP_UPDATE:   return "UPDATE";
+        case FW_CMD_OP_LAUNCH:   return "LAUNCH";
+        case FW_CMD_OP_ERASE:    return "ERASE";
         default:                 return "UNKNOWN";
     }
 }
@@ -158,7 +162,7 @@ static int pipeline_send(struct firmware_s * fm, uint8_t op, uint8_t image,
 
     InterlockedIncrement(&fm->outstanding);
     jsdrv_topic_set(&topic, fm->app->device.topic);
-    jsdrv_topic_append(&topic, "c/sys/!fw_cmd");
+    jsdrv_topic_append(&topic, "c/fwup/!cmd");
     int32_t pub_rc = jsdrv_publish(fm->app->context, topic.topic, &jsdrv_union_bin(buf, msg_size), 0);
     if (pub_rc) {
         InterlockedDecrement(&fm->outstanding);
@@ -237,7 +241,7 @@ static int setup(struct app_s * self) {
     Sleep(500);
 
     jsdrv_topic_set(&topic, self->device.topic);
-    jsdrv_topic_append(&topic, "c/sys/!fw_rsp");
+    jsdrv_topic_append(&topic, "c/fwup/!rsp");
     jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_fw_rsp, NULL, 0);
 
     return 0;
@@ -247,7 +251,7 @@ static int teardown(struct app_s * self, int rc) {
     struct jsdrv_topic_s topic;
 
     jsdrv_topic_set(&topic, self->device.topic);
-    jsdrv_topic_append(&topic, "c/sys/!fw_rsp");
+    jsdrv_topic_append(&topic, "c/fwup/!rsp");
     jsdrv_unsubscribe(self->context, topic.topic, on_fw_rsp, NULL, 0);
 
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
@@ -412,14 +416,14 @@ write_drain:
     }
     if (rc) { goto done; }
 
-    // BOOT
-    printf("Sending boot command (image=%u)...\n", image_slot);
-    rc = fw_cmd(&fw_, FW_CMD_OP_BOOT, image_slot, 0, 0, NULL, 0, 5000);
+    // UPDATE
+    printf("Sending update command (image=%u)...\n", image_slot);
+    rc = fw_cmd(&fw_, FW_CMD_OP_UPDATE, image_slot, 0, 0, NULL, 0, 5000);
     if (rc) {
-        printf("ERROR: boot command failed\n");
+        printf("ERROR: update command failed\n");
         goto done;
     }
-    printf("Boot command accepted, device will reset in ~100 ms\n");
+    printf("Update command accepted, device will reset in ~100 ms\n");
     Sleep(200);
 
 done:
@@ -430,22 +434,55 @@ done:
     return rc;
 }
 
+// --- Launch ---
+
+static int do_launch(uint8_t image_slot) {
+    printf("Sending launch command (image=%u)...\n", image_slot);
+    int rc = fw_cmd(&fw_, FW_CMD_OP_LAUNCH, image_slot, 0, 0, NULL, 0, 5000);
+    if (rc) {
+        printf("ERROR: launch command failed\n");
+        return rc;
+    }
+    printf("Launch command accepted, device will reset in ~100 ms\n");
+    Sleep(200);
+    return 0;
+}
+
+// --- Erase ---
+
+static int do_erase(uint8_t image_slot) {
+    printf("Sending erase command (image=%u)...\n", image_slot);
+    int rc = fw_cmd(&fw_, FW_CMD_OP_ERASE, image_slot, 0, 0, NULL, 0, 5000);
+    if (rc) {
+        printf("ERROR: erase command failed\n");
+        return rc;
+    }
+    printf("Erase command accepted, device will reset in ~100 ms\n");
+    Sleep(200);
+    return 0;
+}
+
 // --- Entry point ---
 
 static int usage(void) {
     printf(
-        "usage: minibitty firmware [-v] [-p N] [-i IMAGE] <path> [device_filter]\n"
+        "usage: minibitty firmware <subcommand> [options] [args]\n"
         "\n"
-        "Update device firmware using the in-band sys task protocol.\n"
+        "Subcommands:\n"
+        "  update [-v] [-p N] [-i IMAGE] <path> [device_filter]\n"
+        "      Update device firmware from an image file.\n"
+        "      -v, --verbose            Show per-transaction details\n"
+        "      -p, --pipeline N         Pipeline depth for write/verify (default 4, max %u)\n"
+        "      -i, --image N            Target image slot (default 0, range 0-1)\n"
+        "      path                     Path to .mbfw firmware image file\n"
         "\n"
-        "Options:\n"
-        "  -v, --verbose            Show per-transaction details\n"
-        "  -p, --pipeline N         Pipeline depth for write/verify (default 4, max %u)\n"
-        "  -i, --image N            Target image slot (default 0, range 0-2)\n"
+        "  launch [-v] <image> [device_filter]\n"
+        "      Launch a specific image slot.\n"
+        "      image                    Image slot (0-3)\n"
         "\n"
-        "Arguments:\n"
-        "  path                     Path to .mbfw firmware image file\n"
-        "  device_filter            Optional device filter string\n",
+        "  erase [-v] <image> [device_filter]\n"
+        "      Erase a specific image slot.\n"
+        "      image                    Image slot (0-1)\n",
         PIPELINE_MAX
         );
     return 1;
@@ -461,10 +498,9 @@ static int parse_u32(const char * str, uint32_t * out) {
     return 0;
 }
 
-int on_firmware(struct app_s * self, int argc, char * argv[]) {
+static int on_firmware_update(struct app_s * self, int argc, char * argv[]) {
     char * device_filter = NULL;
     int rc;
-    verbose_ = 0;
     uint32_t pipeline_depth = 4;
     uint32_t image_slot = 0;
 
@@ -487,8 +523,8 @@ int on_firmware(struct app_s * self, int argc, char * argv[]) {
                 printf("--image requires a number\n");
                 return usage();
             }
-            if (image_slot > 2) {
-                printf("--image must be 0, 1, or 2\n");
+            if (image_slot > 1) {
+                printf("--image must be 0 or 1\n");
                 return usage();
             }
             ARG_CONSUME();
@@ -512,4 +548,94 @@ int on_firmware(struct app_s * self, int argc, char * argv[]) {
         rc = do_firmware(self, path, pipeline_depth, (uint8_t) image_slot);
     }
     return teardown(self, rc);
+}
+
+static int on_firmware_launch(struct app_s * self, int argc, char * argv[]) {
+    char * device_filter = NULL;
+    int rc;
+    uint32_t image_slot;
+
+    while (argc > 0 && argv[0][0] == '-') {
+        if (0 == strcmp(argv[0], "-v") || 0 == strcmp(argv[0], "--verbose")) {
+            verbose_ = 1;
+            ARG_CONSUME();
+        } else {
+            printf("unknown option: %s\n", argv[0]);
+            return usage();
+        }
+    }
+
+    if (argc < 1) {
+        printf("launch requires an image slot\n");
+        return usage();
+    }
+    if (parse_u32(argv[0], &image_slot) || image_slot > 3) {
+        printf("image must be 0-3\n");
+        return usage();
+    }
+    ARG_CONSUME();
+    if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
+
+    ROE(app_match(self, device_filter));
+    rc = setup(self);
+    if (!rc) {
+        rc = do_launch((uint8_t) image_slot);
+    }
+    return teardown(self, rc);
+}
+
+static int on_firmware_erase(struct app_s * self, int argc, char * argv[]) {
+    char * device_filter = NULL;
+    int rc;
+    uint32_t image_slot;
+
+    while (argc > 0 && argv[0][0] == '-') {
+        if (0 == strcmp(argv[0], "-v") || 0 == strcmp(argv[0], "--verbose")) {
+            verbose_ = 1;
+            ARG_CONSUME();
+        } else {
+            printf("unknown option: %s\n", argv[0]);
+            return usage();
+        }
+    }
+
+    if (argc < 1) {
+        printf("erase requires an image slot\n");
+        return usage();
+    }
+    if (parse_u32(argv[0], &image_slot) || image_slot > 1) {
+        printf("image must be 0 or 1\n");
+        return usage();
+    }
+    ARG_CONSUME();
+    if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
+
+    ROE(app_match(self, device_filter));
+    rc = setup(self);
+    if (!rc) {
+        rc = do_erase((uint8_t) image_slot);
+    }
+    return teardown(self, rc);
+}
+
+int on_firmware(struct app_s * self, int argc, char * argv[]) {
+    verbose_ = 0;
+
+    if (argc < 1) {
+        return usage();
+    }
+
+    const char * subcmd = argv[0];
+    ARG_CONSUME();
+
+    if (0 == strcmp(subcmd, "update")) {
+        return on_firmware_update(self, argc, argv);
+    } else if (0 == strcmp(subcmd, "launch")) {
+        return on_firmware_launch(self, argc, argv);
+    } else if (0 == strcmp(subcmd, "erase")) {
+        return on_firmware_erase(self, argc, argv);
+    } else {
+        printf("unknown subcommand: %s\n", subcmd);
+        return usage();
+    }
 }

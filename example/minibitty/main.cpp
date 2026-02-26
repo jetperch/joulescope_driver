@@ -130,6 +130,7 @@ const struct command_s COMMANDS[] = {
         {"firmware", on_firmware, "Update device firmware"},
         {"fpga_mem", on_fpga_mem, "Program FPGA flash memory"},
         {"hotplug", on_hotplug, "Monitor device insertion and removal"},
+        {"sniff", on_pubsub_sniffer, "Subscribe to topic and print"},
         {"info", on_info, "List connected devices and display device details"},
         {"loopback", on_loopback, "Loopback data to test throughput and error rate"},
         {"stream", on_stream, "Stream data"},

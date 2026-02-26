@@ -96,6 +96,7 @@ int on_info(struct app_s * self, int argc, char * argv[]);
 int on_loopback(struct app_s * self, int argc, char * argv[]);
 int on_stream(struct app_s * self, int argc, char * argv[]);
 int on_throughput(struct app_s * self, int argc, char * argv[]);
+int on_pubsub_sniffer(struct app_s * self, int argc, char * argv[]);
 int on_version(struct app_s * self, int argc, char * argv[]);
 
 MB_CPP_GUARD_END

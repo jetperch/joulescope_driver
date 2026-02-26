@@ -35,6 +35,8 @@ enum jtag_mem_op_e {
     JTAG_MEM_OP_ERASE_4K   = 4,
     JTAG_MEM_OP_WRITE      = 5,
     JTAG_MEM_OP_READ       = 6,
+    JTAG_MEM_OP_PROG_AES_KEY = 7,
+    JTAG_MEM_OP_READ_UID   = 8,
 };
 
 struct jtag_mem_s {
@@ -72,6 +74,8 @@ static const char * op_name(uint8_t op) {
         case JTAG_MEM_OP_ERASE_4K:  return "ERASE_4K";
         case JTAG_MEM_OP_WRITE:     return "WRITE";
         case JTAG_MEM_OP_READ:      return "READ";
+        case JTAG_MEM_OP_PROG_AES_KEY: return "PROG_AES_KEY";
+        case JTAG_MEM_OP_READ_UID:  return "READ_UID";
         default:                    return "UNKNOWN";
     }
 }
@@ -96,7 +100,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
         }
         printf("\n");
 
-        if (rsp->operation == JTAG_MEM_OP_READ && data_size > 0) {
+        if ((rsp->operation == JTAG_MEM_OP_READ || rsp->operation == JTAG_MEM_OP_READ_UID) && data_size > 0) {
             uint32_t dump = (data_size > 16) ? 16 : data_size;
             printf("  READ data[0:%u]:", dump);
             for (uint32_t i = 0; i < dump; ++i) {
@@ -106,7 +110,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
         }
     }
 
-    if (rsp->operation == JTAG_MEM_OP_READ) {
+    if (rsp->operation == JTAG_MEM_OP_READ || rsp->operation == JTAG_MEM_OP_READ_UID) {
         if (fpga_mem_.read_buf && data_size > 0) {
             uint32_t buf_offset = rsp->offset - fpga_mem_.read_buf_offset;
             if (buf_offset + data_size <= fpga_mem_.read_buf_length) {
@@ -246,7 +250,7 @@ static uint8_t * file_read(const char * path, uint32_t * size_out) {
 
 // --- Common setup/teardown ---
 
-static int setup(struct app_s * self) {
+static int setup_common(struct app_s * self) {
     struct jsdrv_topic_s topic;
 
     if (verbose_) {
@@ -270,24 +274,11 @@ static int setup(struct app_s * self) {
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "c/jtag/mem/!rsp");
     jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_rsp, NULL, 0);
-
-    // OPEN
-    printf("Opening JTAG...\n");
-    int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_OPEN, 0, 0, NULL, 0, 5000);
-    if (rc) {
-        printf("ERROR: JTAG open failed\n");
-    } else {
-        printf("JTAG opened\n");
-    }
-    return rc;
+    return 0;
 }
 
-static int teardown(struct app_s * self, int rc) {
+static int teardown_common(struct app_s * self, int rc) {
     struct jsdrv_topic_s topic;
-
-    printf("Closing JTAG...\n");
-    fpga_mem_.pipeline_depth = 1;
-    jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_CLOSE, 0, 0, NULL, 0, 5000);
 
     // Restore normal operation
     jsdrv_topic_set(&topic, self->device.topic);
@@ -297,6 +288,28 @@ static int teardown(struct app_s * self, int rc) {
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
     CloseHandle(fpga_mem_.semaphore);
     return rc;
+}
+
+static int setup(struct app_s * self) {
+    int rc = setup_common(self);
+    if (rc) return rc;
+
+    // OPEN (enters SPI background mode)
+    printf("Opening JTAG...\n");
+    rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_OPEN, 0, 0, NULL, 0, 5000);
+    if (rc) {
+        printf("ERROR: JTAG open failed\n");
+    } else {
+        printf("JTAG opened\n");
+    }
+    return rc;
+}
+
+static int teardown(struct app_s * self, int rc) {
+    printf("Closing JTAG...\n");
+    fpga_mem_.pipeline_depth = 1;
+    jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_CLOSE, 0, 0, NULL, 0, 5000);
+    return teardown_common(self, rc);
 }
 
 // --- Subcommands ---
@@ -554,6 +567,72 @@ done:
     return rc;
 }
 
+static int parse_hex_key(const char * hex, uint8_t * key) {
+    if (strlen(hex) != 32) {
+        return 1;
+    }
+    for (int i = 0; i < 16; ++i) {
+        char byte_str[3] = {hex[i * 2], hex[i * 2 + 1], 0};
+        char * end;
+        unsigned long val = strtoul(byte_str, &end, 16);
+        if (*end != '\0') {
+            return 1;
+        }
+        key[i] = (uint8_t) val;
+    }
+    return 0;
+}
+
+static int do_prog_aes_key(struct app_s * self, const uint8_t * key,
+                           uint32_t flags) {
+    (void) self;
+
+    printf("WARNING: This will permanently burn OTP fuses!\n");
+    printf("  Key: ");
+    for (int i = 0; i < 16; ++i) {
+        printf("%02X", key[i]);
+    }
+    printf("\n");
+    printf("  Flags:%s%s\n",
+           (flags & 0x01) ? " KEY_LOCK" : "",
+           (flags & 0x02) ? " ENCRYPT_ONLY" : "");
+
+    printf("Programming AES key...\n");
+    int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_PROG_AES_KEY,
+                          flags, 16, key, 16, 15000);
+    if (rc) {
+        printf("ERROR: AES key programming failed\n");
+        return rc;
+    }
+    printf("AES key programmed successfully\n");
+    return 0;
+}
+
+static int do_read_uid(struct app_s * self) {
+    (void) self;
+    uint8_t uid[8];
+    memset(uid, 0, sizeof(uid));
+
+    fpga_mem_.read_buf = uid;
+    fpga_mem_.read_buf_offset = 0;
+    fpga_mem_.read_buf_length = 8;
+
+    int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_READ_UID, 0, 0, NULL, 0, 1000);
+    fpga_mem_.read_buf = NULL;
+
+    if (rc) {
+        printf("ERROR: read UID failed\n");
+        return rc;
+    }
+
+    printf("Flash Unique ID: ");
+    for (int i = 0; i < 8; ++i) {
+        printf("%02X", uid[i]);
+    }
+    printf("\n");
+    return 0;
+}
+
 // --- Entry point ---
 
 static int usage(void) {
@@ -569,6 +648,10 @@ static int usage(void) {
         "  write <offset> <size>    Write test pattern (size rounded up to 256 B pages)\n"
         "  read <offset> <size>     Read and hex dump\n"
         "  program <path>           Erase, write, and verify image file\n"
+        "  uid                      Read the SPI flash 64-bit unique ID\n"
+        "  aes_key <hex> [options]  Program ECP5 AES-128 encryption key (OTP!)\n"
+        "    --lock                   Set key lock fuse (prevents readback)\n"
+        "    --encrypt-only           Require encrypted bitstreams only\n"
         "\n"
         "Offset and size accept hex (0x...) or decimal.\n",
         PIPELINE_MAX
@@ -663,6 +746,41 @@ int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
         rc = setup(self);
         if (!rc) { rc = do_program(self, path, pipeline_depth); }
         return teardown(self, rc);
+    } else if (0 == strcmp(subcmd, "uid")) {
+        if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
+        ROE(app_match(self, device_filter));
+        rc = setup(self);
+        if (!rc) { rc = do_read_uid(self); }
+        return teardown(self, rc);
+    } else if (0 == strcmp(subcmd, "aes_key")) {
+        if (argc < 1) {
+            printf("aes_key requires <key_hex> (32 hex chars)\n");
+            return usage();
+        }
+        uint8_t key[16];
+        if (parse_hex_key(argv[0], key)) {
+            printf("invalid key: expected 32 hex chars, got '%s'\n",
+                   argv[0]);
+            return usage();
+        }
+        ARG_CONSUME();
+        uint32_t flags = 0;
+        while (argc > 0 && argv[0][0] == '-') {
+            if (0 == strcmp(argv[0], "--lock")) {
+                flags |= 0x01;
+                ARG_CONSUME();
+            } else if (0 == strcmp(argv[0], "--encrypt-only")) {
+                flags |= 0x02;
+                ARG_CONSUME();
+            } else {
+                break;
+            }
+        }
+        if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
+        ROE(app_match(self, device_filter));
+        rc = setup_common(self);
+        if (!rc) { rc = do_prog_aes_key(self, key, flags); }
+        return teardown_common(self, rc);
     } else {
         printf("unknown subcommand: %s\n", subcmd);
         return usage();
