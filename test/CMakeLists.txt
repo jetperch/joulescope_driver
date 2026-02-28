@@ -66,9 +66,11 @@ add_test(pubsub_test ${CMAKE_CURRENT_BINARY_DIR}/pubsub_test)
 
 add_executable(frontend_test frontend_test.c
         ../src/buffer.c
+        ../src/devices.c
         ../src/js110_usb.c
         ../src/js220_usb.c
         ../src/js220_params.c
+        ../src/js320_drv.c
         ../src/mb_device.c
         ../src/jsdrv.c)
 set_target_properties(frontend_test PROPERTIES COMPILE_DEFINITIONS "UNITTEST=1;")

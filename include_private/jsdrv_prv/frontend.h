@@ -65,10 +65,16 @@ struct jsdrvp_ul_device_s {
     void (*join)(struct jsdrvp_ul_device_s *);
 };
 
+// forward declaration for MiniBitty devices
+struct jsdrvp_mb_drv_s;
+
 // create and bind to ll
 int32_t jsdrvp_ul_js110_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
 int32_t jsdrvp_ul_js220_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
-int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
+int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context,
+                                        struct jsdrvp_ll_device_s * ll, struct jsdrvp_mb_drv_s * drv);
+int32_t jsdrvp_mb_device_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
+int32_t jsdrvp_js320_device_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
 int32_t jsdrvp_ul_emu_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
 
 

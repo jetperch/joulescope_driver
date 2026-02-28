@@ -22,6 +22,7 @@
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/dbc.h"
 #include "jsdrv_prv/frontend.h"
+#include "jsdrv_prv/mb_drv.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/thread.h"
 #include <inttypes.h>
@@ -91,10 +92,11 @@ enum state_e {
     ST_LL_CLOSE,
 };
 
-struct dev_s {
+struct jsdrvp_mb_dev_s {
     struct jsdrvp_ul_device_s ul; // MUST BE FIRST!
     struct jsdrvp_ll_device_s ll;
     struct jsdrv_context_s * context;
+    struct jsdrvp_mb_drv_s * drv;  // optional device-specific upper driver
     uint16_t out_frame_id;
     uint16_t in_frame_id;
     uint64_t in_frame_count;
@@ -106,18 +108,19 @@ struct dev_s {
 
     FILE * file_in;
 
+    struct mb_link_identity_s identity;  // received device identity
     struct jsdrv_time_map_s time_map;
 };
 
-static void timeout_set(struct dev_s * self) {
+static void timeout_set(struct jsdrvp_mb_dev_s * self) {
     self->timeout_utc = jsdrv_time_utc() + JSDRV_TIME_SECOND;
 }
 
-static void timeout_clear(struct dev_s * self) {
+static void timeout_clear(struct jsdrvp_mb_dev_s * self) {
     self->timeout_utc = 0;
 }
 
-typedef bool (*state_machine_fn)(struct dev_s * self, uint8_t event);
+typedef bool (*state_machine_fn)(struct jsdrvp_mb_dev_s * self, uint8_t event);
 struct state_machine_transition_s {
     uint8_t event;
     uint8_t state_next;
@@ -131,12 +134,12 @@ struct state_machine_state_s {
     struct state_machine_transition_s const * const transitions;
 };
 
-static void send_to_frontend(struct dev_s * d, const char * subtopic, const struct jsdrv_union_s * value);
-static void publish_to_device(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value);
-static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e service_type, uint16_t metadata,
+static void send_to_frontend(struct jsdrvp_mb_dev_s * d, const char * subtopic, const struct jsdrv_union_s * value);
+static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, const struct jsdrv_union_s * value);
+static void send_to_device(struct jsdrvp_mb_dev_s * d, enum mb_frame_service_type_e service_type, uint16_t metadata,
                            const uint32_t * data, uint32_t length_u32);
 
-static void send_frame_ctrl_to_device(struct dev_s * d, uint8_t ctrl) {
+static void send_frame_ctrl_to_device(struct jsdrvp_mb_dev_s * d, uint8_t ctrl) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_USBBK_MSG_BULK_OUT_DATA, &jsdrv_union_i32(0));
     m->value.type = JSDRV_UNION_BIN;
     m->value.value.bin = m->payload.bin;
@@ -154,7 +157,7 @@ static void send_frame_ctrl_to_device(struct dev_s * d, uint8_t ctrl) {
     msg_queue_push(d->ll.cmd_q, m);
 }
 
-static bool on_ll_open(struct dev_s * self, uint8_t event) {
+static bool on_ll_open(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     self->out_frame_id = 0;
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(self->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(0));
@@ -162,7 +165,7 @@ static bool on_ll_open(struct dev_s * self, uint8_t event) {
     return true;
 }
 
-static bool on_ll_bulk_open(struct dev_s * self, uint8_t event) {
+static bool on_ll_bulk_open(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     struct jsdrvp_msg_s * m;
     m = jsdrvp_msg_alloc_value(self->context, JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN, &jsdrv_union_i32(0));
@@ -171,14 +174,14 @@ static bool on_ll_bulk_open(struct dev_s * self, uint8_t event) {
     return true;
 }
 
-static bool on_link_request(struct dev_s * self, uint8_t event) {
+static bool on_link_request(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     send_frame_ctrl_to_device(self, MB_FRAME_CTRL_CONNECT_REQ);
     timeout_set(self);
     return true;
 }
 
-static bool on_link_identify(struct dev_s * self, uint8_t event) {
+static bool on_link_identify(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) self;
     (void) event;
 
@@ -198,40 +201,40 @@ static bool on_link_identify(struct dev_s * self, uint8_t event) {
     return true;
 }
 
-static bool on_open_enter(struct dev_s * self, uint8_t event) {
+static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     timeout_clear(self);
+    if (self->drv && self->drv->on_open) {
+        self->drv->on_open(self->drv, self, &self->identity);
+    }
     send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
     return true;
 }
 
-static bool on_pubsub_flush(struct dev_s * self, uint8_t event) {
+static bool on_pubsub_flush(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
+    if (self->drv && self->drv->on_close) {
+        self->drv->on_close(self->drv, self);
+    }
     // ok to use "." prefix since directly sending to first PubSub instance.
     publish_to_device(self, "././!ping", &jsdrv_union_str(PUBSUB_DISCONNECT_STR));
     return true;
 }
 
-static bool on_link_disconnect(struct dev_s * self, uint8_t event) {
+static bool on_link_disconnect(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     send_frame_ctrl_to_device(self, MB_FRAME_CTRL_DISCONNECT_REQ);
     return true;
 }
 
-static bool on_ll_close(struct dev_s * self, uint8_t event) {
+static bool on_ll_close(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(self->context, JSDRV_MSG_CLOSE, &jsdrv_union_i32(0));
     msg_queue_push(self->ll.cmd_q, m);
     return true;
 }
 
-static bool guard_open_success(struct dev_s * self, uint8_t event) {
-    (void) event;
-    send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
-    return true;
-}
-
-static bool guard_close_success(struct dev_s * self, uint8_t event) {
+static bool on_ll_close_exit(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     if (!self->finalize_pending) {
         send_to_frontend(self, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(0));
@@ -273,7 +276,7 @@ const struct state_machine_transition_s state_machine_link_request[] = {
 };
 
 const struct state_machine_transition_s state_machine_link_identity[] = {
-    {EV_LINK_IDENTITY_RECEIVED, ST_OPEN, guard_open_success},
+    {EV_LINK_IDENTITY_RECEIVED, ST_OPEN, NULL},
     {EV_TIMEOUT, ST_LINK_REQUEST, NULL},
     {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
     TRANSITION_END
@@ -304,7 +307,7 @@ const struct state_machine_transition_s state_machine_ll_close_pend[] = {
 };
 
 const struct state_machine_transition_s state_machine_ll_close[] = {
-    {EV_BACKEND_CLOSE_ACK, ST_CLOSED, guard_close_success},
+    {EV_BACKEND_CLOSE_ACK, ST_CLOSED, NULL},
     // todo timeout
     TRANSITION_END
 };
@@ -324,11 +327,11 @@ const struct state_machine_state_s state_machine_states[] = {
     {ST_PUBSUB_FLUSH, "pubsub_flush", on_pubsub_flush, NULL, state_machine_pubsub_flush},
     {ST_LINK_DISCONNECT, "link_disconnect", on_link_disconnect, NULL, state_machine_link_disconnect},
     {ST_LL_CLOSE_PEND, "ll_close_pend", NULL, NULL, state_machine_ll_close_pend},
-    {ST_LL_CLOSE, "ll_close", on_ll_close, NULL, state_machine_ll_close},
+    {ST_LL_CLOSE, "ll_close", on_ll_close, on_ll_close_exit, state_machine_ll_close},
     {0, NULL, NULL, NULL, NULL},
 };
 
-static inline void state_transition(struct dev_s * self, uint8_t next_state) {
+static inline void state_transition(struct jsdrvp_mb_dev_s * self, uint8_t next_state) {
     struct state_machine_state_s const * state;
 
     // exit
@@ -346,7 +349,7 @@ static inline void state_transition(struct dev_s * self, uint8_t next_state) {
     }
 }
 
-static bool transitions_evaluate(struct dev_s * self, uint8_t state, uint8_t event) {
+static bool transitions_evaluate(struct jsdrvp_mb_dev_s * self, uint8_t state, uint8_t event) {
     struct state_machine_transition_s const * t = state_machine_states[state].transitions;
     while (t->event) {
         if (t->event == event) {
@@ -360,7 +363,7 @@ static bool transitions_evaluate(struct dev_s * self, uint8_t state, uint8_t eve
     return false;
 }
 
-static void state_machine_process(struct dev_s * self, uint8_t event) {
+static void state_machine_process(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     if (!transitions_evaluate(self, 0, event)) {
         transitions_evaluate(self, self->state, event);
     }
@@ -387,7 +390,7 @@ static const char * prefix_match_and_strip(const char * prefix, const char * top
  * @param metadata The 12-bit metadata value.
  * @return The allocated message or NULL on failure.
  */
-static struct jsdrvp_msg_s * msg_alloc_send_to_device(struct dev_s * d, enum mb_frame_service_type_e service_type, uint8_t length_u32, uint16_t metadata) {
+static struct jsdrvp_msg_s * msg_alloc_send_to_device(struct jsdrvp_mb_dev_s * d, enum mb_frame_service_type_e service_type, uint8_t length_u32, uint16_t metadata) {
     if ((length_u32 == 0) || (length_u32 > PAYLOAD_SIZE_MAX_U32)) {
         JSDRV_LOGE("send_to_device: invalid length %ul", length_u32);
         return NULL;
@@ -413,7 +416,7 @@ static struct jsdrvp_msg_s * msg_alloc_send_to_device(struct dev_s * d, enum mb_
     return m;
 }
 
-static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e service_type, uint16_t metadata,
+static void send_to_device(struct jsdrvp_mb_dev_s * d, enum mb_frame_service_type_e service_type, uint16_t metadata,
                            const uint32_t * data, uint32_t length_u32) {
     JSDRV_DBC_NOT_NULL(data);
     struct jsdrvp_msg_s * m = msg_alloc_send_to_device(d, service_type, length_u32, metadata);
@@ -425,7 +428,7 @@ static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e servic
     msg_queue_push(d->ll.cmd_q, m);
 }
 
-static void publish_to_device(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
+static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
     uint32_t value_size = (value->size < 8) ? 8 : value->size;  // keep things simple
     uint32_t length_u8 = sizeof(struct mb_stdmsg_header_s) + MB_TOPIC_SIZE_MAX + value_size;  // topic and value
     uint32_t length_u32 = (length_u8 + 3) >> 2;  // round up
@@ -466,7 +469,7 @@ static void publish_to_device(struct dev_s * d, const char * topic, const struct
     msg_queue_push(d->ll.cmd_q, m);
 }
 
-static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
+static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
     bool rv = true;
     if (!msg) {
         return false;
@@ -497,6 +500,8 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         }
     //} else if (d->state != ST_OPEN) {
     //    // todo error code.
+    } else if (d->drv && d->drv->handle_cmd && d->drv->handle_cmd(d->drv, d, topic, &msg->value)) {
+        // upper driver handled it
     } else if (((topic[0] == 'h') || (topic[0] == '.')) && (topic[1] == '/')) {
         if (0 == strcmp("h/link/!ping", topic)) {
             send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING,
@@ -508,9 +513,8 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             if (msg->value.size) {
                 d->file_in = fopen(msg->value.value.str, "wb");
             }
-        } else {
-            JSDRV_LOGE("topic invalid: %s", msg->topic);
         }
+        // silently drop unrecognized h/ or ./ topics
     } else {
         publish_to_device(d, topic, &msg->value);
     }
@@ -518,7 +522,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
-static void send_to_frontend(struct dev_s * d, const char * subtopic, const struct jsdrv_union_s * value) {
+static void send_to_frontend(struct jsdrvp_mb_dev_s * d, const char * subtopic, const struct jsdrv_union_s * value) {
     struct jsdrv_topic_s topic;
     jsdrv_topic_set(&topic, d->ll.prefix);
     jsdrv_topic_append(&topic, subtopic);
@@ -527,7 +531,7 @@ static void send_to_frontend(struct dev_s * d, const char * subtopic, const stru
     jsdrvp_backend_send(d->context, m);
 }
 
-static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
+static void handle_in_link(struct jsdrvp_mb_dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
     JSDRV_LOGD3("handle link frame: length=%u", length);
     uint8_t msg_type = (uint8_t) (metadata & 0xff);
     switch (msg_type) {
@@ -541,7 +545,9 @@ static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data,
             send_to_frontend(d, "h/link/!pong", &jsdrv_union_bin((uint8_t *) data, length * 4));
             break;
         case MB_LINK_MSG_IDENTITY:
-            // todo store identity information?
+            if (length >= (sizeof(struct mb_link_identity_s) >> 2)) {
+                d->identity = *((const struct mb_link_identity_s *) data);
+            }
             state_machine_process(d, EV_LINK_IDENTITY_RECEIVED);
             break;
         default:
@@ -550,12 +556,12 @@ static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data,
     }
 }
 
-static void handle_in_trace(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
+static void handle_in_trace(struct jsdrvp_mb_dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
     (void) metadata;
     send_to_frontend(d, "h/!trace", &jsdrv_union_bin((uint8_t *) data, length * 4));
 }
 
-static void handle_in_publish(struct dev_s * d, uint32_t metadata, struct mb_stdmsg_publish_s * publish, uint8_t length) {
+static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, struct mb_stdmsg_publish_s * publish, uint8_t length) {
     uint8_t value_type = (uint8_t) (metadata & 0x0000000fU);
     uint8_t size_lsb = (uint8_t) ((metadata & 0x000000C0U) >> 6);
     uint32_t length_u32 = ((uint32_t) length) << 2;
@@ -598,7 +604,7 @@ static void handle_in_publish(struct dev_s * d, uint32_t metadata, struct mb_std
     }
 }
 
-static void handle_in_stdmsg(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
+static void handle_in_stdmsg(struct jsdrvp_mb_dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
     (void) metadata;  // do not use frame metadata
     struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) data;
     data += sizeof(struct mb_stdmsg_header_s) / sizeof(uint32_t);
@@ -627,160 +633,7 @@ static void handle_in_stdmsg(struct dev_s * d, uint16_t metadata, uint32_t * dat
     }
 }
 
-static void signal_adc(struct jsdrv_stream_signal_s * signal) {
-    signal->field_id = JSDRV_FIELD_RAW;
-    signal->index = 0;
-    signal->element_type = JSDRV_DATA_TYPE_INT;
-    signal->element_size_bits = 32;
-    signal->sample_rate = 16000000;  // 16 MHz
-    signal->decimate_factor = 16;    // to 1 MHz
-}
-
-static void signal_float(struct dev_s * d, struct jsdrv_stream_signal_s * signal, uint8_t field_id) {
-    (void) d;
-    signal->field_id = field_id;
-    signal->index = 0;
-    signal->element_type = JSDRV_DATA_TYPE_FLOAT;
-    signal->element_size_bits = 32;
-    signal->sample_rate = 16000000;  // 16 MHz
-    signal->decimate_factor = 16;    // to 1 MHz
-}
-
-static void signal_gpi(struct dev_s * d, struct jsdrv_stream_signal_s * signal, uint8_t channel) {
-    (void) d;
-    signal->field_id = JSDRV_FIELD_GPI;
-    signal->index = channel;
-    signal->element_type = JSDRV_DATA_TYPE_UINT;
-    signal->element_size_bits = 1;
-    signal->sample_rate = 16000000;  // 16 MHz
-    signal->decimate_factor = 16;    // to 1 MHz
-}
-
-static void handle_in_app(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
-    uint8_t channel = metadata & 0x000fU;
-    uint8_t source = (metadata >> 4) & 0x000fU;
-    //uint8_t data_type = (metadata >> 8) & 0x000fU;
-    //uint8_t compression_type = (metadata >> 12) & 0x000fU;
-
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
-    const char * subtopic = NULL;
-
-    if (channel == 14) {  // statistics are different
-        return;  // todo
-    }
-
-    // process value
-    m->value.type = JSDRV_UNION_BIN;
-    m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
-    m->value.value.bin = m->payload.bin;
-    struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) m->payload.bin;
-    signal->sample_id = *((uint64_t *) data);
-    data += 2;
-    uint32_t length_u32 = (length - 2);  // sample_id is 8 bytes
-    m->value.size = length_u32 << 2;
-    signal->element_count = length_u32;
-
-    switch (channel) {
-        case 0:
-            subtopic = "s/adc/0/!data";
-            signal_adc(signal);
-            signal->index = 0x00 | source;
-            signal->element_count = length_u32;
-            break;
-        case 1:
-            subtopic = "s/adc/1/!data";
-            signal_adc(signal);
-            signal->index = 0x10 | source;
-            signal->element_count = length_u32;
-            break;
-        case 2:
-            if (source > 1) {
-                JSDRV_LOGW("unsupported source for range channel: %d", source);
-            } else {
-                subtopic = source ? "s/v/range/!data" : "s/i/range/!data";
-                signal->field_id = JSDRV_FIELD_RANGE;
-                signal->index = source;
-                signal->element_type = JSDRV_DATA_TYPE_UINT;
-                signal->element_size_bits = 4;
-                signal->element_count *= 8;  // nibbles (32 / 4)
-                signal->sample_rate = 16000000;  // 16 MHz
-                signal->decimate_factor = 16;    // to 1 MHz
-            }
-            break;
-        case 4:
-            break; // reserved
-        case 5:
-            subtopic = "s/i/!data";
-            signal_float(d, signal, JSDRV_FIELD_CURRENT);
-            break;
-        case 6:
-            subtopic = "s/v/!data";
-            signal_float(d, signal, JSDRV_FIELD_VOLTAGE);
-            break;
-        case 7:
-            subtopic = "s/p/!data";
-            signal_float(d, signal, JSDRV_FIELD_POWER);
-            break;
-        case 8:
-            subtopic = "s/gpi/0/!data";
-            signal_gpi(d, signal, 0);
-            signal->element_count *= 32;
-            break;
-        case 9:
-            subtopic = "s/gpi/1/!data";
-            signal_gpi(d, signal, 1);
-            signal->element_count *= 32;
-            break;
-        case 10:
-            subtopic = "s/gpi/2/!data";
-            signal_gpi(d, signal, 2);
-            signal->element_count *= 32;
-            break;
-        case 11:
-            subtopic = "s/gpi/3/!data";
-            signal_gpi(d, signal, 3);
-            signal->element_count *= 32;
-            break;
-        case 12:
-            subtopic = "s/gpi/7/!data";
-            signal_gpi(d, signal, 7);
-            signal->element_count *= 32;
-            break;
-        case 13:
-            subtopic = "s/uart/!data";
-            signal->field_id = JSDRV_FIELD_UART;
-            signal->index = 0;
-            signal->element_type = JSDRV_DATA_TYPE_UINT;
-            signal->element_size_bits = 8;
-            signal->element_count *= 4;
-            signal->sample_rate = 0;
-            signal->decimate_factor = 1;
-            break;
-        case 14:
-            break;  // handled separately above
-        case 15:
-            break;  // reserved
-    }
-
-    if (NULL == subtopic) {
-        JSDRV_LOGW("unsupported app channel: %d", channel);
-        jsdrvp_msg_free(d->context, m);
-        return;
-    }
-
-    // todo signal->time_map
-
-    // process topic
-    struct jsdrv_topic_s topic;
-    jsdrv_topic_set(&topic, d->ll.prefix);
-    jsdrv_topic_append(&topic, subtopic);
-    jsdrv_cstr_copy(m->topic, topic.topic, sizeof(m->topic));
-
-    memcpy(signal->data, data, m->value.size);
-    jsdrvp_backend_send(d->context, m);
-}
-
-static void handle_stream_in_link_frame(struct dev_s * d, uint32_t * p_u32) {
+static void handle_stream_in_link_frame(struct jsdrvp_mb_dev_s * d, uint32_t * p_u32) {
     uint8_t * p_u8 = (uint8_t *) p_u32;
     uint16_t * p_u16 = (uint16_t *) p_u32;
     uint32_t link_check = mb_frame_link_check(p_u16[1]);
@@ -810,7 +663,7 @@ static void handle_stream_in_link_frame(struct dev_s * d, uint32_t * p_u32) {
     state_machine_process(d, event);
 }
 
-static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
+static void handle_stream_in_frame(struct jsdrvp_mb_dev_s * d, uint32_t * p_u32) {
     uint8_t * p_u8 = (uint8_t *) p_u32;
     uint16_t * p_u16 = (uint16_t *) p_u32;
     if (p_u8[0] != MB_FRAME_SOF1) {
@@ -868,7 +721,9 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
             handle_in_stdmsg(d, metadata, p_u32 + 2, length + 1);
             break;
         case MB_FRAME_ST_APP:
-            handle_in_app(d, metadata, p_u32 + 2, length + 1);
+            if (d->drv && d->drv->handle_app) {
+                d->drv->handle_app(d->drv, d, metadata, p_u32 + 2, length + 1);
+            }
             break;
         default:
             JSDRV_LOGW("unsupported service type %d", (int) service_type);
@@ -876,7 +731,7 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
     }
 }
 
-static void handle_stream_in(struct dev_s * d, struct jsdrvp_msg_s * msg) {
+static void handle_stream_in(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_BIN);
     uint32_t frame_count = (msg->value.size + FRAME_SIZE_U8 - 1) / FRAME_SIZE_U8;
     for (uint32_t i = 0; i < frame_count; ++i) {
@@ -888,7 +743,7 @@ static void handle_stream_in(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     }
 }
 
-static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
+static bool handle_rsp(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
     bool rv = true;
     uint8_t event = 0;
     if (!msg) {
@@ -927,7 +782,7 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
-static uint32_t thread_timeout_duration_ms(struct dev_s * d) {
+static uint32_t thread_timeout_duration_ms(struct jsdrvp_mb_dev_s * d) {
     int64_t timeout_duration_t64 = 0;
     if (d->timeout_utc > 0) {
         timeout_duration_t64 = d->timeout_utc - jsdrv_time_utc();
@@ -943,8 +798,8 @@ static uint32_t thread_timeout_duration_ms(struct dev_s * d) {
 
 
 static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
-    struct dev_s *d = (struct dev_s *) lpParam;
-    JSDRV_LOGI("JS220 USB upper-level thread started for %s", d->ll.prefix);
+    struct jsdrvp_mb_dev_s *d = (struct jsdrvp_mb_dev_s *) lpParam;
+    JSDRV_LOGI("MB USB upper-level thread started for %s", d->ll.prefix);
     state_machine_process(d, EV_RESET);
 
 #if _WIN32
@@ -989,19 +844,23 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         fclose(d->file_in);
     }
 
-    JSDRV_LOGI("JS220 USB upper-level thread done %s", d->ll.prefix);
+    JSDRV_LOGI("MB USB upper-level thread done %s", d->ll.prefix);
     THREAD_RETURN();
 }
 
 static void join(struct jsdrvp_ul_device_s * device) {
-    struct dev_s * d = (struct dev_s *) device;
+    struct jsdrvp_mb_dev_s * d = (struct jsdrvp_mb_dev_s *) device;
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, JSDRV_MSG_FINALIZE);
     // and wait for thread to exit.
     jsdrv_thread_join(&d->thread, 1000);
+    if (d->drv && d->drv->finalize) {
+        d->drv->finalize(d->drv);
+    }
     jsdrv_free(d);
 }
 
-int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll) {
+int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context,
+                                        struct jsdrvp_ll_device_s * ll, struct jsdrvp_mb_drv_s * drv) {
     JSDRV_DBC_NOT_NULL(device);
     JSDRV_DBC_NOT_NULL(context);
     JSDRV_DBC_NOT_NULL(ll);
@@ -1018,10 +877,11 @@ int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device, str
     }
 
     *device = NULL;
-    struct dev_s * d = jsdrv_alloc_clr(sizeof(struct dev_s));
+    struct jsdrvp_mb_dev_s * d = jsdrv_alloc_clr(sizeof(struct jsdrvp_mb_dev_s));
     JSDRV_LOGI("jsdrvp_ul_mb_device_factory %p", d);
     d->context = context;
     d->ll = *ll;
+    d->drv = drv;
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
     if (jsdrv_thread_create(&d->thread, driver_thread, d, 1)) {
@@ -1029,4 +889,36 @@ int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device, str
     }
     *device = &d->ul;
     return 0;
+}
+
+int32_t jsdrvp_mb_device_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context,
+                                 struct jsdrvp_ll_device_s * ll) {
+    return jsdrvp_ul_mb_device_usb_factory(device, context, ll, NULL);
+}
+
+// --- Service functions for upper drivers ---
+
+void jsdrvp_mb_dev_send_to_frontend(struct jsdrvp_mb_dev_s * dev, const char * subtopic, const struct jsdrv_union_s * value) {
+    send_to_frontend(dev, subtopic, value);
+}
+
+void jsdrvp_mb_dev_publish_to_device(struct jsdrvp_mb_dev_s * dev, const char * topic, const struct jsdrv_union_s * value) {
+    publish_to_device(dev, topic, value);
+}
+
+void jsdrvp_mb_dev_send_to_device(struct jsdrvp_mb_dev_s * dev, enum mb_frame_service_type_e service_type, uint16_t metadata,
+                                   const uint32_t * data, uint32_t length_u32) {
+    send_to_device(dev, service_type, metadata, data, length_u32);
+}
+
+struct jsdrv_context_s * jsdrvp_mb_dev_context(struct jsdrvp_mb_dev_s * dev) {
+    return dev->context;
+}
+
+const char * jsdrvp_mb_dev_prefix(struct jsdrvp_mb_dev_s * dev) {
+    return dev->ll.prefix;
+}
+
+void jsdrvp_mb_dev_backend_send(struct jsdrvp_mb_dev_s * dev, struct jsdrvp_msg_s * msg) {
+    jsdrvp_backend_send(dev->context, msg);
 }

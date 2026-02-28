@@ -47,7 +47,6 @@ set(SUPPORT_SOURCES
         error_code.c
         calibration_hash.c
         cstr.c
-        devices.c
         downsample.c
         js110_cal.c
         js220_i128.c
@@ -71,11 +70,13 @@ set(SUPPORT_SOURCES
 
 set(SOURCES
         buffer.c
+        devices.c
         #emu.c
         #emulated.c
         js110_usb.c
         js220_usb.c
         js220_params.c
+        js320_drv.c
         mb_device.c
         jsdrv.c
         ${PLATFORM_SRC}

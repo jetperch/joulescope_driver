@@ -29,6 +29,7 @@
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/buffer.h"
 #include "jsdrv_prv/cdef.h"
+#include "jsdrv_prv/devices.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/pubsub.h"
 #include "jsdrv_prv/thread.h"
@@ -506,20 +507,9 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
     jsdrv_list_add_tail(&c->devices, &d->item);
 
     int rv = 1;
-    if (0 == strcmp("js220", model)) {
-        rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
-    } else if (0 == strcmp("js110", model)) {
-        rv = jsdrvp_ul_js110_usb_factory(&d->device, c, &msg->payload.device);
-    } else if (0 == strcmp("&js220", model))  {
-        rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
-    } else if (0 == strcmp("mb", model)) {
-        rv = jsdrvp_ul_mb_device_usb_factory(&d->device, c, &msg->payload.device);
-    } else if (0 == strcmp("js320", model))  {
-        rv = jsdrvp_ul_mb_device_usb_factory(&d->device, c, &msg->payload.device);
-#if UNITTEST == 0
-    //} else if (0 == strcmp("emu", model)) {
-    //    rv = jsdrvp_ul_emu_factory(&d->device, c, &msg->payload.device);
-#endif
+    const struct device_type_s * dt = device_type_lookup(model);
+    if (dt && dt->device_factory) {
+        rv = dt->device_factory(&d->device, c, &msg->payload.device);
     }
     if (rv) {
         JSDRV_LOGE("device_add(%s) failed with %d", model, rv);
