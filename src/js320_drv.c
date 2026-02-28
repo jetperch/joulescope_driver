@@ -20,6 +20,7 @@
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/frontend.h"
+#include "jsdrv_prv/js320_jtag.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/mb_drv.h"
 #include "jsdrv_prv/platform.h"
@@ -30,7 +31,11 @@
 struct js320_drv_s {
     struct jsdrvp_mb_drv_s drv;  // MUST BE FIRST
     const struct mb_link_identity_s * identity;
+    struct jsdrvp_mb_dev_s * dev;
+    struct js320_jtag_s * jtag;
 };
+
+// --- Streaming signal helpers ---
 
 static void signal_adc(struct jsdrv_stream_signal_s * signal) {
     signal->field_id = JSDRV_FIELD_RAW;
@@ -59,18 +64,23 @@ static void signal_gpi(struct jsdrv_stream_signal_s * signal, uint8_t channel) {
     signal->decimate_factor = 16;    // to 1 MHz
 }
 
+// --- Driver callbacks ---
+
 static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
                            const struct mb_link_identity_s * identity) {
-    (void) dev;
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    self->dev = dev;
     self->identity = identity;
+    js320_jtag_on_open(self->jtag, dev);
     JSDRV_LOGI("JS320 driver opened: vendor=0x%04x product=0x%04x",
                identity->vendor_id, identity->product_id);
 }
 
 static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev) {
-    (void) drv;
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
     (void) dev;
+    js320_jtag_on_close(self->jtag);
+    self->dev = NULL;
     JSDRV_LOGI("JS320 driver closed");
 }
 
@@ -209,25 +219,45 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
 
 static bool js320_handle_cmd(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
                               const char * subtopic, const struct jsdrv_union_s * value) {
-    (void) drv;
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
     (void) dev;
-    (void) subtopic;
-    (void) value;
-    return false;  // no JS320-specific commands yet
+    return js320_jtag_handle_cmd(self->jtag, subtopic, value);
+}
+
+static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
+                                  struct jsdrvp_mb_dev_s * dev,
+                                  const char * subtopic,
+                                  const struct jsdrv_union_s * value) {
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    (void) dev;
+    return js320_jtag_handle_publish(self->jtag, subtopic, value);
+}
+
+static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
+                              struct jsdrvp_mb_dev_s * dev) {
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    (void) dev;
+    js320_jtag_on_timeout(self->jtag);
 }
 
 static void js320_finalize(struct jsdrvp_mb_drv_s * drv) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     JSDRV_LOGI("JS320 driver finalized");
+    js320_jtag_free(self->jtag);
     jsdrv_free(self);
 }
 
+// --- Factory ---
+
 static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     struct js320_drv_s * self = jsdrv_alloc_clr(sizeof(struct js320_drv_s));
+    self->jtag = js320_jtag_alloc();
     self->drv.on_open = js320_on_open;
     self->drv.on_close = js320_on_close;
     self->drv.handle_app = js320_handle_app;
     self->drv.handle_cmd = js320_handle_cmd;
+    self->drv.handle_publish = js320_handle_publish;
+    self->drv.on_timeout = js320_on_timeout;
     self->drv.finalize = js320_finalize;
     *drv = &self->drv;
     return 0;

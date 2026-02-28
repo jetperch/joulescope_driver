@@ -100,7 +100,8 @@ struct jsdrvp_mb_dev_s {
     uint16_t out_frame_id;
     uint16_t in_frame_id;
     uint64_t in_frame_count;
-    int64_t timeout_utc;  // <= 0 to disable timeout
+    int64_t timeout_utc;      // <= 0 to disable timeout
+    int64_t drv_timeout_utc;  // upper driver timeout, <= 0 to disable
 
     jsdrv_thread_t thread;
     volatile uint8_t state;  // state_e
@@ -599,6 +600,9 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
             && jsdrv_cstr_casecmp(PUBSUB_DISCONNECT_STR, m->payload.str)) {
         state_machine_process(d, EV_PUBSUB_FLUSH);
         jsdrvp_msg_free(d->context, m);
+    } else if (d->drv && d->drv->handle_publish
+               && d->drv->handle_publish(d->drv, d, publish->topic, &m->value)) {
+        jsdrvp_msg_free(d->context, m);
     } else {
         jsdrvp_backend_send(d->context, m);
     }
@@ -783,14 +787,21 @@ static bool handle_rsp(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
 }
 
 static uint32_t thread_timeout_duration_ms(struct jsdrvp_mb_dev_s * d) {
-    int64_t timeout_duration_t64 = 0;
+    int64_t now = jsdrv_time_utc();
+    int64_t earliest = 0;
     if (d->timeout_utc > 0) {
-        timeout_duration_t64 = d->timeout_utc - jsdrv_time_utc();
-        if (timeout_duration_t64 < 0) {
+        earliest = d->timeout_utc;
+    }
+    if ((d->drv_timeout_utc > 0) && ((earliest <= 0) || (d->drv_timeout_utc < earliest))) {
+        earliest = d->drv_timeout_utc;
+    }
+    if (earliest > 0) {
+        int64_t duration = earliest - now;
+        if (duration < 0) {
             return 0;
         }
-        if (timeout_duration_t64 < (5 * JSDRV_TIME_SECOND)) {
-            return (uint32_t) JSDRV_TIME_TO_MILLISECONDS(timeout_duration_t64);
+        if (duration < (5 * JSDRV_TIME_SECOND)) {
+            return (uint32_t) JSDRV_TIME_TO_MILLISECONDS(duration);
         }
     }
     return 5000;
@@ -833,6 +844,13 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         // note: ResetEvent handled automatically by msg_queue_pop_immediate
         while (handle_rsp(d, msg_queue_pop_immediate(d->ll.rsp_q))) {
             ;
+        }
+
+        if ((d->drv_timeout_utc > 0) && (jsdrv_time_utc() >= d->drv_timeout_utc)) {
+            d->drv_timeout_utc = 0;
+            if (d->drv && d->drv->on_timeout) {
+                d->drv->on_timeout(d->drv, d);
+            }
         }
 
         if (d->state == ST_LL_CLOSE_PEND) {
@@ -921,4 +939,8 @@ const char * jsdrvp_mb_dev_prefix(struct jsdrvp_mb_dev_s * dev) {
 
 void jsdrvp_mb_dev_backend_send(struct jsdrvp_mb_dev_s * dev, struct jsdrvp_msg_s * msg) {
     jsdrvp_backend_send(dev->context, msg);
+}
+
+void jsdrvp_mb_dev_set_timeout(struct jsdrvp_mb_dev_s * dev, int64_t timeout_utc) {
+    dev->drv_timeout_utc = timeout_utc;
 }

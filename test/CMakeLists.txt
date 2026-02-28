@@ -71,6 +71,7 @@ add_executable(frontend_test frontend_test.c
         ../src/js220_usb.c
         ../src/js220_params.c
         ../src/js320_drv.c
+        ../src/js320_jtag.c
         ../src/mb_device.c
         ../src/jsdrv.c)
 set_target_properties(frontend_test PROPERTIES COMPILE_DEFINITIONS "UNITTEST=1;")

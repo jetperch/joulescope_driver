@@ -140,6 +140,8 @@ extensions = [
                                      'src/js220_params.c',
                                      'src/js220_usb.c',
                                      'src/js220_stats.c',
+                                     'src/js320_drv.c',
+                                     'src/js320_jtag.c',
                                      'src/jsdrv.c',
                                      'src/json.c',
                                      'src/log.c',

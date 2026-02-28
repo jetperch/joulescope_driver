@@ -108,6 +108,32 @@ struct jsdrvp_mb_drv_s {
                        const struct jsdrv_union_s * value);
 
     /**
+     * @brief Called for incoming device publishes before forwarding to frontend.
+     *
+     * @param drv This driver instance.
+     * @param dev The mb_device handle for calling service functions.
+     * @param subtopic The device-relative topic (e.g., "c/jtag/!done").
+     * @param value The published value.
+     * @return true if consumed (will not be forwarded to frontend),
+     *         false to forward normally.
+     */
+    bool (*handle_publish)(struct jsdrvp_mb_drv_s * drv,
+                           struct jsdrvp_mb_dev_s * dev,
+                           const char * subtopic,
+                           const struct jsdrv_union_s * value);
+
+    /**
+     * @brief Called when the upper driver timer expires.
+     *
+     * Set the timer with jsdrvp_mb_dev_set_timeout().
+     *
+     * @param drv This driver instance.
+     * @param dev The mb_device handle for calling service functions.
+     */
+    void (*on_timeout)(struct jsdrvp_mb_drv_s * drv,
+                       struct jsdrvp_mb_dev_s * dev);
+
+    /**
      * @brief Called to destroy the upper driver instance.
      *
      * @param drv This driver instance.  Free all resources including drv itself.
@@ -179,6 +205,18 @@ const char * jsdrvp_mb_dev_prefix(struct jsdrvp_mb_dev_s * dev);
  */
 void jsdrvp_mb_dev_backend_send(struct jsdrvp_mb_dev_s * dev,
                                  struct jsdrvp_msg_s * msg);
+
+/**
+ * @brief Set the upper driver timeout.
+ *
+ * @param dev The mb_device handle.
+ * @param timeout_utc The absolute timeout time as jsdrv_time_utc(),
+ *        or 0 to cancel any pending timeout.
+ *
+ * When the timeout expires, drv->on_timeout is called from the driver thread.
+ * Only one timeout may be active at a time; calling again replaces the previous.
+ */
+void jsdrvp_mb_dev_set_timeout(struct jsdrvp_mb_dev_s * dev, int64_t timeout_utc);
 
 JSDRV_CPP_GUARD_END
 

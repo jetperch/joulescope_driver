@@ -77,6 +77,7 @@ set(SOURCES
         js220_usb.c
         js220_params.c
         js320_drv.c
+        js320_jtag.c
         mb_device.c
         jsdrv.c
         ${PLATFORM_SRC}

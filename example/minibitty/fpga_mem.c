@@ -583,10 +583,36 @@ static int parse_hex_key(const char * hex, uint8_t * key) {
     return 0;
 }
 
+// --- Host-side AES key programming (h/jtag/!aes_cmd) ---
+
+struct aes_cmd_s {
+    uint32_t transaction_id;
+    uint32_t flags;
+    uint8_t key[16];
+};
+
+struct aes_rsp_s {
+    uint32_t transaction_id;
+    int32_t status;
+};
+
+static volatile int32_t aes_rsp_status_;
+
+static void on_aes_rsp(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) user_data;
+    (void) topic;
+    if (value->type != JSDRV_UNION_BIN || value->size < sizeof(struct aes_rsp_s)) {
+        printf("AES RSP ERROR: invalid response (size=%u)\n", value->size);
+        aes_rsp_status_ = 1;
+    } else {
+        const struct aes_rsp_s * rsp = (const struct aes_rsp_s *) value->value.bin;
+        aes_rsp_status_ = rsp->status;
+    }
+    ReleaseSemaphore(fpga_mem_.semaphore, 1, NULL);
+}
+
 static int do_prog_aes_key(struct app_s * self, const uint8_t * key,
                            uint32_t flags) {
-    (void) self;
-
     printf("WARNING: This will permanently burn OTP fuses!\n");
     printf("  Key: ");
     for (int i = 0; i < 16; ++i) {
@@ -597,15 +623,47 @@ static int do_prog_aes_key(struct app_s * self, const uint8_t * key,
            (flags & 0x01) ? " KEY_LOCK" : "",
            (flags & 0x02) ? " ENCRYPT_ONLY" : "");
 
+    // Subscribe to AES response
+    struct jsdrv_topic_s rsp_topic;
+    jsdrv_topic_set(&rsp_topic, self->device.topic);
+    jsdrv_topic_append(&rsp_topic, "h/jtag/aes/!rsp");
+    jsdrv_subscribe(self->context, rsp_topic.topic, JSDRV_SFLAG_PUB, on_aes_rsp, NULL, 0);
+
+    // Send AES command
+    struct aes_cmd_s cmd;
+    cmd.transaction_id = ++fpga_mem_.transaction_id;
+    cmd.flags = flags;
+    memcpy(cmd.key, key, 16);
+
     printf("Programming AES key...\n");
-    int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_PROG_AES_KEY,
-                          flags, 16, key, 16, 15000);
-    if (rc) {
-        printf("ERROR: AES key programming failed\n");
-        return rc;
+    struct jsdrv_topic_s cmd_topic;
+    aes_rsp_status_ = 1;  // assume failure until response
+    jsdrv_topic_set(&cmd_topic, self->device.topic);
+    jsdrv_topic_append(&cmd_topic, "h/jtag/aes/!cmd");
+    int32_t pub_rc = jsdrv_publish(self->context, cmd_topic.topic,
+        &jsdrv_union_bin((uint8_t *) &cmd, sizeof(cmd)), 0);
+    int rc;
+    if (pub_rc) {
+        printf("ERROR: jsdrv_publish failed: %d\n", pub_rc);
+        rc = pub_rc;
+    } else {
+        // Wait for response (up to 15s for burn delays)
+        DWORD result = WaitForSingleObject(fpga_mem_.semaphore, 15000);
+        if (result != WAIT_OBJECT_0) {
+            printf("ERROR: timeout waiting for AES response\n");
+            rc = 1;
+        } else if (aes_rsp_status_ != 0) {
+            printf("ERROR: AES key programming failed (status=%d)\n", aes_rsp_status_);
+            rc = 1;
+        } else {
+            printf("AES key programmed successfully\n");
+            rc = 0;
+        }
     }
-    printf("AES key programmed successfully\n");
-    return 0;
+
+    // Unsubscribe
+    jsdrv_unsubscribe(self->context, rsp_topic.topic, on_aes_rsp, NULL, 0);
+    return rc;
 }
 
 static int do_read_uid(struct app_s * self) {
