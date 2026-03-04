@@ -32,6 +32,7 @@ import json
 import logging
 import numpy as np
 include "module.pxi"
+import threading
 import time
 cimport numpy as np
 from . cimport c_jsdrv
@@ -893,6 +894,41 @@ cdef class Driver:
             rc = c_jsdrv.jsdrv_query(self._context, <char *> &topic_str[0], &v, timeout_ms)
         _handle_rc(rc, 'jsdrv_query', topic)
         return _jsdrv_union_to_py(&v)
+
+    def publish_and_wait(self, publish_topic, publish_value,
+                         response_topic, timeout=None):
+        """Publish a value and wait for a response on another topic.
+
+        :param publish_topic: The topic to publish to.
+        :param publish_value: The value to publish.
+        :param response_topic: The topic to subscribe to for
+            the response.
+        :param timeout: The timeout in float seconds.
+            None (default) uses the default timeout.
+        :return: The value received on response_topic.
+        :raises TimeoutError: If no response arrives in time.
+        """
+        if timeout is None:
+            timeout = _TIMEOUT_MS_DEFAULT / 1000.0
+        event = threading.Event()
+        result = [None]
+
+        def on_response(topic, value):
+            result[0] = value
+            event.set()
+
+        self.subscribe(response_topic, 'pub', on_response)
+        try:
+            self.publish(publish_topic, publish_value)
+            if not event.wait(timeout):
+                raise TimeoutError(
+                    f'publish_and_wait timed out: '
+                    f'publish={publish_topic}, '
+                    f'response={response_topic}'
+                )
+            return result[0]
+        finally:
+            self.unsubscribe(response_topic, on_response)
 
     def device_paths(self, timeout=None):
         """List the currently connected devices.
