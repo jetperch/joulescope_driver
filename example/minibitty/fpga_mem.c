@@ -28,24 +28,25 @@
 #define PIPELINE_MAX        16U
 
 
-enum jtag_mem_op_e {
-    JTAG_MEM_OP_OPEN       = 1,
-    JTAG_MEM_OP_CLOSE      = 2,
-    JTAG_MEM_OP_ERASE_64K  = 3,
-    JTAG_MEM_OP_ERASE_4K   = 4,
-    JTAG_MEM_OP_WRITE      = 5,
-    JTAG_MEM_OP_READ       = 6,
-    JTAG_MEM_OP_PROG_AES_KEY = 7,
-    JTAG_MEM_OP_READ_UID   = 8,
+enum js320_jtag_op_e {
+    JS320_JTAG_OP_MEM_OPEN      = 0x10,
+    JS320_JTAG_OP_MEM_CLOSE     = 0x11,
+    JS320_JTAG_OP_MEM_ERASE_64K = 0x12,
+    JS320_JTAG_OP_MEM_ERASE_4K  = 0x13,
+    JS320_JTAG_OP_MEM_WRITE     = 0x14,
+    JS320_JTAG_OP_MEM_READ      = 0x15,
+    JS320_JTAG_OP_MEM_READ_UID  = 0x16,
 };
 
-struct jtag_mem_s {
+struct js320_jtag_cmd_s {
     uint32_t transaction_id;
     uint8_t operation;
-    uint8_t status;
+    uint8_t flags;
     uint16_t timeout_ms;
     uint32_t offset;
     uint32_t length;
+    uint32_t delay_us;
+    uint32_t rsv1_u32;
     uint8_t data[];
 };
 
@@ -66,16 +67,64 @@ static struct fpga_mem_s fpga_mem_;
 static int verbose_;
 
 
+// --- Host-side fwup for 'program' subcommand (matches jsdrv_prv/js320_fwup.h) ---
+
+enum fwup_fpga_op_e {
+    FWUP_FPGA_OP_PROGRAM = 1,
+};
+
+struct fwup_fpga_cmd_s {
+    uint32_t transaction_id;
+    uint8_t op;
+    uint8_t pipeline_depth;
+    uint16_t rsv;
+    uint8_t data[];
+};
+
+struct fwup_rsp_s {
+    uint32_t transaction_id;
+    int32_t status;
+};
+
+struct fwup_state_s {
+    struct app_s * app;
+    uint32_t transaction_id;
+    int32_t rsp_status;
+    HANDLE event;
+};
+
+static struct fwup_state_s fwup_;
+
+static void on_fwup_fpga_rsp(void * user_data, const char * topic,
+                               const struct jsdrv_union_s * value) {
+    (void) user_data;
+    (void) topic;
+    if (value->type != JSDRV_UNION_BIN || value->size < sizeof(struct fwup_rsp_s)) {
+        printf("RSP ERROR: invalid response (type=%d, size=%u)\n",
+               value->type, value->size);
+        fwup_.rsp_status = 1;
+    } else {
+        const struct fwup_rsp_s * rsp = (const struct fwup_rsp_s *) value->value.bin;
+        fwup_.rsp_status = rsp->status;
+        if (verbose_) {
+            printf("RSP: transaction_id=%u status=%d\n",
+                   rsp->transaction_id, rsp->status);
+        }
+    }
+    SetEvent(fwup_.event);
+}
+
+
 static const char * op_name(uint8_t op) {
     switch (op) {
-        case JTAG_MEM_OP_OPEN:      return "OPEN";
-        case JTAG_MEM_OP_CLOSE:     return "CLOSE";
-        case JTAG_MEM_OP_ERASE_64K: return "ERASE_64K";
-        case JTAG_MEM_OP_ERASE_4K:  return "ERASE_4K";
-        case JTAG_MEM_OP_WRITE:     return "WRITE";
-        case JTAG_MEM_OP_READ:      return "READ";
-        case JTAG_MEM_OP_PROG_AES_KEY: return "PROG_AES_KEY";
-        case JTAG_MEM_OP_READ_UID:  return "READ_UID";
+        case JS320_JTAG_OP_MEM_OPEN:      return "OPEN";
+        case JS320_JTAG_OP_MEM_CLOSE:     return "CLOSE";
+        case JS320_JTAG_OP_MEM_ERASE_64K: return "ERASE_64K";
+        case JS320_JTAG_OP_MEM_ERASE_4K:  return "ERASE_4K";
+        case JS320_JTAG_OP_MEM_WRITE:     return "WRITE";
+        case JS320_JTAG_OP_MEM_READ:      return "READ";
+        case 0x07: return "PROG_AES_KEY";  // legacy
+        case JS320_JTAG_OP_MEM_READ_UID:  return "READ_UID";
         default:                    return "UNKNOWN";
     }
 }
@@ -83,16 +132,16 @@ static const char * op_name(uint8_t op) {
 static void on_rsp(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
     (void) topic;
-    const struct jtag_mem_s * rsp = (const struct jtag_mem_s *) value->value.bin;
-    if (value->size < sizeof(struct jtag_mem_s)) {
-        printf("RSP ERROR: too short: %u bytes (need %u)\n", value->size, (uint32_t) sizeof(struct jtag_mem_s));
+    const struct js320_jtag_cmd_s * rsp = (const struct js320_jtag_cmd_s *) value->value.bin;
+    if (value->size < sizeof(struct js320_jtag_cmd_s)) {
+        printf("RSP ERROR: too short: %u bytes (need %u)\n", value->size, (uint32_t) sizeof(struct js320_jtag_cmd_s));
         return;
     }
 
-    uint32_t data_size = value->size - (uint32_t) sizeof(struct jtag_mem_s);
+    uint32_t data_size = value->size - (uint32_t) sizeof(struct js320_jtag_cmd_s);
     if (verbose_) {
-        printf("RSP: op=%s status=%d offset=0x%06X length=%u value_size=%u data_size=%u\n",
-               op_name(rsp->operation), rsp->status, rsp->offset, rsp->length, value->size, data_size);
+        printf("RSP: op=%s flags=%d offset=0x%06X length=%u value_size=%u data_size=%u\n",
+               op_name(rsp->operation), rsp->flags, rsp->offset, rsp->length, value->size, data_size);
         uint32_t raw_dump = (value->size > 32) ? 32 : value->size;
         printf("  RAW[%u]:", value->size);
         for (uint32_t i = 0; i < raw_dump; ++i) {
@@ -100,7 +149,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
         }
         printf("\n");
 
-        if ((rsp->operation == JTAG_MEM_OP_READ || rsp->operation == JTAG_MEM_OP_READ_UID) && data_size > 0) {
+        if ((rsp->operation == JS320_JTAG_OP_MEM_READ || rsp->operation == JS320_JTAG_OP_MEM_READ_UID) && data_size > 0) {
             uint32_t dump = (data_size > 16) ? 16 : data_size;
             printf("  READ data[0:%u]:", dump);
             for (uint32_t i = 0; i < dump; ++i) {
@@ -110,7 +159,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
         }
     }
 
-    if (rsp->operation == JTAG_MEM_OP_READ || rsp->operation == JTAG_MEM_OP_READ_UID) {
+    if (rsp->operation == JS320_JTAG_OP_MEM_READ || rsp->operation == JS320_JTAG_OP_MEM_READ_UID) {
         if (fpga_mem_.read_buf && data_size > 0) {
             uint32_t buf_offset = rsp->offset - fpga_mem_.read_buf_offset;
             if (buf_offset + data_size <= fpga_mem_.read_buf_length) {
@@ -125,7 +174,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
         }
     }
 
-    if (rsp->status != 0) {
+    if (rsp->flags != 0) {
         InterlockedIncrement(&fpga_mem_.error_count);
     }
     InterlockedDecrement(&fpga_mem_.outstanding);
@@ -147,23 +196,25 @@ static int pipeline_send(struct fpga_mem_s * fm, uint8_t op, uint32_t offset, ui
     }
 
     struct jsdrv_topic_s topic;
-    uint8_t buf[sizeof(struct jtag_mem_s) + FLASH_PAGE_SIZE];
-    struct jtag_mem_s * cmd = (struct jtag_mem_s *) buf;
-    uint32_t msg_size = sizeof(struct jtag_mem_s) + data_size;
+    uint8_t buf[sizeof(struct js320_jtag_cmd_s) + FLASH_PAGE_SIZE];
+    struct js320_jtag_cmd_s * cmd = (struct js320_jtag_cmd_s *) buf;
+    uint32_t msg_size = sizeof(struct js320_jtag_cmd_s) + data_size;
 
     cmd->transaction_id = ++fm->transaction_id;
     cmd->operation = op;
-    cmd->status = 0;
+    cmd->flags = 0;
     cmd->timeout_ms = (uint16_t) timeout_ms;
     cmd->offset = offset;
     cmd->length = length;
+    cmd->delay_us = 0;
+    cmd->rsv1_u32 = 0;
     if (data && data_size > 0) {
         memcpy(cmd->data, data, data_size);
     }
 
     InterlockedIncrement(&fm->outstanding);
     jsdrv_topic_set(&topic, fm->app->device.topic);
-    jsdrv_topic_append(&topic, "c/jtag/mem/!cmd");
+    jsdrv_topic_append(&topic, "c/jtag/!cmd");
     int32_t pub_rc = jsdrv_publish(fm->app->context, topic.topic, &jsdrv_union_bin(buf, msg_size), 0);
     if (pub_rc) {
         InterlockedDecrement(&fm->outstanding);
@@ -205,7 +256,7 @@ static int jtag_mem_read(struct fpga_mem_s * fm, uint32_t offset, uint8_t * buf,
     uint32_t addr = offset;
     while (remaining > 0) {
         uint32_t chunk = (remaining > FLASH_PAGE_SIZE) ? FLASH_PAGE_SIZE : remaining;
-        int rc = jtag_mem_cmd(fm, JTAG_MEM_OP_READ, addr, chunk, NULL, 0, 1000);
+        int rc = jtag_mem_cmd(fm, JS320_JTAG_OP_MEM_READ, addr, chunk, NULL, 0, 1000);
         if (rc) {
             fm->read_buf = NULL;
             return rc;
@@ -254,7 +305,7 @@ static int setup_common(struct app_s * self) {
     struct jsdrv_topic_s topic;
 
     if (verbose_) {
-        printf("sizeof(jtag_mem_s) = %u\n", (uint32_t) sizeof(struct jtag_mem_s));
+        printf("sizeof(js320_jtag_cmd_s) = %u\n", (uint32_t) sizeof(struct js320_jtag_cmd_s));
     }
 
     memset(&fpga_mem_, 0, sizeof(fpga_mem_));
@@ -272,7 +323,7 @@ static int setup_common(struct app_s * self) {
     Sleep(100);  // allow mode switch to take effect
 
     jsdrv_topic_set(&topic, self->device.topic);
-    jsdrv_topic_append(&topic, "c/jtag/mem/!rsp");
+    jsdrv_topic_append(&topic, "c/jtag/!rsp");
     jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_rsp, NULL, 0);
     return 0;
 }
@@ -296,7 +347,7 @@ static int setup(struct app_s * self) {
 
     // OPEN (enters SPI background mode)
     printf("Opening JTAG...\n");
-    rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_OPEN, 0, 0, NULL, 0, 5000);
+    rc = jtag_mem_cmd(&fpga_mem_, JS320_JTAG_OP_MEM_OPEN, 0, 0, NULL, 0, 5000);
     if (rc) {
         printf("ERROR: JTAG open failed\n");
     } else {
@@ -308,7 +359,7 @@ static int setup(struct app_s * self) {
 static int teardown(struct app_s * self, int rc) {
     printf("Closing JTAG...\n");
     fpga_mem_.pipeline_depth = 1;
-    jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_CLOSE, 0, 0, NULL, 0, 5000);
+    jtag_mem_cmd(&fpga_mem_, JS320_JTAG_OP_MEM_CLOSE, 0, 0, NULL, 0, 5000);
     return teardown_common(self, rc);
 }
 
@@ -322,6 +373,7 @@ static int do_erase(struct app_s * self, uint32_t offset, uint32_t size) {
     end = (end + FLASH_BLOCK_64K - 1) & ~(FLASH_BLOCK_64K - 1);
     uint32_t num_blocks = (end - offset) / FLASH_BLOCK_64K;
 
+    fpga_mem_.pipeline_depth = 1;
     printf("Erasing %u blocks from 0x%06X (%u bytes)...\n", num_blocks, offset, num_blocks * FLASH_BLOCK_64K);
     for (uint32_t block = 0; block < num_blocks; ++block) {
         if (quit_) { return 1; }
@@ -329,7 +381,7 @@ static int do_erase(struct app_s * self, uint32_t offset, uint32_t size) {
         if (verbose_) {
             printf("  Erase block %u/%u (offset 0x%06X)\n", block + 1, num_blocks, addr);
         }
-        int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_ERASE_64K, addr, 0, NULL, 0, 5000);
+        int rc = jtag_mem_cmd(&fpga_mem_, JS320_JTAG_OP_MEM_ERASE_64K, addr, 0, NULL, 0, 5000);
         if (rc) {
             printf("ERROR: erase failed at offset 0x%06X\n", addr);
             return rc;
@@ -357,7 +409,7 @@ static int do_write(struct app_s * self, uint32_t offset, uint32_t size) {
         if (verbose_) {
             printf("  Write page %u/%u (offset 0x%06X)\n", page + 1, num_pages, addr);
         }
-        int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_WRITE, addr, FLASH_PAGE_SIZE, page_buf, FLASH_PAGE_SIZE, 1000);
+        int rc = jtag_mem_cmd(&fpga_mem_, JS320_JTAG_OP_MEM_WRITE, addr, FLASH_PAGE_SIZE, page_buf, FLASH_PAGE_SIZE, 1000);
         if (rc) {
             printf("ERROR: write failed at offset 0x%06X\n", addr);
             return rc;
@@ -399,170 +451,93 @@ static int do_read(struct app_s * self, uint32_t offset, uint32_t size) {
     return 0;
 }
 
+// --- Driver-based 'program' setup/teardown ---
+
+static int setup_fwup(struct app_s * self) {
+    struct jsdrv_topic_s topic;
+
+    memset(&fwup_, 0, sizeof(fwup_));
+    fwup_.app = self;
+    fwup_.event = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    ROE(jsdrv_open(self->context, self->device.topic,
+                   JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
+    Sleep(500);
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/fwup/fpga/!rsp");
+    jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB,
+                    on_fwup_fpga_rsp, NULL, 0);
+    return 0;
+}
+
+static int teardown_fwup(struct app_s * self, int rc) {
+    struct jsdrv_topic_s topic;
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/fwup/fpga/!rsp");
+    jsdrv_unsubscribe(self->context, topic.topic, on_fwup_fpga_rsp, NULL, 0);
+
+    jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
+    CloseHandle(fwup_.event);
+    return rc;
+}
+
 static int do_program(struct app_s * self, const char * image_path, uint32_t pipeline_depth) {
     (void) self;
     uint8_t * image = NULL;
     uint32_t image_size = 0;
-    int rc = 0;
 
     image = file_read(image_path, &image_size);
     if (!image) {
         return 1;
     }
     printf("Image: %s, %u bytes (pipeline=%u)\n", image_path, image_size, pipeline_depth);
-    if (verbose_) {
-        printf("Image first 16 bytes:");
-        for (uint32_t i = 0; i < 16 && i < image_size; ++i) {
-            printf(" %02X", image[i]);
-        }
-        printf("\n");
+
+    uint32_t cmd_size = (uint32_t) sizeof(struct fwup_fpga_cmd_s) + image_size;
+    uint8_t * buf = (uint8_t *) malloc(cmd_size);
+    if (!buf) {
+        printf("ERROR: could not allocate %u bytes\n", cmd_size);
+        free(image);
+        return 1;
     }
 
-    // ERASE (synchronous — flash serializes internally)
-    uint32_t num_blocks = (image_size + FLASH_BLOCK_64K - 1) / FLASH_BLOCK_64K;
-    printf("Erasing %u blocks (%u bytes)...\n", num_blocks, num_blocks * FLASH_BLOCK_64K);
-    for (uint32_t block = 0; block < num_blocks; ++block) {
-        if (quit_) { rc = 1; goto done; }
-        uint32_t offset = block * FLASH_BLOCK_64K;
-        if (verbose_) {
-            printf("  Erase block %u/%u (offset 0x%06X)\n", block + 1, num_blocks, offset);
-        }
-        rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_ERASE_64K, offset, 0, NULL, 0, 5000);
-        if (rc) {
-            printf("ERROR: erase failed at offset 0x%06X\n", offset);
-            goto done;
-        }
-    }
-    printf("Erase complete\n");
-
-    // WRITE (pipelined)
-    uint32_t num_pages = (image_size + FLASH_PAGE_SIZE - 1) / FLASH_PAGE_SIZE;
-    printf("Writing %u pages (%u bytes)...\n", num_pages, image_size);
-    fpga_mem_.pipeline_depth = pipeline_depth;
-    fpga_mem_.error_count = 0;
-    uint8_t page_buf[FLASH_PAGE_SIZE];
-    for (uint32_t page = 0; page < num_pages; ++page) {
-        if (quit_) { rc = 1; goto write_drain; }
-        uint32_t offset = page * FLASH_PAGE_SIZE;
-        uint32_t remaining = image_size - offset;
-        uint32_t chunk = (remaining > FLASH_PAGE_SIZE) ? FLASH_PAGE_SIZE : remaining;
-        const uint8_t * src;
-        if (chunk < FLASH_PAGE_SIZE) {
-            memcpy(page_buf, image + offset, chunk);
-            memset(page_buf + chunk, 0xFF, FLASH_PAGE_SIZE - chunk);
-            src = page_buf;
-        } else {
-            src = image + offset;
-        }
-        if (verbose_ && ((page % 64) == 0)) {
-            printf("  Write page %u/%u (offset 0x%06X)\n", page + 1, num_pages, offset);
-        }
-        rc = pipeline_send(&fpga_mem_, JTAG_MEM_OP_WRITE, offset, FLASH_PAGE_SIZE, src, FLASH_PAGE_SIZE, 1000);
-        if (rc) {
-            printf("ERROR: write failed at offset 0x%06X\n", offset);
-            goto write_drain;
-        }
-    }
-write_drain:
-    if (!rc) {
-        rc = pipeline_drain(&fpga_mem_, 1000);
-    } else {
-        pipeline_drain(&fpga_mem_, 1000);
-    }
-    fpga_mem_.pipeline_depth = 1;
-    if (rc) { goto done; }
-    printf("Write complete\n");
-
-    // READ + VERIFY (pipelined in batches)
-    printf("Verifying %u bytes...\n", image_size);
-    uint32_t batch = pipeline_depth;
-    uint32_t batch_bytes = batch * FLASH_PAGE_SIZE;
-    uint8_t * verify_buf = (uint8_t *) malloc(batch_bytes);
-    uint8_t * expect_buf = (uint8_t *) malloc(batch_bytes);
-    if (!verify_buf || !expect_buf) {
-        printf("ERROR: could not allocate verify buffers\n");
-        free(verify_buf);
-        free(expect_buf);
-        rc = 1;
-        goto done;
-    }
-    for (uint32_t base = 0; base < num_pages; base += batch) {
-        if (quit_) { rc = 1; break; }
-        uint32_t count = num_pages - base;
-        if (count > batch) { count = batch; }
-        uint32_t base_offset = base * FLASH_PAGE_SIZE;
-
-        // Build expected data for this batch
-        for (uint32_t i = 0; i < count; ++i) {
-            uint32_t page = base + i;
-            uint32_t offset = page * FLASH_PAGE_SIZE;
-            uint32_t remaining = image_size - offset;
-            uint32_t chunk = (remaining > FLASH_PAGE_SIZE) ? FLASH_PAGE_SIZE : remaining;
-            memcpy(expect_buf + i * FLASH_PAGE_SIZE, image + offset, chunk);
-            if (chunk < FLASH_PAGE_SIZE) {
-                memset(expect_buf + i * FLASH_PAGE_SIZE + chunk, 0xFF, FLASH_PAGE_SIZE - chunk);
-            }
-        }
-
-        // Set up read buffer and send pipelined reads
-        fpga_mem_.read_buf = verify_buf;
-        fpga_mem_.read_buf_offset = base_offset;
-        fpga_mem_.read_buf_length = count * FLASH_PAGE_SIZE;
-        fpga_mem_.pipeline_depth = pipeline_depth;
-        fpga_mem_.error_count = 0;
-        memset(verify_buf, 0, count * FLASH_PAGE_SIZE);
-
-        if (verbose_ && ((base % 64) == 0)) {
-            printf("  Verify page %u/%u (offset 0x%06X)\n", base + 1, num_pages, base_offset);
-        }
-        for (uint32_t i = 0; i < count; ++i) {
-            uint32_t offset = (base + i) * FLASH_PAGE_SIZE;
-            rc = pipeline_send(&fpga_mem_, JTAG_MEM_OP_READ, offset, FLASH_PAGE_SIZE, NULL, 0, 1000);
-            if (rc) {
-                printf("ERROR: read send failed at offset 0x%06X\n", offset);
-                break;
-            }
-        }
-        if (!rc) {
-            rc = pipeline_drain(&fpga_mem_, 1000);
-        } else {
-            pipeline_drain(&fpga_mem_, 1000);
-        }
-        fpga_mem_.read_buf = NULL;
-        fpga_mem_.pipeline_depth = 1;
-        if (rc) { break; }
-
-        // Compare this batch
-        for (uint32_t i = 0; i < count; ++i) {
-            uint32_t buf_off = i * FLASH_PAGE_SIZE;
-            if (memcmp(verify_buf + buf_off, expect_buf + buf_off, FLASH_PAGE_SIZE) != 0) {
-                uint32_t offset = (base + i) * FLASH_PAGE_SIZE;
-                printf("ERROR: verify mismatch at offset 0x%06X\n", offset);
-                printf("  Expected:");
-                for (uint32_t j = 0; j < 32; ++j) {
-                    printf(" %02X", expect_buf[buf_off + j]);
-                }
-                printf("\n  Got:     ");
-                for (uint32_t j = 0; j < 32; ++j) {
-                    printf(" %02X", verify_buf[buf_off + j]);
-                }
-                printf("\n");
-                rc = 1;
-                break;
-            }
-        }
-        if (rc) { break; }
-    }
-    free(verify_buf);
-    free(expect_buf);
-    if (!rc) {
-        printf("Verify complete\n");
-    }
-
-done:
+    struct fwup_fpga_cmd_s * cmd = (struct fwup_fpga_cmd_s *) buf;
+    cmd->transaction_id = ++fwup_.transaction_id;
+    cmd->op = FWUP_FPGA_OP_PROGRAM;
+    cmd->pipeline_depth = (uint8_t) ((pipeline_depth > 255) ? 255 : pipeline_depth);
+    cmd->rsv = 0;
+    memcpy(cmd->data, image, image_size);
     free(image);
+
+    fwup_.rsp_status = 1;
+    ResetEvent(fwup_.event);
+
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, fwup_.app->device.topic);
+    jsdrv_topic_append(&topic, "h/fwup/fpga/!cmd");
+    printf("Programming FPGA (erase, write, verify)...\n");
+    int32_t pub_rc = jsdrv_publish(fwup_.app->context, topic.topic,
+                                    &jsdrv_union_bin(buf, cmd_size), 0);
+    free(buf);
+    if (pub_rc) {
+        printf("ERROR: jsdrv_publish failed: %d\n", pub_rc);
+        return pub_rc;
+    }
+
+    DWORD result = WaitForSingleObject(fwup_.event, 120000);
+    int rc;
+    if (result != WAIT_OBJECT_0) {
+        printf("ERROR: timeout waiting for FPGA programming response\n");
+        rc = 1;
+    } else {
+        rc = fwup_.rsp_status;
+    }
+
     if (rc == 0) {
         printf("FPGA flash programmed successfully\n");
+    } else {
+        printf("ERROR: FPGA programming failed (status=%d)\n", rc);
     }
     return rc;
 }
@@ -675,7 +650,7 @@ static int do_read_uid(struct app_s * self) {
     fpga_mem_.read_buf_offset = 0;
     fpga_mem_.read_buf_length = 8;
 
-    int rc = jtag_mem_cmd(&fpga_mem_, JTAG_MEM_OP_READ_UID, 0, 0, NULL, 0, 1000);
+    int rc = jtag_mem_cmd(&fpga_mem_, JS320_JTAG_OP_MEM_READ_UID, 0, 0, NULL, 0, 1000);
     fpga_mem_.read_buf = NULL;
 
     if (rc) {
@@ -801,9 +776,9 @@ int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
         ARG_CONSUME();
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
         ROE(app_match(self, device_filter));
-        rc = setup(self);
+        rc = setup_fwup(self);
         if (!rc) { rc = do_program(self, path, pipeline_depth); }
-        return teardown(self, rc);
+        return teardown_fwup(self, rc);
     } else if (0 == strcmp(subcmd, "uid")) {
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
         ROE(app_match(self, device_filter));

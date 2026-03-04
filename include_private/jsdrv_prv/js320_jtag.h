@@ -40,6 +40,30 @@ struct js320_jtag_s;
 #define ECP5_AES_FLAG_KEY_LOCK          0x01
 #define ECP5_AES_FLAG_ENCRYPT_ONLY      0x02
 
+
+enum js320_jtag_op_e {
+    JS320_JTAG_OP_GOTO_STATE    = 1,
+    JS320_JTAG_OP_SHIFT         = 2,
+    JS320_JTAG_OP_MEM_OPEN      = 0x10,
+    JS320_JTAG_OP_MEM_CLOSE     = 0x11,
+    JS320_JTAG_OP_MEM_ERASE_64K = 0x12,
+    JS320_JTAG_OP_MEM_ERASE_4K  = 0x13,
+    JS320_JTAG_OP_MEM_WRITE     = 0x14,
+    JS320_JTAG_OP_MEM_READ      = 0x15,
+    JS320_JTAG_OP_MEM_READ_UID  = 0x16,
+};
+
+struct js320_jtag_cmd_s {
+    uint32_t transaction_id;
+    uint8_t operation;
+    uint8_t flags;
+    uint16_t timeout_ms;
+    uint32_t offset;
+    uint32_t length;
+    uint32_t delay_us;
+    uint32_t rsv1_u32;
+};
+
 struct jtag_aes_cmd_s {
     uint32_t transaction_id;
     uint32_t flags;             ///< ECP5_AES_FLAG_*

@@ -14,23 +14,24 @@
 #define BITS_SHIFT_MAX (256U * 8)
 
 
-enum js320_jtag_events_e {
-    JS320_JTAG_EVENT_NONE = 0,
-    JS320_JTAG_EVENT_ERROR = 1,         // error indication
-    JS320_JTAG_EVENT_GOTO_STATE = 2,    // use STATE_TEST_LOGIC_RESET to reset TAP (but not device)
-    JS320_JTAG_EVENT_WAIT = 3,
-    JS320_JTAG_EVENT_SHIFT = 4,
+enum js320_jtag_op_e {
+    JS320_JTAG_OP_GOTO_STATE    = 1,
+    JS320_JTAG_OP_SHIFT         = 2,
 };
 
-struct jtag_hdr_s {
-    uint32_t id;
-    uint8_t cmd;
-    uint8_t arg1;
-    uint16_t arg0;
+struct js320_jtag_cmd_s {
+    uint32_t transaction_id;
+    uint8_t operation;
+    uint8_t flags;
+    uint16_t timeout_ms;
+    uint32_t offset;
+    uint32_t length;
+    uint32_t delay_us;
+    uint32_t rsv1_u32;
 };
 
 struct op_s {
-    struct jtag_hdr_s hdr;
+    struct js320_jtag_cmd_s cmd;
     uint8_t * data;
     uint32_t size;
     volatile bool done;
@@ -46,25 +47,24 @@ static struct jsdrv_topic_s topic_done_;
 static void on_done(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
     (void) topic;
-    const struct jtag_hdr_s * hdr = (struct jtag_hdr_s *) value->value.bin;
-    if (value->type != JSDRV_UNION_BIN) {
-        fprintf(stderr, "type mismatch\n");
+    if (value->type != JSDRV_UNION_BIN || value->size < sizeof(struct js320_jtag_cmd_s)) {
+        fprintf(stderr, "type/size mismatch\n");
         return;
     }
-    if (hdr->id != op_.hdr.id) {
-        fprintf(stderr, "id mismatch: %d %d\n", hdr->id, op_.hdr.id);
+    const struct js320_jtag_cmd_s * rsp = (const struct js320_jtag_cmd_s *) value->value.bin;
+    if (rsp->transaction_id != op_.cmd.transaction_id) {
+        fprintf(stderr, "id mismatch: %u %u\n", rsp->transaction_id, op_.cmd.transaction_id);
         return;
     }
-    if (hdr->cmd != op_.hdr.cmd) {
-        fprintf(stderr, "cmd mismatch\n");
+    if (rsp->operation != op_.cmd.operation) {
+        fprintf(stderr, "op mismatch\n");
         return;
     }
-    const uint8_t * data = value->value.bin + sizeof(*hdr);
+    const uint8_t * data = value->value.bin + sizeof(struct js320_jtag_cmd_s);
 
-    switch (hdr->cmd) {
-        case JS320_JTAG_EVENT_GOTO_STATE: break;
-        case JS320_JTAG_EVENT_WAIT: break;
-        case JS320_JTAG_EVENT_SHIFT: {
+    switch (rsp->operation) {
+        case JS320_JTAG_OP_GOTO_STATE: break;
+        case JS320_JTAG_OP_SHIFT: {
             memcpy(op_.data, data, op_.size);
         }
         default: break;
@@ -131,28 +131,29 @@ void jtag_tap_shift(
     uint32_t data_bits,
     bool must_end) {
 
-    uint8_t payload[512];
+    uint8_t payload[sizeof(struct js320_jtag_cmd_s) + 256];
     uint32_t offset = 0;  // in bytes
-    op_.hdr.cmd = JS320_JTAG_EVENT_SHIFT;
-    op_.hdr.arg1 = 0;
 
     while (data_bits) {
-        op_.hdr.id++;
+        uint32_t next_id = op_.cmd.transaction_id + 1;
+        memset(&op_.cmd, 0, sizeof(op_.cmd));
+        op_.cmd.transaction_id = next_id;
+        op_.cmd.operation = JS320_JTAG_OP_SHIFT;
         op_.done = false;
         uint32_t bits = data_bits;
         if (data_bits > BITS_SHIFT_MAX) {
             bits = BITS_SHIFT_MAX;
         } else {
-            op_.hdr.arg1 = must_end ? 1 : 0;
+            op_.cmd.flags = must_end ? 1 : 0;
         }
-        op_.hdr.arg0 = bits;
+        op_.cmd.length = bits;
         uint32_t payload_size = (bits + 7) / 8;
         op_.data = output_data + offset;
         op_.size = payload_size;
-        memcpy(payload, &op_.hdr, sizeof(op_.hdr));
-        memcpy(payload + sizeof(op_.hdr), input_data + offset, payload_size);
+        memcpy(payload, &op_.cmd, sizeof(op_.cmd));
+        memcpy(payload + sizeof(op_.cmd), input_data + offset, payload_size);
 
-        uint32_t sz = sizeof(op_.hdr) + payload_size;
+        uint32_t sz = sizeof(op_.cmd) + payload_size;
         jsdrv_publish(context, topic_cmd_.topic, &jsdrv_union_bin(payload, sz), 0);
         while (!op_.done) {
             Sleep(1);  // todo
@@ -163,25 +164,22 @@ void jtag_tap_shift(
 }
 
 void jtag_wait_time(uint32_t microseconds) {
-    op_.hdr.id++;
-    uint8_t data[16];
-    if (microseconds > (16 * 8)) {
-        Sleep(10);
-        microseconds = 16 * 8;
-    }
-    jtag_tap_shift(data, data, microseconds, false);
-
-    /*
-    op_.hdr.cmd = JS320_JTAG_EVENT_WAIT;
-    op_.hdr.arg0 = microseconds;
-    op_.hdr.arg1 = 0;
-    */
+    uint32_t next_id = op_.cmd.transaction_id + 1;
+    memset(&op_.cmd, 0, sizeof(op_.cmd));
+    op_.cmd.transaction_id = next_id;
+    op_.cmd.operation = JS320_JTAG_OP_GOTO_STATE;
+    op_.cmd.offset = STATE_RUN_TEST_IDLE;
+    op_.cmd.delay_us = microseconds;
+    jsdrv_publish(context, topic_cmd_.topic,
+        &jsdrv_union_bin((uint8_t *) &op_.cmd, sizeof(op_.cmd)), 0);
 }
 
 void jtag_go_to_state(unsigned state) {
-    op_.hdr.id++;
-    op_.hdr.cmd = JS320_JTAG_EVENT_GOTO_STATE;
-    op_.hdr.arg0 = state;
-    op_.hdr.arg1 = 0;
-    jsdrv_publish(context, topic_cmd_.topic, &jsdrv_union_bin((uint8_t *) &op_.hdr, sizeof(op_.hdr)), 0);
+    uint32_t next_id = op_.cmd.transaction_id + 1;
+    memset(&op_.cmd, 0, sizeof(op_.cmd));
+    op_.cmd.transaction_id = next_id;
+    op_.cmd.operation = JS320_JTAG_OP_GOTO_STATE;
+    op_.cmd.offset = state;
+    jsdrv_publish(context, topic_cmd_.topic,
+        &jsdrv_union_bin((uint8_t *) &op_.cmd, sizeof(op_.cmd)), 0);
 }

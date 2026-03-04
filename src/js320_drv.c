@@ -20,6 +20,7 @@
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/frontend.h"
+#include "jsdrv_prv/js320_fwup.h"
 #include "jsdrv_prv/js320_jtag.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/mb_drv.h"
@@ -33,6 +34,7 @@ struct js320_drv_s {
     const struct mb_link_identity_s * identity;
     struct jsdrvp_mb_dev_s * dev;
     struct js320_jtag_s * jtag;
+    struct js320_fwup_s * fwup;
 };
 
 // --- Streaming signal helpers ---
@@ -72,6 +74,7 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
     self->dev = dev;
     self->identity = identity;
     js320_jtag_on_open(self->jtag, dev);
+    js320_fwup_on_open(self->fwup, dev);
     JSDRV_LOGI("JS320 driver opened: vendor=0x%04x product=0x%04x",
                identity->vendor_id, identity->product_id);
 }
@@ -79,6 +82,7 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
 static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     (void) dev;
+    js320_fwup_on_close(self->fwup);
     js320_jtag_on_close(self->jtag);
     self->dev = NULL;
     JSDRV_LOGI("JS320 driver closed");
@@ -221,6 +225,9 @@ static bool js320_handle_cmd(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
                               const char * subtopic, const struct jsdrv_union_s * value) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     (void) dev;
+    if (js320_fwup_handle_cmd(self->fwup, subtopic, value)) {
+        return true;
+    }
     return js320_jtag_handle_cmd(self->jtag, subtopic, value);
 }
 
@@ -230,6 +237,9 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
                                   const struct jsdrv_union_s * value) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     (void) dev;
+    if (js320_fwup_handle_publish(self->fwup, subtopic, value)) {
+        return true;
+    }
     return js320_jtag_handle_publish(self->jtag, subtopic, value);
 }
 
@@ -237,12 +247,14 @@ static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
                               struct jsdrvp_mb_dev_s * dev) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     (void) dev;
+    js320_fwup_on_timeout(self->fwup);
     js320_jtag_on_timeout(self->jtag);
 }
 
 static void js320_finalize(struct jsdrvp_mb_drv_s * drv) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     JSDRV_LOGI("JS320 driver finalized");
+    js320_fwup_free(self->fwup);
     js320_jtag_free(self->jtag);
     jsdrv_free(self);
 }
@@ -252,6 +264,7 @@ static void js320_finalize(struct jsdrvp_mb_drv_s * drv) {
 static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     struct js320_drv_s * self = jsdrv_alloc_clr(sizeof(struct js320_drv_s));
     self->jtag = js320_jtag_alloc();
+    self->fwup = js320_fwup_alloc();
     self->drv.on_open = js320_on_open;
     self->drv.on_close = js320_on_close;
     self->drv.handle_app = js320_handle_app;

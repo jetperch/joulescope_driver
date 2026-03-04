@@ -28,24 +28,11 @@
 
 // --- JTAG low-level command interface ---
 
-enum jtag_cmd_e {
-    JTAG_CMD_GOTO_STATE = 2,
-    JTAG_CMD_WAIT       = 3,
-    JTAG_CMD_SHIFT      = 4,
-};
-
 enum jtag_tap_state_e {
     TAP_TEST_LOGIC_RESET =  0,
     TAP_RUN_TEST_IDLE    =  1,
     TAP_SHIFT_DR         =  4,
     TAP_SHIFT_IR         = 11,
-};
-
-struct jtag_hdr_s {
-    uint32_t id;
-    uint8_t cmd;
-    uint8_t arg1;
-    uint16_t arg0;
 };
 
 // --- ECP5 constants ---
@@ -305,36 +292,38 @@ static void aes_process(struct js320_jtag_s * self, uint8_t event) {
 // --- JTAG command helpers ---
 
 static void jtag_goto(struct js320_jtag_s * self, uint8_t state) {
-    struct jtag_hdr_s hdr;
-    hdr.id = ++self->aes_jtag_cmd_id;
-    hdr.cmd = JTAG_CMD_GOTO_STATE;
-    hdr.arg1 = 0;
-    hdr.arg0 = state;
+    struct js320_jtag_cmd_s cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.transaction_id = ++self->aes_jtag_cmd_id;
+    cmd.operation = JS320_JTAG_OP_GOTO_STATE;
+    cmd.offset = state;
     jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd",
-        &jsdrv_union_bin((uint8_t *) &hdr, sizeof(hdr)));
+        &jsdrv_union_bin((uint8_t *) &cmd, sizeof(cmd)));
 }
 
-static void jtag_wait_us(struct js320_jtag_s * self, uint16_t microseconds) {
-    struct jtag_hdr_s hdr;
-    hdr.id = ++self->aes_jtag_cmd_id;
-    hdr.cmd = JTAG_CMD_WAIT;
-    hdr.arg1 = 0;
-    hdr.arg0 = microseconds;
+static void jtag_wait_us(struct js320_jtag_s * self, uint32_t microseconds) {
+    struct js320_jtag_cmd_s cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.transaction_id = ++self->aes_jtag_cmd_id;
+    cmd.operation = JS320_JTAG_OP_GOTO_STATE;
+    cmd.offset = TAP_RUN_TEST_IDLE;
+    cmd.delay_us = microseconds;
     jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd",
-        &jsdrv_union_bin((uint8_t *) &hdr, sizeof(hdr)));
+        &jsdrv_union_bin((uint8_t *) &cmd, sizeof(cmd)));
 }
 
 static void jtag_shift(struct js320_jtag_s * self, const uint8_t * data,
                         uint16_t bits, bool must_end) {
-    uint8_t buf[sizeof(struct jtag_hdr_s) + 32];
+    uint8_t buf[sizeof(struct js320_jtag_cmd_s) + 32];
     uint32_t data_bytes = (bits + 7) / 8;
-    struct jtag_hdr_s * hdr = (struct jtag_hdr_s *) buf;
-    hdr->id = ++self->aes_jtag_cmd_id;
-    hdr->cmd = JTAG_CMD_SHIFT;
-    hdr->arg1 = must_end ? 1 : 0;
-    hdr->arg0 = bits;
-    memcpy(buf + sizeof(struct jtag_hdr_s), data, data_bytes);
-    uint32_t sz = sizeof(struct jtag_hdr_s) + data_bytes;
+    struct js320_jtag_cmd_s * cmd = (struct js320_jtag_cmd_s *) buf;
+    memset(cmd, 0, sizeof(*cmd));
+    cmd->transaction_id = ++self->aes_jtag_cmd_id;
+    cmd->operation = JS320_JTAG_OP_SHIFT;
+    cmd->flags = must_end ? 1 : 0;
+    cmd->length = bits;
+    memcpy(buf + sizeof(struct js320_jtag_cmd_s), data, data_bytes);
+    uint32_t sz = sizeof(struct js320_jtag_cmd_s) + data_bytes;
     jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd",
         &jsdrv_union_bin(buf, sz));
     self->aes_expected_responses++;
@@ -700,16 +689,16 @@ bool js320_jtag_handle_publish(struct js320_jtag_s * jtag,
     if (jtag->aes_state == AES_IDLE) {
         return false;
     }
-    if (0 != strcmp(subtopic, "c/jtag/!done")) {
+    if (0 != strcmp(subtopic, "c/jtag/!rsp")) {
         return false;
     }
-    if (value->type != JSDRV_UNION_BIN || value->size < sizeof(struct jtag_hdr_s)) {
+    if (value->type != JSDRV_UNION_BIN || value->size < sizeof(struct js320_jtag_cmd_s)) {
         return true;  // malformed, consume
     }
 
     if (jtag->aes_current_response_idx == jtag->aes_target_response_idx) {
-        const uint8_t * data = value->value.bin + sizeof(struct jtag_hdr_s);
-        uint32_t data_size = value->size - sizeof(struct jtag_hdr_s);
+        const uint8_t * data = value->value.bin + sizeof(struct js320_jtag_cmd_s);
+        uint32_t data_size = value->size - sizeof(struct js320_jtag_cmd_s);
         uint32_t copy_size = (data_size < jtag->aes_response_size)
                            ? data_size : jtag->aes_response_size;
         memcpy(jtag->aes_response_buf, data, copy_size);
