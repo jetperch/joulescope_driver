@@ -919,7 +919,7 @@ cdef class Driver:
 
         self.subscribe(response_topic, 'pub', on_response)
         try:
-            self.publish(publish_topic, publish_value)
+            self.publish(publish_topic, publish_value, timeout=0)
             if not event.wait(timeout):
                 raise TimeoutError(
                     f'publish_and_wait timed out: '
