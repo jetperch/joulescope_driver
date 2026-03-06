@@ -34,10 +34,18 @@ enum loopback_location_e {
 };
 
 void on_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    static uint32_t counter = 0;
     (void) user_data;
     (void) topic;
     (void) value;
-    printf("YES\n");
+    // do something
+    if (counter == 1000) {
+        const uint32_t * p32 = &value->value.u32;
+        printf("%d\n", p32[32]);
+        counter = 0;
+    } else {
+        ++counter;
+    }
 }
 
 #define PUBLISH_U32(topic_, value_) \
@@ -62,7 +70,14 @@ static int run(struct app_s * self, const char * device) {
     PUBLISH_U32("s/led/blue", 0xf0);
     PUBLISH_U32("s/led/en", 1);
 
-    PUBLISH_U32("s/adc/0/sel", 0);
+    //PUBLISH_U32("s/adc/0/sel", 0);
+    //PUBLISH_U32("s/adc/0/ctrl", 1);
+
+    PUBLISH_U32("s/adc/0/sel", 3);
+    PUBLISH_U32("i/range/mode", 5);
+    PUBLISH_U32("i/range/select", 0);
+    PUBLISH_U32("v/range/mode", 1);
+    PUBLISH_U32("v/range/select", 1);
     PUBLISH_U32("s/adc/0/ctrl", 1);
 
     jsdrv_topic_set(&topic, self->device.topic);
