@@ -22,6 +22,7 @@
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/dbc.h"
 #include "jsdrv_prv/frontend.h"
+#include "jsdrv_prv/log.h"
 #include "jsdrv_prv/mb_drv.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/thread.h"
@@ -834,7 +835,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
 #if _WIN32
         WaitForMultipleObjects(handle_count, handles, false, thread_timeout_duration_ms(d));
 #else
-        // todo support timeout_duration_ms
+        (void) thread_timeout_duration_ms; // todo support timeout_duration_ms
         poll(fds, 2, 2);
 #endif
         JSDRV_LOGD2("ul thread tick");
