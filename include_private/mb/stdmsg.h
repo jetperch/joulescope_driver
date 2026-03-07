@@ -227,21 +227,23 @@ struct mb_stdmsg_mem_s {
 /**
  * @brief Send a header-only memory operation response to the origin.
  *
- * Copies the command header, sets the status, and publishes as
- * MB_STDMSG_MEM to {origin_prefix}/!rsp.
+ * Derives origin_prefix and cmd from hdr.  Copies the command header,
+ * sets the status, and publishes as MB_STDMSG_MEM to
+ * {origin_prefix}/!rsp.
  *
- * @param origin_prefix The origin pubsub prefix character.
- * @param cmd The command to respond to.
+ * @param hdr The stdmsg header of the incoming command.
  * @param status The response status (0=success, else mb_error_code_e).
  */
-void mb_stdmsg_mem_respond(uint8_t origin_prefix,
-        const struct mb_stdmsg_mem_s * cmd, uint8_t status);
+void mb_stdmsg_mem_respond(
+        const struct mb_stdmsg_header_s * hdr,
+        uint8_t status);
 
 /**
  * @brief Create a memory operation response with data, to the origin.
  *
- * Allocates a message, copies the command header, sets the status,
- * and targets {origin_prefix}/!rsp as MB_STDMSG_MEM.
+ * Derives origin_prefix and cmd from hdr.  Allocates a message, copies
+ * the command header, sets the status, and targets
+ * {origin_prefix}/!rsp as MB_STDMSG_MEM.
  * The caller must fill in the data payload and send the message via
  * mb_task_send(mb_context->services[MB_TASK_SERVICE_PUBSUB], msg).
  *
@@ -253,16 +255,15 @@ void mb_stdmsg_mem_respond(uint8_t origin_prefix,
  * uint8_t * data = rsp->data;
  * @endcode
  *
- * @param origin_prefix The origin pubsub prefix character.
- * @param cmd The command to respond to.
+ * @param hdr The stdmsg header of the incoming command.
  * @param status The response status (0=success, else mb_error_code_e).
  * @param data_alloc_length The data allocation size in bytes.
  * @return The message ready for data fill and send via
  *      mb_task_send(mb_context->services[MB_TASK_SERVICE_PUBSUB], msg).
  */
 struct mb_msg_s * mb_stdmsg_mem_respond_data(
-        uint8_t origin_prefix,
-        const struct mb_stdmsg_mem_s * cmd, uint8_t status,
+        const struct mb_stdmsg_header_s * hdr,
+        uint8_t status,
         uint32_t data_alloc_length);
 
 MB_CPP_GUARD_END
