@@ -115,13 +115,19 @@ static const char * op_name(uint8_t op) {
 static void on_rsp(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
     (void) topic;
-    const struct mb_stdmsg_mem_s * rsp = (const struct mb_stdmsg_mem_s *) value->value.bin;
-    if (value->size < sizeof(struct mb_stdmsg_mem_s)) {
-        printf("RSP ERROR: too short: %u bytes (need %u)\n", value->size, (uint32_t) sizeof(struct mb_stdmsg_mem_s));
+    uint32_t hdr_offset = 0;
+    if (value->type == JSDRV_UNION_STDMSG) {
+        hdr_offset = sizeof(struct mb_stdmsg_header_s);
+    }
+    if (value->size < hdr_offset + sizeof(struct mb_stdmsg_mem_s)) {
+        printf("RSP ERROR: too short: %u bytes (need %u)\n", value->size,
+               (uint32_t) (hdr_offset + sizeof(struct mb_stdmsg_mem_s)));
         return;
     }
+    const struct mb_stdmsg_mem_s * rsp = (const struct mb_stdmsg_mem_s *)
+        (value->value.bin + hdr_offset);
 
-    uint32_t data_size = value->size - (uint32_t) sizeof(struct mb_stdmsg_mem_s);
+    uint32_t data_size = value->size - hdr_offset - (uint32_t) sizeof(struct mb_stdmsg_mem_s);
     if (verbose_) {
         printf("RSP: op=%s status=%d offset=0x%06X length=%u value_size=%u data_size=%u\n",
                op_name(rsp->operation), rsp->status, rsp->offset, rsp->length, value->size, data_size);
@@ -179,9 +185,14 @@ static int pipeline_send(struct fpga_mem_s * fm, uint8_t op, uint32_t offset, ui
     }
 
     struct jsdrv_topic_s topic;
-    uint8_t buf[sizeof(struct mb_stdmsg_mem_s) + FLASH_PAGE_SIZE];
-    struct mb_stdmsg_mem_s * cmd = (struct mb_stdmsg_mem_s *) buf;
-    uint32_t msg_size = sizeof(struct mb_stdmsg_mem_s) + data_size;
+    uint8_t buf[sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s) + FLASH_PAGE_SIZE];
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_MEM;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    struct mb_stdmsg_mem_s * cmd = (struct mb_stdmsg_mem_s *) (hdr + 1);
+    uint32_t msg_size = sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s) + data_size;
 
     memset(cmd, 0, sizeof(*cmd));
     cmd->transaction_id = ++fm->transaction_id;
@@ -196,7 +207,11 @@ static int pipeline_send(struct fpga_mem_s * fm, uint8_t op, uint32_t offset, ui
     InterlockedIncrement(&fm->outstanding);
     jsdrv_topic_set(&topic, fm->app->device.topic);
     jsdrv_topic_append(&topic, "c/jtag/!cmd");
-    int32_t pub_rc = jsdrv_publish(fm->app->context, topic.topic, &jsdrv_union_bin(buf, msg_size), 0);
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = msg_size;
+    v.value.bin = buf;
+    int32_t pub_rc = jsdrv_publish(fm->app->context, topic.topic, &v, 0);
     if (pub_rc) {
         InterlockedDecrement(&fm->outstanding);
         printf("ERROR: jsdrv_publish failed: %d\n", pub_rc);
@@ -304,13 +319,17 @@ static int setup_common(struct app_s * self) {
     Sleep(100);  // allow mode switch to take effect
 
     jsdrv_topic_set(&topic, self->device.topic);
-    jsdrv_topic_append(&topic, "c/jtag/!rsp");
+    jsdrv_topic_append(&topic, "h/!rsp");
     jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_rsp, NULL, 0);
     return 0;
 }
 
 static int teardown_common(struct app_s * self, int rc) {
     struct jsdrv_topic_s topic;
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/!rsp");
+    jsdrv_unsubscribe(self->context, topic.topic, on_rsp, NULL, 0);
 
     // Restore normal operation
     jsdrv_topic_set(&topic, self->device.topic);

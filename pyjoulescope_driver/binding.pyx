@@ -28,6 +28,7 @@ from libc.math cimport isfinite, NAN
 from libc.string cimport memset, strcpy
 
 from collections.abc import Iterable, Mapping
+from . import StdMsg
 import json
 import logging
 import numpy as np
@@ -856,6 +857,11 @@ cdef class Driver:
             v.type = c_jsdrv.JSDRV_UNION_BIN
             v.value.bin = <const uint8_t *> byte_str
             v.app = c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_REQ
+            v.size = <uint32_t> len(value)
+        elif isinstance(value, StdMsg):
+            byte_str = bytes(value)
+            v.type = c_jsdrv.JSDRV_UNION_STDMSG
+            v.value.bin = <const uint8_t *> byte_str
             v.size = <uint32_t> len(value)
         elif isinstance(value, bytes):
             byte_str = value
