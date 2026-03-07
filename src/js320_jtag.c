@@ -292,40 +292,66 @@ static void aes_process(struct js320_jtag_s * self, uint8_t event) {
 // --- JTAG command helpers ---
 
 static void jtag_goto(struct js320_jtag_s * self, uint8_t state) {
-    struct js320_jtag_cmd_s cmd;
-    memset(&cmd, 0, sizeof(cmd));
-    cmd.transaction_id = ++self->aes_jtag_cmd_id;
-    cmd.operation = JS320_JTAG_OP_GOTO_STATE;
-    cmd.offset = state;
-    jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd",
-        &jsdrv_union_bin((uint8_t *) &cmd, sizeof(cmd)));
+    uint8_t buf[sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s)];
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_MEM;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    struct mb_stdmsg_mem_s * cmd = (struct mb_stdmsg_mem_s *) (hdr + 1);
+    memset(cmd, 0, sizeof(*cmd));
+    cmd->transaction_id = ++self->aes_jtag_cmd_id;
+    cmd->operation = JS320_JTAG_OP_GOTO_STATE;
+    cmd->offset = state;
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = sizeof(buf);
+    v.value.bin = buf;
+    jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd", &v);
 }
 
 static void jtag_wait_us(struct js320_jtag_s * self, uint32_t microseconds) {
-    struct js320_jtag_cmd_s cmd;
-    memset(&cmd, 0, sizeof(cmd));
-    cmd.transaction_id = ++self->aes_jtag_cmd_id;
-    cmd.operation = JS320_JTAG_OP_GOTO_STATE;
-    cmd.offset = TAP_RUN_TEST_IDLE;
-    cmd.delay_us = microseconds;
-    jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd",
-        &jsdrv_union_bin((uint8_t *) &cmd, sizeof(cmd)));
+    uint8_t buf[sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s)];
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_MEM;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    struct mb_stdmsg_mem_s * cmd = (struct mb_stdmsg_mem_s *) (hdr + 1);
+    memset(cmd, 0, sizeof(*cmd));
+    cmd->transaction_id = ++self->aes_jtag_cmd_id;
+    cmd->operation = JS320_JTAG_OP_GOTO_STATE;
+    cmd->offset = TAP_RUN_TEST_IDLE;
+    cmd->delay_us = microseconds;
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = sizeof(buf);
+    v.value.bin = buf;
+    jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd", &v);
 }
 
 static void jtag_shift(struct js320_jtag_s * self, const uint8_t * data,
                         uint16_t bits, bool must_end) {
-    uint8_t buf[sizeof(struct js320_jtag_cmd_s) + 32];
+    uint8_t buf[sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s) + 32];
     uint32_t data_bytes = (bits + 7) / 8;
-    struct js320_jtag_cmd_s * cmd = (struct js320_jtag_cmd_s *) buf;
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_MEM;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    struct mb_stdmsg_mem_s * cmd = (struct mb_stdmsg_mem_s *) (hdr + 1);
     memset(cmd, 0, sizeof(*cmd));
     cmd->transaction_id = ++self->aes_jtag_cmd_id;
     cmd->operation = JS320_JTAG_OP_SHIFT;
     cmd->flags = must_end ? 1 : 0;
     cmd->length = bits;
-    memcpy(buf + sizeof(struct js320_jtag_cmd_s), data, data_bytes);
-    uint32_t sz = sizeof(struct js320_jtag_cmd_s) + data_bytes;
-    jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd",
-        &jsdrv_union_bin(buf, sz));
+    memcpy(buf + sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s), data, data_bytes);
+    uint32_t sz = sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s) + data_bytes;
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = sz;
+    v.value.bin = buf;
+    jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd", &v);
     self->aes_expected_responses++;
 }
 
@@ -689,16 +715,20 @@ bool js320_jtag_handle_publish(struct js320_jtag_s * jtag,
     if (jtag->aes_state == AES_IDLE) {
         return false;
     }
-    if (0 != strcmp(subtopic, "c/jtag/!rsp")) {
+    if (0 != strcmp(subtopic, "h/!rsp")) {
         return false;
     }
-    if (value->type != JSDRV_UNION_BIN || value->size < sizeof(struct js320_jtag_cmd_s)) {
+    uint32_t hdr_offset = 0;
+    if (value->type == JSDRV_UNION_STDMSG) {
+        hdr_offset = sizeof(struct mb_stdmsg_header_s);
+    }
+    if (value->size < hdr_offset + sizeof(struct mb_stdmsg_mem_s)) {
         return true;  // malformed, consume
     }
 
     if (jtag->aes_current_response_idx == jtag->aes_target_response_idx) {
-        const uint8_t * data = value->value.bin + sizeof(struct js320_jtag_cmd_s);
-        uint32_t data_size = value->size - sizeof(struct js320_jtag_cmd_s);
+        const uint8_t * data = value->value.bin + hdr_offset + sizeof(struct mb_stdmsg_mem_s);
+        uint32_t data_size = value->size - hdr_offset - sizeof(struct mb_stdmsg_mem_s);
         uint32_t copy_size = (data_size < jtag->aes_response_size)
                            ? data_size : jtag->aes_response_size;
         memcpy(jtag->aes_response_buf, data, copy_size);

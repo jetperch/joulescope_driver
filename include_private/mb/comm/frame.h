@@ -1,5 +1,6 @@
 /*
- * Copyright 2014-2025 Jetperch LLC
+ * SPDX-FileCopyrightText: Copyright 2014-2025 Jetperch LLC
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +52,10 @@ MB_CPP_GUARD_START
 #define MB_FRAME_FRAME_ID_MAX ((1U << 11) - 1U)
 #define MB_FRAME_LENGTH_TO_CHECK_LENGTH(x)  (3 + 1 + (uint16_t) (x))
 #define MB_FRAME_METADATA_MASK (0x0fffU)
+
+
+// forward declaration for mb/msg.h
+struct mb_msg_s;
 
 /**
  * @brief The frame types.
@@ -164,11 +169,11 @@ enum mb_frame_service_type_e {
 
 /**
  * @brief Length check computation constant.
- *
+ * 
  * This 16-bit constant provides Hamming Distance (HD) of 4 when used
  * for length validation. The algorithm computes:
  * length_check = (length * MB_FRAME_LENGTH_CHECK_CONSTANT) >> MB_FRAME_LENGTH_CHECK_SHIFT
- *
+ * 
  * This detects all 1, 2, and 3 bit errors, and 97.4% of 4 bit errors.
  * See doc/comm/frame.md for detailed analysis.
  */
@@ -176,7 +181,7 @@ enum mb_frame_service_type_e {
 
 /**
  * @brief Length check right shift amount.
- *
+ * 
  * Used with MB_FRAME_LENGTH_CHECK_CONSTANT to extract bits [18:11]
  * of the multiplication result for optimal error detection.
  */
@@ -184,11 +189,11 @@ enum mb_frame_service_type_e {
 
 /**
  * @brief Link check computation constant.
- *
+ * 
  * This 16-bit constant provides Hamming Distance (HD) of 9 when used
  * for link frame validation. The algorithm computes:
  * link_check = link_msg * MB_FRAME_LINK_CHECK_CONSTANT
- *
+ * 
  * Where link_msg contains bytes 2 & 3 (frame_id and frame_type).
  * See doc/comm/frame.md for detailed analysis.
  */
@@ -257,6 +262,35 @@ MB_API struct mb_msg_s * mb_frame_link_construct(uint8_t frame_type, uint16_t fr
  * @return The payload to populate which is guaranteed 64-bit aligned.
  */
 MB_API uint32_t * mb_frame_init(struct mb_msg_s * msg, uint8_t service_type, size_t payload_size, uint16_t metadata);
+
+/**
+ * @brief Get the data frame_check offset location.
+ *
+ * @param msg The message containing the completed frame, possibly without frame_check.
+ * @return The position of the frame_check in u32 words.
+ *      Return 0 if msg does not contain a data frame.
+ */
+MB_API uint32_t mb_frame_check_offset(struct mb_msg_s * msg);
+
+/**
+ * @brief Function that computes a frame_check.
+ *
+ * @param data The data start, which is usually the first word containing SOF1.
+ * @param length The length of data in u32 words EXCLUDING the ending frame_check.
+ *      Use MB_FRAME_LENGTH_TO_CHECK_LENGTH(frame.length).
+ */
+typedef uint32_t (*mb_frame_check_fn_t)(const uint32_t * data, size_t length);
+
+/**
+ * @brief Compute the frame_check using the provided function.
+ *
+ * @param msg The message containing a data frame.
+ * @return The frame_check value.
+ */
+MB_API uint32_t mb_frame_check_compute(struct mb_msg_s * msg, mb_frame_check_fn_t check_fn);
+
+
+MB_API bool mb_frame_check_insert(struct mb_msg_s * msg, mb_frame_check_fn_t check_fn);
 
 
 /**

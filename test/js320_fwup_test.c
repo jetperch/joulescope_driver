@@ -26,6 +26,7 @@
 #include "jsdrv/error_code.h"
 #include "jsdrv/time.h"
 #include "jsdrv_prv/js320_fwup.h"
+#include "mb/stdmsg.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/mb_drv.h"
 #include "jsdrv_prv/platform.h"
@@ -36,45 +37,24 @@
 // =====================================================================
 
 #define FW_PAGE_SIZE        256U
-#define FW_CMD_HEADER_SIZE  16U
+#define STDMSG_HDR_SIZE     sizeof(struct mb_stdmsg_header_s)
+#define DEV_CMD_SIZE        (STDMSG_HDR_SIZE + sizeof(struct mb_stdmsg_mem_s))
 #define FLASH_BLOCK_64K     65536U
 
-struct fw_cmd_s {
-    uint32_t id;
-    uint8_t op;
-    uint8_t status;
-    uint8_t image;
-    uint8_t rsv;
-    uint32_t offset;
-    uint32_t length;
+/// Fwup device op codes (mirrors mb_fwup_op_e + mb_stdmsg_mem_op_e).
+enum fwup_dev_op_e {
+    FWUP_DEV_OP_READ      = MB_STDMSG_MEM_OP_READ,
+    FWUP_DEV_OP_WRITE     = MB_STDMSG_MEM_OP_WRITE,
+    FWUP_DEV_OP_ERASE     = MB_STDMSG_MEM_OP_ERASE,
+    FWUP_DEV_OP_ALLOCATE  = MB_STDMSG_MEM_OP_CUSTOM_START,
+    FWUP_DEV_OP_UPDATE,
+    FWUP_DEV_OP_LAUNCH,
 };
 
-enum fw_cmd_op_e {
-    FW_CMD_OP_ALLOCATE = 1,
-    FW_CMD_OP_WRITE    = 2,
-    FW_CMD_OP_READ     = 3,
-    FW_CMD_OP_UPDATE   = 4,
-    FW_CMD_OP_LAUNCH   = 5,
-    FW_CMD_OP_ERASE    = 6,
-};
-
-struct js320_jtag_cmd_s {
-    uint32_t transaction_id;
-    uint8_t operation;
-    uint8_t flags;
-    uint16_t timeout_ms;
-    uint32_t offset;
-    uint32_t length;
-    uint32_t delay_us;
-    uint32_t rsv1_u32;
-};
-
+/// JTAG device op codes (mirrors js320_jtag_op_e).
 enum js320_jtag_op_e {
-    JS320_JTAG_OP_MEM_OPEN      = 0x10,
-    JS320_JTAG_OP_MEM_CLOSE     = 0x11,
-    JS320_JTAG_OP_MEM_ERASE_64K = 0x12,
-    JS320_JTAG_OP_MEM_WRITE     = 0x14,
-    JS320_JTAG_OP_MEM_READ      = 0x15,
+    JS320_JTAG_OP_MEM_OPEN      = MB_STDMSG_MEM_OP_CUSTOM_START + 2,
+    JS320_JTAG_OP_MEM_CLOSE,
 };
 
 
@@ -83,7 +63,7 @@ enum js320_jtag_op_e {
 // =====================================================================
 
 #define MAX_DEV_CMDS    64
-#define MAX_CMD_SIZE    (FW_CMD_HEADER_SIZE + FW_PAGE_SIZE + 16)
+#define MAX_CMD_SIZE    (DEV_CMD_SIZE + FW_PAGE_SIZE + 16)
 
 struct captured_dev_cmd {
     char topic[128];
@@ -218,24 +198,24 @@ static struct captured_dev_cmd * pop_dev_cmd(void) {
     return &g_ctx.dev_cmds[idx];
 }
 
-static struct fw_cmd_s * pop_fw_cmd(const char * expected_topic) {
+static struct mb_stdmsg_mem_s * pop_fw_cmd(const char * expected_topic) {
     struct captured_dev_cmd * c = pop_dev_cmd();
     assert_string_equal(c->topic, expected_topic);
-    assert_true(c->size >= FW_CMD_HEADER_SIZE);
-    return (struct fw_cmd_s *) c->data;
+    assert_true(c->size >= DEV_CMD_SIZE);
+    return (struct mb_stdmsg_mem_s *) (c->data + STDMSG_HDR_SIZE);
 }
 
 static struct captured_dev_cmd * pop_jtag_cmd_raw(
         const char * expected_topic) {
     struct captured_dev_cmd * c = pop_dev_cmd();
     assert_string_equal(c->topic, expected_topic);
-    assert_true(c->size >= sizeof(struct js320_jtag_cmd_s));
+    assert_true(c->size >= DEV_CMD_SIZE);
     return c;
 }
 
-static struct js320_jtag_cmd_s * pop_jtag_cmd(const char * expected_topic) {
+static struct mb_stdmsg_mem_s * pop_jtag_cmd(const char * expected_topic) {
     struct captured_dev_cmd * c = pop_jtag_cmd_raw(expected_topic);
-    return (struct js320_jtag_cmd_s *) c->data;
+    return (struct mb_stdmsg_mem_s *) (c->data + STDMSG_HDR_SIZE);
 }
 
 /// Build a ctrl cmd with appended image data.
@@ -271,23 +251,27 @@ static void build_fpga_cmd(uint8_t * buf, uint32_t * out_size,
     *out_size = sizeof(struct fwup_fpga_cmd_s) + image_size;
 }
 
-/// Build a device fw_cmd response (header only or with read data).
+/// Build a device fwup response (header only or with read data).
 static void build_fw_rsp(uint8_t * buf, uint32_t * out_size,
                           uint32_t id, uint8_t op, uint8_t status,
                           uint32_t offset, uint32_t length,
                           const uint8_t * data, uint32_t data_size) {
-    struct fw_cmd_s * r = (struct fw_cmd_s *) buf;
-    r->id = id;
-    r->op = op;
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_MEM;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    struct mb_stdmsg_mem_s * r = (struct mb_stdmsg_mem_s *) (hdr + 1);
+    memset(r, 0, sizeof(*r));
+    r->transaction_id = id;
+    r->operation = op;
     r->status = status;
-    r->image = 0;
-    r->rsv = 0;
     r->offset = offset;
     r->length = length;
     if (data && data_size > 0) {
-        memcpy(buf + FW_CMD_HEADER_SIZE, data, data_size);
+        memcpy(buf + STDMSG_HDR_SIZE + sizeof(struct mb_stdmsg_mem_s), data, data_size);
     }
-    *out_size = FW_CMD_HEADER_SIZE + data_size;
+    *out_size = (uint32_t)(STDMSG_HDR_SIZE + sizeof(struct mb_stdmsg_mem_s) + data_size);
 }
 
 /// Build a jtag_mem response (header only or with read data).
@@ -295,25 +279,31 @@ static void build_jtag_rsp(uint8_t * buf, uint32_t * out_size,
                             uint32_t txn_id, uint8_t op, uint8_t status,
                             uint32_t offset, uint32_t length,
                             const uint8_t * data, uint32_t data_size) {
-    struct js320_jtag_cmd_s * r = (struct js320_jtag_cmd_s *) buf;
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_MEM;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    struct mb_stdmsg_mem_s * r = (struct mb_stdmsg_mem_s *) (hdr + 1);
+    memset(r, 0, sizeof(*r));
     r->transaction_id = txn_id;
     r->operation = op;
-    r->flags = status;
-    r->timeout_ms = 0;
+    r->status = status;
     r->offset = offset;
     r->length = length;
-    r->delay_us = 0;
-    r->rsv1_u32 = 0;
     if (data && data_size > 0) {
-        memcpy(buf + sizeof(struct js320_jtag_cmd_s), data, data_size);
+        memcpy(buf + STDMSG_HDR_SIZE + sizeof(struct mb_stdmsg_mem_s), data, data_size);
     }
-    *out_size = (uint32_t)(sizeof(struct js320_jtag_cmd_s) + data_size);
+    *out_size = (uint32_t)(STDMSG_HDR_SIZE + sizeof(struct mb_stdmsg_mem_s) + data_size);
 }
 
-/// Send a jsdrv_union_s BIN to handle_publish.
-static bool send_publish(const char * subtopic,
-                          uint8_t * buf, uint32_t size) {
-    struct jsdrv_union_s v = jsdrv_union_bin(buf, size);
+/// Send a jsdrv_union_s STDMSG to handle_publish.
+static bool send_publish_stdmsg(const char * subtopic,
+                                 uint8_t * buf, uint32_t size) {
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = size;
+    v.value.bin = buf;
     return js320_fwup_handle_publish(g_ctx.fwup, subtopic, &v);
 }
 
@@ -372,63 +362,63 @@ static void test_ctrl_update_success(void ** state) {
 
     // Should have sent ALLOCATE
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_ALLOCATE, fc->op);
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_ALLOCATE, fc->operation);
     assert_int_equal(512, fc->length);
 
     // Send ALLOCATE response
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE + FW_PAGE_SIZE];
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_ALLOCATE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ALLOCATE,
                  0, 0, 512, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should have sent 2 WRITE commands (pipeline=2)
     assert_int_equal(2, dev_cmd_pending());
-    struct fw_cmd_s * w0 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_WRITE, w0->op);
+    struct mb_stdmsg_mem_s * w0 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_WRITE, w0->operation);
     assert_int_equal(0, w0->offset);
-    struct fw_cmd_s * w1 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_WRITE, w1->op);
+    struct mb_stdmsg_mem_s * w1 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_WRITE, w1->operation);
     assert_int_equal(256, w1->offset);
 
     // Send 2 WRITE responses
-    build_fw_rsp(rsp_buf, &rsp_size, w0->id, FW_CMD_OP_WRITE,
+    build_fw_rsp(rsp_buf, &rsp_size, w0->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 0, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
-    build_fw_rsp(rsp_buf, &rsp_size, w1->id, FW_CMD_OP_WRITE,
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
+    build_fw_rsp(rsp_buf, &rsp_size, w1->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 256, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should have sent 2 READ commands
     assert_int_equal(2, dev_cmd_pending());
-    struct fw_cmd_s * r0 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_READ, r0->op);
+    struct mb_stdmsg_mem_s * r0 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_READ, r0->operation);
     assert_int_equal(0, r0->offset);
-    struct fw_cmd_s * r1 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_READ, r1->op);
+    struct mb_stdmsg_mem_s * r1 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_READ, r1->operation);
     assert_int_equal(256, r1->offset);
 
     // Send 2 READ responses with correct data
     uint8_t page[FW_PAGE_SIZE];
     memset(page, 0xAB, FW_PAGE_SIZE);
-    build_fw_rsp(rsp_buf, &rsp_size, r0->id, FW_CMD_OP_READ,
+    build_fw_rsp(rsp_buf, &rsp_size, r0->transaction_id, FWUP_DEV_OP_READ,
                  0, 0, FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
-    build_fw_rsp(rsp_buf, &rsp_size, r1->id, FW_CMD_OP_READ,
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
+    build_fw_rsp(rsp_buf, &rsp_size, r1->transaction_id, FWUP_DEV_OP_READ,
                  0, 256, FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should have sent UPDATE
     assert_int_equal(1, dev_cmd_pending());
     fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_UPDATE, fc->op);
-    assert_int_equal(1, fc->image);
+    assert_int_equal(FWUP_DEV_OP_UPDATE, fc->operation);
+    assert_int_equal(1, fc->target);
 
     // Send UPDATE response
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_UPDATE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_UPDATE,
                  0, 0, 0, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Verify frontend response
     assert_string_equal("h/fwup/ctrl/!rsp", g_ctx.fe_subtopic);
@@ -447,15 +437,15 @@ static void test_ctrl_launch_success(void ** state) {
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_LAUNCH, fc->op);
-    assert_int_equal(1, fc->image);
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_LAUNCH, fc->operation);
+    assert_int_equal(1, fc->target);
 
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE];
+    uint8_t rsp_buf[DEV_CMD_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_LAUNCH,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_LAUNCH,
                  0, 0, 0, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     assert_string_equal("h/fwup/ctrl/!rsp", g_ctx.fe_subtopic);
     assert_int_equal(10, (int) g_ctx.fe_rsp.transaction_id);
@@ -473,15 +463,15 @@ static void test_ctrl_erase_success(void ** state) {
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_ERASE, fc->op);
-    assert_int_equal(0, fc->image);
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_ERASE, fc->operation);
+    assert_int_equal(0, fc->target);
 
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE];
+    uint8_t rsp_buf[DEV_CMD_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_ERASE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ERASE,
                  0, 0, 0, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     assert_string_equal("h/fwup/ctrl/!rsp", g_ctx.fe_subtopic);
     assert_int_equal(20, (int) g_ctx.fe_rsp.transaction_id);
@@ -529,27 +519,27 @@ static void test_ctrl_device_error_write(void ** state) {
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
     // ALLOCATE
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE + FW_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_ALLOCATE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ALLOCATE,
                  0, 0, 512, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // 2 WRITE commands sent
     assert_int_equal(2, dev_cmd_pending());
-    struct fw_cmd_s * w0 = pop_fw_cmd("c/fwup/!cmd");
-    struct fw_cmd_s * w1 = pop_fw_cmd("c/fwup/!cmd");
+    struct mb_stdmsg_mem_s * w0 = pop_fw_cmd("c/fwup/!cmd");
+    struct mb_stdmsg_mem_s * w1 = pop_fw_cmd("c/fwup/!cmd");
 
     // First WRITE succeeds
-    build_fw_rsp(rsp_buf, &rsp_size, w0->id, FW_CMD_OP_WRITE,
+    build_fw_rsp(rsp_buf, &rsp_size, w0->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 0, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Second WRITE fails with device error (status=1)
-    build_fw_rsp(rsp_buf, &rsp_size, w1->id, FW_CMD_OP_WRITE,
+    build_fw_rsp(rsp_buf, &rsp_size, w1->transaction_id, FWUP_DEV_OP_WRITE,
                  1, 256, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Pipeline drained (recv_idx >= send_idx), should finish with IO error
     assert_string_equal("h/fwup/ctrl/!rsp", g_ctx.fe_subtopic);
@@ -570,31 +560,31 @@ static void test_ctrl_verify_mismatch(void ** state) {
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
     // ALLOCATE
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE + FW_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_ALLOCATE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ALLOCATE,
                  0, 0, 256, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // 1 WRITE (only 1 page)
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * w0 = pop_fw_cmd("c/fwup/!cmd");
-    build_fw_rsp(rsp_buf, &rsp_size, w0->id, FW_CMD_OP_WRITE,
+    struct mb_stdmsg_mem_s * w0 = pop_fw_cmd("c/fwup/!cmd");
+    build_fw_rsp(rsp_buf, &rsp_size, w0->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 0, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // 1 READ
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * r0 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_READ, r0->op);
+    struct mb_stdmsg_mem_s * r0 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_READ, r0->operation);
 
     // Send wrong data
     uint8_t bad_page[FW_PAGE_SIZE];
     memset(bad_page, 0xBB, FW_PAGE_SIZE);
-    build_fw_rsp(rsp_buf, &rsp_size, r0->id, FW_CMD_OP_READ,
+    build_fw_rsp(rsp_buf, &rsp_size, r0->transaction_id, FWUP_DEV_OP_READ,
                  0, 0, FW_PAGE_SIZE, bad_page, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Pipeline drained, should get IO error
     assert_string_equal("h/fwup/ctrl/!rsp", g_ctx.fe_subtopic);
@@ -640,15 +630,15 @@ static void fpga_drive_to_open(void) {
     // Fire timeout -> should send OPEN
     js320_fwup_on_timeout(g_ctx.fwup);
     assert_int_equal(1, dev_cmd_pending());
-    struct js320_jtag_cmd_s * jc = pop_jtag_cmd("c/jtag/!cmd");
+    struct mb_stdmsg_mem_s * jc = pop_jtag_cmd("c/jtag/!cmd");
     assert_int_equal(JS320_JTAG_OP_MEM_OPEN, jc->operation);
 
     // Send OPEN response
-    uint8_t rsp_buf[sizeof(struct js320_jtag_cmd_s) + FW_PAGE_SIZE];
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
                    JS320_JTAG_OP_MEM_OPEN, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 }
 
 static void test_fpga_program_success(void ** state) {
@@ -667,56 +657,56 @@ static void test_fpga_program_success(void ** state) {
 
     // Should have sent ERASE (1 block for 512 bytes)
     assert_int_equal(1, dev_cmd_pending());
-    struct js320_jtag_cmd_s * jc = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_ERASE_64K, jc->operation);
+    struct mb_stdmsg_mem_s * jc = pop_jtag_cmd("c/jtag/!cmd");
+    assert_int_equal(MB_STDMSG_MEM_OP_ERASE, jc->operation);
     assert_int_equal(0, (int) jc->offset);
 
     // Send ERASE response
-    uint8_t rsp_buf[sizeof(struct js320_jtag_cmd_s) + FW_PAGE_SIZE];
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_ERASE_64K, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_ERASE, 0, 0, 0, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should have sent 2 WRITE commands (pipeline=2)
     assert_int_equal(2, dev_cmd_pending());
     struct captured_dev_cmd * wc0 = pop_jtag_cmd_raw("c/jtag/!cmd");
-    struct js320_jtag_cmd_s * jw0 = (struct js320_jtag_cmd_s *) wc0->data;
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jw0->operation);
+    struct mb_stdmsg_mem_s * jw0 = (struct mb_stdmsg_mem_s *) (wc0->data + STDMSG_HDR_SIZE);
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jw0->operation);
     assert_int_equal(0, (int) jw0->offset);
     struct captured_dev_cmd * wc1 = pop_jtag_cmd_raw("c/jtag/!cmd");
-    struct js320_jtag_cmd_s * jw1 = (struct js320_jtag_cmd_s *) wc1->data;
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jw1->operation);
+    struct mb_stdmsg_mem_s * jw1 = (struct mb_stdmsg_mem_s *) (wc1->data + STDMSG_HDR_SIZE);
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jw1->operation);
     assert_int_equal(256, (int) jw1->offset);
 
     // Send 2 WRITE responses
     build_jtag_rsp(rsp_buf, &rsp_size, jw0->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 0, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_WRITE, 0, 0, FW_PAGE_SIZE, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     build_jtag_rsp(rsp_buf, &rsp_size, jw1->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 256, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_WRITE, 0, 256, FW_PAGE_SIZE, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should have sent 2 READ commands
     assert_int_equal(2, dev_cmd_pending());
     jc = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_READ, jc->operation);
+    assert_int_equal(MB_STDMSG_MEM_OP_READ, jc->operation);
     assert_int_equal(0, (int) jc->offset);
-    struct js320_jtag_cmd_s * jr1 = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_READ, jr1->operation);
+    struct mb_stdmsg_mem_s * jr1 = pop_jtag_cmd("c/jtag/!cmd");
+    assert_int_equal(MB_STDMSG_MEM_OP_READ, jr1->operation);
     assert_int_equal(256, (int) jr1->offset);
 
     // Send correct read data
     uint8_t page[FW_PAGE_SIZE];
     memset(page, 0xEE, FW_PAGE_SIZE);
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_READ, 0, 0, FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_READ, 0, 0, FW_PAGE_SIZE,
                    page, FW_PAGE_SIZE);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     build_jtag_rsp(rsp_buf, &rsp_size, jr1->transaction_id,
-                   JS320_JTAG_OP_MEM_READ, 0, 256, FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_READ, 0, 256, FW_PAGE_SIZE,
                    page, FW_PAGE_SIZE);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should have sent CLOSE
     assert_int_equal(1, dev_cmd_pending());
@@ -726,7 +716,7 @@ static void test_fpga_program_success(void ** state) {
     // Send CLOSE response
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
                    JS320_JTAG_OP_MEM_CLOSE, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should publish c/mode=0 and set timeout
     assert_int_equal(1, dev_cmd_pending());
@@ -764,30 +754,30 @@ static void test_fpga_program_multi_erase(void ** state) {
 
     // Erase block 0
     assert_int_equal(1, dev_cmd_pending());
-    struct js320_jtag_cmd_s * jc = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_ERASE_64K, jc->operation);
+    struct mb_stdmsg_mem_s * jc = pop_jtag_cmd("c/jtag/!cmd");
+    assert_int_equal(MB_STDMSG_MEM_OP_ERASE, jc->operation);
     assert_int_equal(0, (int) jc->offset);
 
-    uint8_t rsp_buf[sizeof(struct js320_jtag_cmd_s) + FW_PAGE_SIZE];
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_ERASE_64K, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_ERASE, 0, 0, 0, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Erase block 1
     assert_int_equal(1, dev_cmd_pending());
     jc = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_ERASE_64K, jc->operation);
+    assert_int_equal(MB_STDMSG_MEM_OP_ERASE, jc->operation);
     assert_int_equal(FLASH_BLOCK_64K, jc->offset);
 
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_ERASE_64K, 0, FLASH_BLOCK_64K, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_ERASE, 0, FLASH_BLOCK_64K, 0, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should now be in WRITE phase — verify we got WRITE commands
     assert_true(dev_cmd_pending() > 0);
-    struct js320_jtag_cmd_s * jw = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jw->operation);
+    struct mb_stdmsg_mem_s * jw = pop_jtag_cmd("c/jtag/!cmd");
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jw->operation);
 
     free(image);
     free(cmd_buf);
@@ -808,22 +798,22 @@ static void test_fpga_error_cleanup(void ** state) {
     fpga_drive_to_open();
 
     // ERASE
-    struct js320_jtag_cmd_s * jc = pop_jtag_cmd("c/jtag/!cmd");
-    uint8_t rsp_buf[sizeof(struct js320_jtag_cmd_s) + FW_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * jc = pop_jtag_cmd("c/jtag/!cmd");
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_ERASE_64K, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_ERASE, 0, 0, 0, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // 1 WRITE command (pipeline=2, 1 page)
     assert_int_equal(1, dev_cmd_pending());
     jc = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jc->operation);
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jc->operation);
 
     // WRITE fails
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 1, 0, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_WRITE, 1, 0, FW_PAGE_SIZE, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should enter error cleanup: CLOSE
     assert_int_equal(1, dev_cmd_pending());
@@ -833,7 +823,7 @@ static void test_fpga_error_cleanup(void ** state) {
     // Send CLOSE rsp
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
                    JS320_JTAG_OP_MEM_CLOSE, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should publish c/mode=0 and set timeout
     assert_int_equal(1, dev_cmd_pending());
@@ -889,31 +879,31 @@ static void test_fpga_verify_mismatch(void ** state) {
     fpga_drive_to_open();
 
     // ERASE
-    struct js320_jtag_cmd_s * jc = pop_jtag_cmd("c/jtag/!cmd");
-    uint8_t rsp_buf[sizeof(struct js320_jtag_cmd_s) + FW_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * jc = pop_jtag_cmd("c/jtag/!cmd");
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_ERASE_64K, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_ERASE, 0, 0, 0, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // WRITE (1 page)
     jc = pop_jtag_cmd("c/jtag/!cmd");
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 0, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_WRITE, 0, 0, FW_PAGE_SIZE, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // READ
     assert_int_equal(1, dev_cmd_pending());
     jc = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_READ, jc->operation);
+    assert_int_equal(MB_STDMSG_MEM_OP_READ, jc->operation);
 
     // Send wrong data
     uint8_t bad_page[FW_PAGE_SIZE];
     memset(bad_page, 0xFF, FW_PAGE_SIZE);
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_READ, 0, 0, FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_READ, 0, 0, FW_PAGE_SIZE,
                    bad_page, FW_PAGE_SIZE);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Error cleanup -> CLOSE
     assert_int_equal(1, dev_cmd_pending());
@@ -922,7 +912,7 @@ static void test_fpga_verify_mismatch(void ** state) {
 
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
                    JS320_JTAG_OP_MEM_CLOSE, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // MODE_RESTORE
     assert_int_equal(1, dev_cmd_pending());
@@ -954,12 +944,12 @@ static void test_pipeline_depth_default(void ** state) {
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
     // ALLOCATE
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE];
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    uint8_t rsp_buf[DEV_CMD_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_ALLOCATE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ALLOCATE,
                  0, 0, 1024, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should have sent exactly 4 WRITE commands (default pipeline)
     assert_int_equal(4, dev_cmd_pending());
@@ -983,12 +973,12 @@ static void test_pipeline_depth_clamp(void ** state) {
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
     // ALLOCATE
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE];
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    uint8_t rsp_buf[DEV_CMD_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_ALLOCATE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ALLOCATE,
                  0, 0, img_size, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Should have sent 16 (not 17 or 255) WRITE commands
     assert_int_equal(16, dev_cmd_pending());
@@ -1011,12 +1001,12 @@ static void test_last_page_padding(void ** state) {
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
     // ALLOCATE
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE + FW_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_ALLOCATE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ALLOCATE,
                  0, 0, 300, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // 2 WRITE commands
     assert_int_equal(2, dev_cmd_pending());
@@ -1024,7 +1014,7 @@ static void test_last_page_padding(void ** state) {
     struct captured_dev_cmd * wc1 = pop_dev_cmd();
 
     // Verify second WRITE has padded data
-    uint8_t * write_data = wc1->data + FW_CMD_HEADER_SIZE;
+    uint8_t * write_data = wc1->data + DEV_CMD_SIZE;
     // First 44 bytes should be 0x33
     for (uint32_t i = 0; i < 44; i++) {
         assert_int_equal(0x33, write_data[i]);
@@ -1035,41 +1025,41 @@ static void test_last_page_padding(void ** state) {
     }
 
     // Send WRITE responses
-    struct fw_cmd_s * fw0 = (struct fw_cmd_s *) wc0->data;
-    struct fw_cmd_s * fw1 = (struct fw_cmd_s *) wc1->data;
-    build_fw_rsp(rsp_buf, &rsp_size, fw0->id, FW_CMD_OP_WRITE,
+    struct mb_stdmsg_mem_s * fw0 = (struct mb_stdmsg_mem_s *) (wc0->data + STDMSG_HDR_SIZE);
+    struct mb_stdmsg_mem_s * fw1 = (struct mb_stdmsg_mem_s *) (wc1->data + STDMSG_HDR_SIZE);
+    build_fw_rsp(rsp_buf, &rsp_size, fw0->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 0, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
-    build_fw_rsp(rsp_buf, &rsp_size, fw1->id, FW_CMD_OP_WRITE,
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
+    build_fw_rsp(rsp_buf, &rsp_size, fw1->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 256, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // READ phase: verify padded page matches in verification
     assert_int_equal(2, dev_cmd_pending());
-    struct fw_cmd_s * r0 = pop_fw_cmd("c/fwup/!cmd");
-    struct fw_cmd_s * r1 = pop_fw_cmd("c/fwup/!cmd");
+    struct mb_stdmsg_mem_s * r0 = pop_fw_cmd("c/fwup/!cmd");
+    struct mb_stdmsg_mem_s * r1 = pop_fw_cmd("c/fwup/!cmd");
 
     // Page 0: all 0x33
     uint8_t expected_p0[FW_PAGE_SIZE];
     get_expected_page(image, sizeof(image), 0, expected_p0);
-    build_fw_rsp(rsp_buf, &rsp_size, r0->id, FW_CMD_OP_READ,
+    build_fw_rsp(rsp_buf, &rsp_size, r0->transaction_id, FWUP_DEV_OP_READ,
                  0, 0, FW_PAGE_SIZE, expected_p0, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Page 1: 44 bytes of 0x33 + 212 bytes of 0xFF
     uint8_t expected_p1[FW_PAGE_SIZE];
     get_expected_page(image, sizeof(image), 1, expected_p1);
-    build_fw_rsp(rsp_buf, &rsp_size, r1->id, FW_CMD_OP_READ,
+    build_fw_rsp(rsp_buf, &rsp_size, r1->transaction_id, FWUP_DEV_OP_READ,
                  0, 256, FW_PAGE_SIZE, expected_p1, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // UPDATE
     assert_int_equal(1, dev_cmd_pending());
     fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_UPDATE, fc->op);
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_UPDATE,
+    assert_int_equal(FWUP_DEV_OP_UPDATE, fc->operation);
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_UPDATE,
                  0, 0, 0, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     assert_int_equal(0, g_ctx.fe_rsp.status);
 }
@@ -1116,8 +1106,8 @@ static void test_on_close_aborts(void ** state) {
 
     // Should have sent LAUNCH (not BUSY)
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_LAUNCH, fc->op);
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_LAUNCH, fc->operation);
     // No BUSY response should have been sent
     assert_int_equal(0, g_ctx.fe_rsp_count);
 }
@@ -1146,102 +1136,102 @@ static void test_ctrl_pipeline_refill(void ** state) {
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
     // ALLOCATE
-    struct fw_cmd_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_ALLOCATE, fc->op);
-    uint8_t rsp_buf[FW_CMD_HEADER_SIZE + FW_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_ALLOCATE, fc->operation);
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_ALLOCATE,
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ALLOCATE,
                  0, 0, sizeof(image), NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // --- WRITE phase: initial fill sends pages 0,1 ---
     assert_int_equal(2, dev_cmd_pending());
-    struct fw_cmd_s * w0 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_WRITE, w0->op);
+    struct mb_stdmsg_mem_s * w0 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_WRITE, w0->operation);
     assert_int_equal(0 * FW_PAGE_SIZE, w0->offset);
-    struct fw_cmd_s * w1 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_WRITE, w1->op);
+    struct mb_stdmsg_mem_s * w1 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_WRITE, w1->operation);
     assert_int_equal(1 * FW_PAGE_SIZE, w1->offset);
 
     // Respond to page 0 -> should refill with page 2
-    build_fw_rsp(rsp_buf, &rsp_size, w0->id, FW_CMD_OP_WRITE,
+    build_fw_rsp(rsp_buf, &rsp_size, w0->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 0 * FW_PAGE_SIZE, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * w2 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_WRITE, w2->op);
+    struct mb_stdmsg_mem_s * w2 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_WRITE, w2->operation);
     assert_int_equal(2 * FW_PAGE_SIZE, w2->offset);
 
     // Respond to page 1 -> should refill with page 3
-    build_fw_rsp(rsp_buf, &rsp_size, w1->id, FW_CMD_OP_WRITE,
+    build_fw_rsp(rsp_buf, &rsp_size, w1->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 1 * FW_PAGE_SIZE, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * w3 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_WRITE, w3->op);
+    struct mb_stdmsg_mem_s * w3 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_WRITE, w3->operation);
     assert_int_equal(3 * FW_PAGE_SIZE, w3->offset);
 
     // Respond to page 2 -> no more pages, no refill
-    build_fw_rsp(rsp_buf, &rsp_size, w2->id, FW_CMD_OP_WRITE,
+    build_fw_rsp(rsp_buf, &rsp_size, w2->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 2 * FW_PAGE_SIZE, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(0, dev_cmd_pending());
 
     // Respond to page 3 -> all writes done, enter VERIFY
-    build_fw_rsp(rsp_buf, &rsp_size, w3->id, FW_CMD_OP_WRITE,
+    build_fw_rsp(rsp_buf, &rsp_size, w3->transaction_id, FWUP_DEV_OP_WRITE,
                  0, 3 * FW_PAGE_SIZE, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // --- VERIFY phase: initial fill sends reads 0,1 ---
     assert_int_equal(2, dev_cmd_pending());
-    struct fw_cmd_s * r0 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_READ, r0->op);
+    struct mb_stdmsg_mem_s * r0 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_READ, r0->operation);
     assert_int_equal(0 * FW_PAGE_SIZE, r0->offset);
-    struct fw_cmd_s * r1 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_READ, r1->op);
+    struct mb_stdmsg_mem_s * r1 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_READ, r1->operation);
     assert_int_equal(1 * FW_PAGE_SIZE, r1->offset);
 
     // Respond to read 0 (correct data) -> refill with read 2
     uint8_t page[FW_PAGE_SIZE];
     get_expected_page(image, sizeof(image), 0, page);
-    build_fw_rsp(rsp_buf, &rsp_size, r0->id, FW_CMD_OP_READ,
+    build_fw_rsp(rsp_buf, &rsp_size, r0->transaction_id, FWUP_DEV_OP_READ,
                  0, 0 * FW_PAGE_SIZE, FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * r2 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_READ, r2->op);
+    struct mb_stdmsg_mem_s * r2 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_READ, r2->operation);
     assert_int_equal(2 * FW_PAGE_SIZE, r2->offset);
 
     // Respond to read 1 -> refill with read 3
     get_expected_page(image, sizeof(image), 1, page);
-    build_fw_rsp(rsp_buf, &rsp_size, r1->id, FW_CMD_OP_READ,
+    build_fw_rsp(rsp_buf, &rsp_size, r1->transaction_id, FWUP_DEV_OP_READ,
                  0, 1 * FW_PAGE_SIZE, FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(1, dev_cmd_pending());
-    struct fw_cmd_s * r3 = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_READ, r3->op);
+    struct mb_stdmsg_mem_s * r3 = pop_fw_cmd("c/fwup/!cmd");
+    assert_int_equal(FWUP_DEV_OP_READ, r3->operation);
     assert_int_equal(3 * FW_PAGE_SIZE, r3->offset);
 
     // Respond to read 2 -> no refill
     get_expected_page(image, sizeof(image), 2, page);
-    build_fw_rsp(rsp_buf, &rsp_size, r2->id, FW_CMD_OP_READ,
+    build_fw_rsp(rsp_buf, &rsp_size, r2->transaction_id, FWUP_DEV_OP_READ,
                  0, 2 * FW_PAGE_SIZE, FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(0, dev_cmd_pending());
 
     // Respond to read 3 -> all verified, send UPDATE
     get_expected_page(image, sizeof(image), 3, page);
-    build_fw_rsp(rsp_buf, &rsp_size, r3->id, FW_CMD_OP_READ,
+    build_fw_rsp(rsp_buf, &rsp_size, r3->transaction_id, FWUP_DEV_OP_READ,
                  0, 3 * FW_PAGE_SIZE, FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // UPDATE
     assert_int_equal(1, dev_cmd_pending());
     fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FW_CMD_OP_UPDATE, fc->op);
-    build_fw_rsp(rsp_buf, &rsp_size, fc->id, FW_CMD_OP_UPDATE,
+    assert_int_equal(FWUP_DEV_OP_UPDATE, fc->operation);
+    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_UPDATE,
                  0, 0, 0, NULL, 0);
-    send_publish("c/fwup/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     assert_string_equal("h/fwup/ctrl/!rsp", g_ctx.fe_subtopic);
     assert_int_equal(200, (int) g_ctx.fe_rsp.transaction_id);
@@ -1268,118 +1258,118 @@ static void test_fpga_pipeline_refill(void ** state) {
     fpga_drive_to_open();
 
     // ERASE (1 block)
-    struct js320_jtag_cmd_s * jc = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_ERASE_64K, jc->operation);
-    uint8_t rsp_buf[sizeof(struct js320_jtag_cmd_s) + FW_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * jc = pop_jtag_cmd("c/jtag/!cmd");
+    assert_int_equal(MB_STDMSG_MEM_OP_ERASE, jc->operation);
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_ERASE_64K, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_ERASE, 0, 0, 0, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // --- WRITE phase: initial fill sends pages 0,1 ---
     assert_int_equal(2, dev_cmd_pending());
     struct captured_dev_cmd * wc0 = pop_jtag_cmd_raw("c/jtag/!cmd");
-    struct js320_jtag_cmd_s * jw0 = (struct js320_jtag_cmd_s *) wc0->data;
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jw0->operation);
+    struct mb_stdmsg_mem_s * jw0 = (struct mb_stdmsg_mem_s *) (wc0->data + STDMSG_HDR_SIZE);
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jw0->operation);
     assert_int_equal(0 * FW_PAGE_SIZE, (int) jw0->offset);
     // Verify write payload for page 0
     uint8_t expected[FW_PAGE_SIZE];
     get_expected_page(image, sizeof(image), 0, expected);
-    assert_memory_equal(wc0->data + sizeof(struct js320_jtag_cmd_s),
+    assert_memory_equal(wc0->data + DEV_CMD_SIZE,
                         expected, FW_PAGE_SIZE);
 
     struct captured_dev_cmd * wc1 = pop_jtag_cmd_raw("c/jtag/!cmd");
-    struct js320_jtag_cmd_s * jw1 = (struct js320_jtag_cmd_s *) wc1->data;
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jw1->operation);
+    struct mb_stdmsg_mem_s * jw1 = (struct mb_stdmsg_mem_s *) (wc1->data + STDMSG_HDR_SIZE);
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jw1->operation);
     assert_int_equal(1 * FW_PAGE_SIZE, (int) jw1->offset);
     get_expected_page(image, sizeof(image), 1, expected);
-    assert_memory_equal(wc1->data + sizeof(struct js320_jtag_cmd_s),
+    assert_memory_equal(wc1->data + DEV_CMD_SIZE,
                         expected, FW_PAGE_SIZE);
 
     // Respond to page 0 -> refill with page 2
     build_jtag_rsp(rsp_buf, &rsp_size, jw0->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 0 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_WRITE, 0, 0 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(1, dev_cmd_pending());
     struct captured_dev_cmd * wc2 = pop_jtag_cmd_raw("c/jtag/!cmd");
-    struct js320_jtag_cmd_s * jw2 = (struct js320_jtag_cmd_s *) wc2->data;
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jw2->operation);
+    struct mb_stdmsg_mem_s * jw2 = (struct mb_stdmsg_mem_s *) (wc2->data + STDMSG_HDR_SIZE);
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jw2->operation);
     assert_int_equal(2 * FW_PAGE_SIZE, (int) jw2->offset);
     get_expected_page(image, sizeof(image), 2, expected);
-    assert_memory_equal(wc2->data + sizeof(struct js320_jtag_cmd_s),
+    assert_memory_equal(wc2->data + DEV_CMD_SIZE,
                         expected, FW_PAGE_SIZE);
 
     // Respond to page 1 -> refill with page 3
     build_jtag_rsp(rsp_buf, &rsp_size, jw1->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 1 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_WRITE, 0, 1 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(1, dev_cmd_pending());
     struct captured_dev_cmd * wc3 = pop_jtag_cmd_raw("c/jtag/!cmd");
-    struct js320_jtag_cmd_s * jw3 = (struct js320_jtag_cmd_s *) wc3->data;
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jw3->operation);
+    struct mb_stdmsg_mem_s * jw3 = (struct mb_stdmsg_mem_s *) (wc3->data + STDMSG_HDR_SIZE);
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jw3->operation);
     assert_int_equal(3 * FW_PAGE_SIZE, (int) jw3->offset);
     get_expected_page(image, sizeof(image), 3, expected);
-    assert_memory_equal(wc3->data + sizeof(struct js320_jtag_cmd_s),
+    assert_memory_equal(wc3->data + DEV_CMD_SIZE,
                         expected, FW_PAGE_SIZE);
 
     // Respond to page 2 -> no refill
     build_jtag_rsp(rsp_buf, &rsp_size, jw2->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 2 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_WRITE, 0, 2 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(0, dev_cmd_pending());
 
     // Respond to page 3 -> enter VERIFY
     build_jtag_rsp(rsp_buf, &rsp_size, jw3->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 3 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_WRITE, 0, 3 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // --- VERIFY phase: initial fill sends reads 0,1 ---
     assert_int_equal(2, dev_cmd_pending());
     jc = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_READ, jc->operation);
+    assert_int_equal(MB_STDMSG_MEM_OP_READ, jc->operation);
     assert_int_equal(0 * FW_PAGE_SIZE, (int) jc->offset);
-    struct js320_jtag_cmd_s * jr1 = pop_jtag_cmd("c/jtag/!cmd");
+    struct mb_stdmsg_mem_s * jr1 = pop_jtag_cmd("c/jtag/!cmd");
     assert_int_equal(1 * FW_PAGE_SIZE, (int) jr1->offset);
 
     // Respond read 0 -> refill read 2
     uint8_t page[FW_PAGE_SIZE];
     get_expected_page(image, sizeof(image), 0, page);
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_READ, 0, 0 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_READ, 0, 0 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(1, dev_cmd_pending());
-    struct js320_jtag_cmd_s * jr2 = pop_jtag_cmd("c/jtag/!cmd");
+    struct mb_stdmsg_mem_s * jr2 = pop_jtag_cmd("c/jtag/!cmd");
     assert_int_equal(2 * FW_PAGE_SIZE, (int) jr2->offset);
 
     // Respond read 1 -> refill read 3
     get_expected_page(image, sizeof(image), 1, page);
     build_jtag_rsp(rsp_buf, &rsp_size, jr1->transaction_id,
-                   JS320_JTAG_OP_MEM_READ, 0, 1 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_READ, 0, 1 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(1, dev_cmd_pending());
-    struct js320_jtag_cmd_s * jr3 = pop_jtag_cmd("c/jtag/!cmd");
+    struct mb_stdmsg_mem_s * jr3 = pop_jtag_cmd("c/jtag/!cmd");
     assert_int_equal(3 * FW_PAGE_SIZE, (int) jr3->offset);
 
     // Respond read 2 -> no refill
     get_expected_page(image, sizeof(image), 2, page);
     build_jtag_rsp(rsp_buf, &rsp_size, jr2->transaction_id,
-                   JS320_JTAG_OP_MEM_READ, 0, 2 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_READ, 0, 2 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     assert_int_equal(0, dev_cmd_pending());
 
     // Respond read 3 -> enter CLOSE
     get_expected_page(image, sizeof(image), 3, page);
     build_jtag_rsp(rsp_buf, &rsp_size, jr3->transaction_id,
-                   JS320_JTAG_OP_MEM_READ, 0, 3 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_READ, 0, 3 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, page, FW_PAGE_SIZE);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // CLOSE
     assert_int_equal(1, dev_cmd_pending());
@@ -1387,7 +1377,7 @@ static void test_fpga_pipeline_refill(void ** state) {
     assert_int_equal(JS320_JTAG_OP_MEM_CLOSE, jc->operation);
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
                    JS320_JTAG_OP_MEM_CLOSE, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // MODE_RESTORE
     assert_int_equal(1, dev_cmd_pending());
@@ -1417,40 +1407,40 @@ static void test_fpga_pipeline_error_drain(void ** state) {
     fpga_drive_to_open();
 
     // ERASE
-    struct js320_jtag_cmd_s * jc = pop_jtag_cmd("c/jtag/!cmd");
-    uint8_t rsp_buf[sizeof(struct js320_jtag_cmd_s) + FW_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * jc = pop_jtag_cmd("c/jtag/!cmd");
+    uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
-                   JS320_JTAG_OP_MEM_ERASE_64K, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_ERASE, 0, 0, 0, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // WRITE: 2 initial sends (pages 0,1)
     assert_int_equal(2, dev_cmd_pending());
-    struct js320_jtag_cmd_s * jw0 = pop_jtag_cmd("c/jtag/!cmd");
-    struct js320_jtag_cmd_s * jw1 = pop_jtag_cmd("c/jtag/!cmd");
+    struct mb_stdmsg_mem_s * jw0 = pop_jtag_cmd("c/jtag/!cmd");
+    struct mb_stdmsg_mem_s * jw1 = pop_jtag_cmd("c/jtag/!cmd");
 
     // Page 0 succeeds -> would normally refill page 2
     build_jtag_rsp(rsp_buf, &rsp_size, jw0->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 0, FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+                   MB_STDMSG_MEM_OP_WRITE, 0, 0, FW_PAGE_SIZE, NULL, 0);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     // Page 2 was sent as refill
     assert_int_equal(1, dev_cmd_pending());
-    struct js320_jtag_cmd_s * jw2 = pop_jtag_cmd("c/jtag/!cmd");
-    assert_int_equal(JS320_JTAG_OP_MEM_WRITE, jw2->operation);
+    struct mb_stdmsg_mem_s * jw2 = pop_jtag_cmd("c/jtag/!cmd");
+    assert_int_equal(MB_STDMSG_MEM_OP_WRITE, jw2->operation);
 
     // Page 1 FAILS -> error detected, no more refills
     build_jtag_rsp(rsp_buf, &rsp_size, jw1->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 1, FW_PAGE_SIZE, FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_WRITE, 1, FW_PAGE_SIZE, FW_PAGE_SIZE,
                    NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
     // Should NOT have refilled (error draining)
     assert_int_equal(0, dev_cmd_pending());
 
     // Page 2 succeeds -> drain complete, enter error cleanup
     build_jtag_rsp(rsp_buf, &rsp_size, jw2->transaction_id,
-                   JS320_JTAG_OP_MEM_WRITE, 0, 2 * FW_PAGE_SIZE,
+                   MB_STDMSG_MEM_OP_WRITE, 0, 2 * FW_PAGE_SIZE,
                    FW_PAGE_SIZE, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // Error cleanup -> CLOSE
     assert_int_equal(1, dev_cmd_pending());
@@ -1459,7 +1449,7 @@ static void test_fpga_pipeline_error_drain(void ** state) {
 
     build_jtag_rsp(rsp_buf, &rsp_size, jc->transaction_id,
                    JS320_JTAG_OP_MEM_CLOSE, 0, 0, 0, NULL, 0);
-    send_publish("c/jtag/!rsp", rsp_buf, rsp_size);
+    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     // MODE_RESTORE
     assert_int_equal(1, dev_cmd_pending());

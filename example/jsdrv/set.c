@@ -112,13 +112,13 @@ static int u32list_to_bin(const char * s, uint8_t ** bin, size_t * bin_size) {
         while (!is_separator(*c)) {
             *z++ = *c++;
             if ((z - u32_buffer) >= (intptr_t) (sizeof(u32_buffer) - 2)) {
-                printf("u32list item %lld too long\n", i);
+                printf("u32list item %lu too long\n", i);
                 return 1;
             }
         }
         *z++ = 0;
         if (jsdrv_cstr_to_u32(u32_buffer, &b[i])) {
-            printf("u32list item %lld conversion failed: %s\n", i, u32_buffer);
+            printf("u32list item %lu conversion failed: %s\n", i, u32_buffer);
             return 1;
         } else {
             printf("0x%08x\n", b[i]);

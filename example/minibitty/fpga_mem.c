@@ -15,6 +15,7 @@
  */
 
 #include "minibitty_exe_prv.h"
+#include "mb/stdmsg.h"
 #include "jsdrv/cstr.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,25 +30,9 @@
 
 
 enum js320_jtag_op_e {
-    JS320_JTAG_OP_MEM_OPEN      = 0x10,
-    JS320_JTAG_OP_MEM_CLOSE     = 0x11,
-    JS320_JTAG_OP_MEM_ERASE_64K = 0x12,
-    JS320_JTAG_OP_MEM_ERASE_4K  = 0x13,
-    JS320_JTAG_OP_MEM_WRITE     = 0x14,
-    JS320_JTAG_OP_MEM_READ      = 0x15,
-    JS320_JTAG_OP_MEM_READ_UID  = 0x16,
-};
-
-struct js320_jtag_cmd_s {
-    uint32_t transaction_id;
-    uint8_t operation;
-    uint8_t flags;
-    uint16_t timeout_ms;
-    uint32_t offset;
-    uint32_t length;
-    uint32_t delay_us;
-    uint32_t rsv1_u32;
-    uint8_t data[];
+    JS320_JTAG_OP_MEM_OPEN      = MB_STDMSG_MEM_OP_CUSTOM_START + 2,
+    JS320_JTAG_OP_MEM_CLOSE,
+    JS320_JTAG_OP_MEM_READ_UID,
 };
 
 
@@ -117,31 +102,29 @@ static void on_fwup_fpga_rsp(void * user_data, const char * topic,
 
 static const char * op_name(uint8_t op) {
     switch (op) {
+        case MB_STDMSG_MEM_OP_READ:       return "READ";
+        case MB_STDMSG_MEM_OP_WRITE:      return "WRITE";
+        case MB_STDMSG_MEM_OP_ERASE:      return "ERASE";
         case JS320_JTAG_OP_MEM_OPEN:      return "OPEN";
         case JS320_JTAG_OP_MEM_CLOSE:     return "CLOSE";
-        case JS320_JTAG_OP_MEM_ERASE_64K: return "ERASE_64K";
-        case JS320_JTAG_OP_MEM_ERASE_4K:  return "ERASE_4K";
-        case JS320_JTAG_OP_MEM_WRITE:     return "WRITE";
-        case JS320_JTAG_OP_MEM_READ:      return "READ";
-        case 0x07: return "PROG_AES_KEY";  // legacy
         case JS320_JTAG_OP_MEM_READ_UID:  return "READ_UID";
-        default:                    return "UNKNOWN";
+        default:                           return "UNKNOWN";
     }
 }
 
 static void on_rsp(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
     (void) topic;
-    const struct js320_jtag_cmd_s * rsp = (const struct js320_jtag_cmd_s *) value->value.bin;
-    if (value->size < sizeof(struct js320_jtag_cmd_s)) {
-        printf("RSP ERROR: too short: %u bytes (need %u)\n", value->size, (uint32_t) sizeof(struct js320_jtag_cmd_s));
+    const struct mb_stdmsg_mem_s * rsp = (const struct mb_stdmsg_mem_s *) value->value.bin;
+    if (value->size < sizeof(struct mb_stdmsg_mem_s)) {
+        printf("RSP ERROR: too short: %u bytes (need %u)\n", value->size, (uint32_t) sizeof(struct mb_stdmsg_mem_s));
         return;
     }
 
-    uint32_t data_size = value->size - (uint32_t) sizeof(struct js320_jtag_cmd_s);
+    uint32_t data_size = value->size - (uint32_t) sizeof(struct mb_stdmsg_mem_s);
     if (verbose_) {
-        printf("RSP: op=%s flags=%d offset=0x%06X length=%u value_size=%u data_size=%u\n",
-               op_name(rsp->operation), rsp->flags, rsp->offset, rsp->length, value->size, data_size);
+        printf("RSP: op=%s status=%d offset=0x%06X length=%u value_size=%u data_size=%u\n",
+               op_name(rsp->operation), rsp->status, rsp->offset, rsp->length, value->size, data_size);
         uint32_t raw_dump = (value->size > 32) ? 32 : value->size;
         printf("  RAW[%u]:", value->size);
         for (uint32_t i = 0; i < raw_dump; ++i) {
@@ -149,7 +132,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
         }
         printf("\n");
 
-        if ((rsp->operation == JS320_JTAG_OP_MEM_READ || rsp->operation == JS320_JTAG_OP_MEM_READ_UID) && data_size > 0) {
+        if ((rsp->operation == MB_STDMSG_MEM_OP_READ || rsp->operation == JS320_JTAG_OP_MEM_READ_UID) && data_size > 0) {
             uint32_t dump = (data_size > 16) ? 16 : data_size;
             printf("  READ data[0:%u]:", dump);
             for (uint32_t i = 0; i < dump; ++i) {
@@ -159,7 +142,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
         }
     }
 
-    if (rsp->operation == JS320_JTAG_OP_MEM_READ || rsp->operation == JS320_JTAG_OP_MEM_READ_UID) {
+    if (rsp->operation == MB_STDMSG_MEM_OP_READ || rsp->operation == JS320_JTAG_OP_MEM_READ_UID) {
         if (fpga_mem_.read_buf && data_size > 0) {
             uint32_t buf_offset = rsp->offset - fpga_mem_.read_buf_offset;
             if (buf_offset + data_size <= fpga_mem_.read_buf_length) {
@@ -174,7 +157,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
         }
     }
 
-    if (rsp->flags != 0) {
+    if (rsp->status != 0) {
         InterlockedIncrement(&fpga_mem_.error_count);
     }
     InterlockedDecrement(&fpga_mem_.outstanding);
@@ -196,18 +179,16 @@ static int pipeline_send(struct fpga_mem_s * fm, uint8_t op, uint32_t offset, ui
     }
 
     struct jsdrv_topic_s topic;
-    uint8_t buf[sizeof(struct js320_jtag_cmd_s) + FLASH_PAGE_SIZE];
-    struct js320_jtag_cmd_s * cmd = (struct js320_jtag_cmd_s *) buf;
-    uint32_t msg_size = sizeof(struct js320_jtag_cmd_s) + data_size;
+    uint8_t buf[sizeof(struct mb_stdmsg_mem_s) + FLASH_PAGE_SIZE];
+    struct mb_stdmsg_mem_s * cmd = (struct mb_stdmsg_mem_s *) buf;
+    uint32_t msg_size = sizeof(struct mb_stdmsg_mem_s) + data_size;
 
+    memset(cmd, 0, sizeof(*cmd));
     cmd->transaction_id = ++fm->transaction_id;
     cmd->operation = op;
-    cmd->flags = 0;
     cmd->timeout_ms = (uint16_t) timeout_ms;
     cmd->offset = offset;
     cmd->length = length;
-    cmd->delay_us = 0;
-    cmd->rsv1_u32 = 0;
     if (data && data_size > 0) {
         memcpy(cmd->data, data, data_size);
     }
@@ -256,7 +237,7 @@ static int jtag_mem_read(struct fpga_mem_s * fm, uint32_t offset, uint8_t * buf,
     uint32_t addr = offset;
     while (remaining > 0) {
         uint32_t chunk = (remaining > FLASH_PAGE_SIZE) ? FLASH_PAGE_SIZE : remaining;
-        int rc = jtag_mem_cmd(fm, JS320_JTAG_OP_MEM_READ, addr, chunk, NULL, 0, 1000);
+        int rc = jtag_mem_cmd(fm, MB_STDMSG_MEM_OP_READ, addr, chunk, NULL, 0, 1000);
         if (rc) {
             fm->read_buf = NULL;
             return rc;
@@ -305,7 +286,7 @@ static int setup_common(struct app_s * self) {
     struct jsdrv_topic_s topic;
 
     if (verbose_) {
-        printf("sizeof(js320_jtag_cmd_s) = %u\n", (uint32_t) sizeof(struct js320_jtag_cmd_s));
+        printf("sizeof(mb_stdmsg_mem_s) = %u\n", (uint32_t) sizeof(struct mb_stdmsg_mem_s));
     }
 
     memset(&fpga_mem_, 0, sizeof(fpga_mem_));
@@ -381,7 +362,7 @@ static int do_erase(struct app_s * self, uint32_t offset, uint32_t size) {
         if (verbose_) {
             printf("  Erase block %u/%u (offset 0x%06X)\n", block + 1, num_blocks, addr);
         }
-        int rc = jtag_mem_cmd(&fpga_mem_, JS320_JTAG_OP_MEM_ERASE_64K, addr, 0, NULL, 0, 5000);
+        int rc = jtag_mem_cmd(&fpga_mem_, MB_STDMSG_MEM_OP_ERASE, addr, FLASH_BLOCK_64K, NULL, 0, 5000);
         if (rc) {
             printf("ERROR: erase failed at offset 0x%06X\n", addr);
             return rc;
@@ -409,7 +390,7 @@ static int do_write(struct app_s * self, uint32_t offset, uint32_t size) {
         if (verbose_) {
             printf("  Write page %u/%u (offset 0x%06X)\n", page + 1, num_pages, addr);
         }
-        int rc = jtag_mem_cmd(&fpga_mem_, JS320_JTAG_OP_MEM_WRITE, addr, FLASH_PAGE_SIZE, page_buf, FLASH_PAGE_SIZE, 1000);
+        int rc = jtag_mem_cmd(&fpga_mem_, MB_STDMSG_MEM_OP_WRITE, addr, FLASH_PAGE_SIZE, page_buf, FLASH_PAGE_SIZE, 1000);
         if (rc) {
             printf("ERROR: write failed at offset 0x%06X\n", addr);
             return rc;

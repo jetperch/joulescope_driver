@@ -1,5 +1,6 @@
 /*
- * Copyright 2014-2024 Jetperch LLC
+ * SPDX-FileCopyrightText: Copyright 2014-2024 Jetperch LLC
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +21,8 @@
  * @brief Commonly used C macros for RTOS.
  */
 
-#ifndef MB_CMACRO_INC_H__
-#define MB_CMACRO_INC_H__
+#ifndef MB_CDEF_INC_H__
+#define MB_CDEF_INC_H__
 
 #include <stddef.h>  // offsetof
 
@@ -34,6 +35,11 @@
  * @{
  */
 
+/// Indicate state machine code generation section
+#define MB_DEF_STATE_MACHINE 0
+
+/// Indicate code generation section
+#define MB_GENERATOR 0
 
 /**
  * @brief The unique file identifier for this compilation unit.
@@ -91,7 +97,7 @@
  * @return The pointer to the container.
  */
 #define MB_CONTAINER_OF(ptr, type, member) \
-( (type *) (((char *) (ptr)) - offsetof(type, member)) )
+( (type *) (((uintptr_t) (ptr)) - offsetof(type, member)) )
 
 /**
  * @brief Perform a compile-time check
@@ -106,6 +112,7 @@
  * @brief Declare a packed structure.
  */
 #ifdef __GNUC__
+#define MB_NORETURN __attribute__((noreturn))
 #define MB_STRUCT_PACKED __attribute__((packed))
 #define MB_ALIGNED(value) __attribute__((aligned(value)))
 #define MB_USED __attribute__((used))
@@ -121,6 +128,7 @@
 #define MB_INLINE_FN static inline __attribute__((always_inline))
 #endif
 #else
+#define MB_NORETURN
 #define MB_STRUCT_PACKED
 #define MB_ALIGNED(value)
 #define MB_USED
@@ -139,4 +147,4 @@
 
 /** @} */
 
-#endif /* MB_CMACRO_INC_H__ */
+#endif /* MB_CDEF_INC_H__ */

@@ -24,6 +24,7 @@
 #define JSDRV_PRV_JS320_JTAG_H_
 
 #include "jsdrv/cmacro_inc.h"
+#include "mb/stdmsg.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -42,26 +43,11 @@ struct js320_jtag_s;
 
 
 enum js320_jtag_op_e {
-    JS320_JTAG_OP_GOTO_STATE    = 1,
-    JS320_JTAG_OP_SHIFT         = 2,
-    JS320_JTAG_OP_MEM_OPEN      = 0x10,
-    JS320_JTAG_OP_MEM_CLOSE     = 0x11,
-    JS320_JTAG_OP_MEM_ERASE_64K = 0x12,
-    JS320_JTAG_OP_MEM_ERASE_4K  = 0x13,
-    JS320_JTAG_OP_MEM_WRITE     = 0x14,
-    JS320_JTAG_OP_MEM_READ      = 0x15,
-    JS320_JTAG_OP_MEM_READ_UID  = 0x16,
-};
-
-struct js320_jtag_cmd_s {
-    uint32_t transaction_id;
-    uint8_t operation;
-    uint8_t flags;
-    uint16_t timeout_ms;
-    uint32_t offset;
-    uint32_t length;
-    uint32_t delay_us;
-    uint32_t rsv1_u32;
+    JS320_JTAG_OP_GOTO_STATE    = MB_STDMSG_MEM_OP_CUSTOM_START,
+    JS320_JTAG_OP_SHIFT,
+    JS320_JTAG_OP_MEM_OPEN,
+    JS320_JTAG_OP_MEM_CLOSE,
+    JS320_JTAG_OP_MEM_READ_UID,
 };
 
 struct jtag_aes_cmd_s {

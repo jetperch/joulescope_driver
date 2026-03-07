@@ -26,6 +26,7 @@
 #include "jsdrv_prv/mb_drv.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/thread.h"
+#include "mb/stdmsg.h"
 #include <inttypes.h>
 #include <jsdrv/cstr.h>
 #include <stdio.h>
@@ -113,6 +114,10 @@ struct jsdrvp_mb_dev_s {
     struct mb_link_identity_s identity;  // received device identity
     struct jsdrv_time_map_s time_map;
 };
+
+char mb_pubsub_prefix_get(void) {
+    return 'h';
+}
 
 static void timeout_set(struct jsdrvp_mb_dev_s * self) {
     self->timeout_utc = jsdrv_time_utc() + JSDRV_TIME_SECOND;
@@ -445,9 +450,8 @@ static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, co
     struct mb_stdmsg_header_s hdr;
     hdr.version = 0;
     hdr.type = MB_STDMSG_PUBLISH;
-    hdr.rsv_u8 = 0;
+    hdr.origin_prefix = 'h';
     hdr.metadata = 0
-        | (((uint32_t) 'h') << 16)      // pubsub prefix
         | (0 << 8)                      // tracking id
         | ((length_u8 & 0x0003U) << 6)  // size LSB
         | (value->type & 0x000fU);
@@ -463,7 +467,7 @@ static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, co
         if (jsdrv_cstr_copy((char *) data_u8, value->value.str, (PAYLOAD_SIZE_MAX_U8 - MB_TOPIC_SIZE_MAX))) {
             JSDRV_LOGW("bulk_out_publish(%s) string truncated", topic);
         }
-    } else if (value->type == JSDRV_UNION_BIN) {
+    } else if (value->type == JSDRV_UNION_BIN || value->type == JSDRV_UNION_STDMSG) {
         memcpy(data_u8, value->value.bin, value->size);
     } else {
         memcpy(data_u8, &value->value.u64, sizeof(uint64_t));

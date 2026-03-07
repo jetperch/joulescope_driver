@@ -27,31 +27,21 @@
 #include <string.h>
 
 
-// --- Device-side protocol (unchanged from firmware.c / fpga_mem.c) ---
+// --- Device-side protocol (uses mb_stdmsg_mem_s) ---
 
 #define FW_PAGE_SIZE            256U
-#define FW_CMD_HEADER_SIZE      16U
 #define PIPELINE_DEFAULT        4U
 #define PIPELINE_MAX            16U
 #define FLASH_BLOCK_64K         65536U
 
-enum fw_cmd_op_e {
-    FW_CMD_OP_ALLOCATE = 1,
-    FW_CMD_OP_WRITE    = 2,
-    FW_CMD_OP_READ     = 3,
-    FW_CMD_OP_UPDATE   = 4,
-    FW_CMD_OP_LAUNCH   = 5,
-    FW_CMD_OP_ERASE    = 6,
-};
-
-struct fw_cmd_s {
-    uint32_t id;
-    uint8_t op;
-    uint8_t status;
-    uint8_t image;
-    uint8_t rsv;
-    uint32_t offset;
-    uint32_t length;
+/// Device-side fwup operation codes (mirrors mb_fwup_op_e + mb_stdmsg_mem_op_e).
+enum fwup_dev_op_e {
+    FWUP_DEV_OP_READ      = MB_STDMSG_MEM_OP_READ,
+    FWUP_DEV_OP_WRITE     = MB_STDMSG_MEM_OP_WRITE,
+    FWUP_DEV_OP_ERASE     = MB_STDMSG_MEM_OP_ERASE,
+    FWUP_DEV_OP_ALLOCATE  = MB_STDMSG_MEM_OP_CUSTOM_START,
+    FWUP_DEV_OP_UPDATE,
+    FWUP_DEV_OP_LAUNCH,
 };
 
 #define JTAG_MEM_DELAY_US       100U
@@ -166,23 +156,30 @@ static void ctrl_send_fw_cmd(struct js320_fwup_s * self,
                               uint8_t op, uint8_t image,
                               uint32_t offset, uint32_t length,
                               const uint8_t * data, uint32_t data_size) {
-    uint8_t buf[FW_CMD_HEADER_SIZE + FW_PAGE_SIZE];
-    struct fw_cmd_s * cmd = (struct fw_cmd_s *) buf;
-    uint32_t msg_size = FW_CMD_HEADER_SIZE + data_size;
+    uint8_t buf[sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s) + FW_PAGE_SIZE];
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_MEM;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    struct mb_stdmsg_mem_s * cmd = (struct mb_stdmsg_mem_s *) (hdr + 1);
+    uint32_t msg_size = sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s) + data_size;
 
-    cmd->id = ++self->device_cmd_id;
-    cmd->op = op;
-    cmd->status = 0;
-    cmd->image = image;
-    cmd->rsv = 0;
+    memset(cmd, 0, sizeof(*cmd));
+    cmd->transaction_id = ++self->device_cmd_id;
+    cmd->target = image;
+    cmd->operation = op;
     cmd->offset = offset;
     cmd->length = length;
     if (data && data_size > 0) {
-        memcpy(buf + FW_CMD_HEADER_SIZE, data, data_size);
+        memcpy(buf + sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s), data, data_size);
     }
 
-    jsdrvp_mb_dev_publish_to_device(self->dev, "c/fwup/!cmd",
-        &jsdrv_union_bin(buf, msg_size));
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = msg_size;
+    v.value.bin = buf;
+    jsdrvp_mb_dev_publish_to_device(self->dev, "c/fwup/!cmd", &v);
 }
 
 static void ctrl_get_page_data(struct js320_fwup_s * self,
@@ -203,7 +200,7 @@ static void ctrl_send_writes(struct js320_fwup_s * self) {
            (self->send_idx - self->recv_idx) < self->pipeline_depth) {
         uint32_t offset = self->send_idx * FW_PAGE_SIZE;
         ctrl_get_page_data(self, self->send_idx, page_buf);
-        ctrl_send_fw_cmd(self, FW_CMD_OP_WRITE, 0,
+        ctrl_send_fw_cmd(self, FWUP_DEV_OP_WRITE, 0,
                           offset, FW_PAGE_SIZE,
                           page_buf, FW_PAGE_SIZE);
         self->send_idx++;
@@ -214,7 +211,7 @@ static void ctrl_send_reads(struct js320_fwup_s * self) {
     while (self->send_idx < self->page_count &&
            (self->send_idx - self->recv_idx) < self->pipeline_depth) {
         uint32_t offset = self->send_idx * FW_PAGE_SIZE;
-        ctrl_send_fw_cmd(self, FW_CMD_OP_READ, 0,
+        ctrl_send_fw_cmd(self, FWUP_DEV_OP_READ, 0,
                           offset, FW_PAGE_SIZE, NULL, 0);
         self->send_idx++;
     }
@@ -290,21 +287,21 @@ static void ctrl_on_cmd(struct js320_fwup_s * self,
             self->page_count = (image_size + FW_PAGE_SIZE - 1) / FW_PAGE_SIZE;
             // Start with ALLOCATE
             self->ctrl_state = CTRL_ALLOCATE;
-            ctrl_send_fw_cmd(self, FW_CMD_OP_ALLOCATE, 0, 0,
+            ctrl_send_fw_cmd(self, FWUP_DEV_OP_ALLOCATE, 0, 0,
                               image_size, NULL, 0);
             break;
 
         case FWUP_CTRL_OP_LAUNCH:
             JSDRV_LOGI("fwup ctrl: launch image_slot=%u", cmd->image_slot);
             self->ctrl_state = CTRL_LAUNCH;
-            ctrl_send_fw_cmd(self, FW_CMD_OP_LAUNCH, cmd->image_slot,
+            ctrl_send_fw_cmd(self, FWUP_DEV_OP_LAUNCH, cmd->image_slot,
                               0, 0, NULL, 0);
             break;
 
         case FWUP_CTRL_OP_ERASE:
             JSDRV_LOGI("fwup ctrl: erase image_slot=%u", cmd->image_slot);
             self->ctrl_state = CTRL_ERASE;
-            ctrl_send_fw_cmd(self, FW_CMD_OP_ERASE, cmd->image_slot,
+            ctrl_send_fw_cmd(self, FWUP_DEV_OP_ERASE, cmd->image_slot,
                               0, 0, NULL, 0);
             break;
 
@@ -317,16 +314,20 @@ static void ctrl_on_cmd(struct js320_fwup_s * self,
 
 static void ctrl_on_dev_rsp(struct js320_fwup_s * self,
                               const struct jsdrv_union_s * value) {
-    if (value->size < FW_CMD_HEADER_SIZE) {
+    uint32_t hdr_offset = 0;
+    if (value->type == JSDRV_UNION_STDMSG) {
+        hdr_offset = sizeof(struct mb_stdmsg_header_s);
+    }
+    if (value->size < hdr_offset + sizeof(struct mb_stdmsg_mem_s)) {
         JSDRV_LOGW("fwup ctrl: rsp too short (%u bytes)", value->size);
         return;
     }
 
-    const struct fw_cmd_s * rsp = (const struct fw_cmd_s *) value->value.bin;
+    const struct mb_stdmsg_mem_s * rsp = (const struct mb_stdmsg_mem_s *) (value->value.bin + hdr_offset);
 
     if (rsp->status != 0) {
         JSDRV_LOGW("fwup ctrl: device error status=%u op=%u offset=0x%06X",
-                   rsp->status, rsp->op, rsp->offset);
+                   rsp->status, rsp->operation, rsp->offset);
         self->error_count++;
         if (self->error_code == 0) {
             self->error_code = JSDRV_ERROR_IO;
@@ -361,8 +362,8 @@ static void ctrl_on_dev_rsp(struct js320_fwup_s * self,
             // Compare read data against expected
             if (rsp->status == 0 && self->error_code == 0) {
                 uint32_t page_idx = rsp->offset / FW_PAGE_SIZE;
-                uint32_t data_size = value->size - FW_CMD_HEADER_SIZE;
-                const uint8_t * read_data = value->value.bin + FW_CMD_HEADER_SIZE;
+                uint32_t data_size = value->size - hdr_offset - sizeof(struct mb_stdmsg_mem_s);
+                const uint8_t * read_data = value->value.bin + hdr_offset + sizeof(struct mb_stdmsg_mem_s);
                 uint8_t expected[FW_PAGE_SIZE];
                 ctrl_get_page_data(self, page_idx, expected);
                 if (data_size >= FW_PAGE_SIZE &&
@@ -382,7 +383,7 @@ static void ctrl_on_dev_rsp(struct js320_fwup_s * self,
                 JSDRV_LOGI("fwup ctrl: update image_slot=%u",
                            self->ctrl_image_slot);
                 self->ctrl_state = CTRL_UPDATE;
-                ctrl_send_fw_cmd(self, FW_CMD_OP_UPDATE,
+                ctrl_send_fw_cmd(self, FWUP_DEV_OP_UPDATE,
                                   self->ctrl_image_slot, 0, 0, NULL, 0);
             } else {
                 ctrl_send_reads(self);
@@ -420,24 +421,31 @@ static void fpga_send_jtag_mem_cmd(struct js320_fwup_s * self,
                                      const uint8_t * data,
                                      uint32_t data_size,
                                      uint16_t timeout_ms) {
-    uint8_t buf[sizeof(struct js320_jtag_cmd_s) + FW_PAGE_SIZE];
-    struct js320_jtag_cmd_s * cmd = (struct js320_jtag_cmd_s *) buf;
-    uint32_t msg_size = sizeof(struct js320_jtag_cmd_s) + data_size;
+    uint8_t buf[sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s) + FW_PAGE_SIZE];
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_MEM;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    struct mb_stdmsg_mem_s * cmd = (struct mb_stdmsg_mem_s *) (hdr + 1);
+    uint32_t msg_size = sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s) + data_size;
 
+    memset(cmd, 0, sizeof(*cmd));
     cmd->transaction_id = ++self->device_cmd_id;
     cmd->operation = op;
-    cmd->flags = 0;
     cmd->timeout_ms = timeout_ms;
     cmd->offset = offset;
     cmd->length = length;
     cmd->delay_us = JTAG_MEM_DELAY_US;
-    cmd->rsv1_u32 = 0;
     if (data && data_size > 0) {
-        memcpy(buf + sizeof(struct js320_jtag_cmd_s), data, data_size);
+        memcpy(buf + sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_mem_s), data, data_size);
     }
 
-    jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd",
-        &jsdrv_union_bin(buf, msg_size));
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = msg_size;
+    v.value.bin = buf;
+    jsdrvp_mb_dev_publish_to_device(self->dev, "c/jtag/!cmd", &v);
 }
 
 static void fpga_get_page_data(struct js320_fwup_s * self,
@@ -458,7 +466,7 @@ static void fpga_send_writes(struct js320_fwup_s * self) {
            (self->send_idx - self->recv_idx) < self->pipeline_depth) {
         uint32_t offset = self->send_idx * FW_PAGE_SIZE;
         fpga_get_page_data(self, self->send_idx, page_buf);
-        fpga_send_jtag_mem_cmd(self, JS320_JTAG_OP_MEM_WRITE,
+        fpga_send_jtag_mem_cmd(self, MB_STDMSG_MEM_OP_WRITE,
                                 offset, FW_PAGE_SIZE,
                                 page_buf, FW_PAGE_SIZE, 1000);
         self->send_idx++;
@@ -469,7 +477,7 @@ static void fpga_send_reads(struct js320_fwup_s * self) {
     while (self->send_idx < self->page_count &&
            (self->send_idx - self->recv_idx) < self->pipeline_depth) {
         uint32_t offset = self->send_idx * FW_PAGE_SIZE;
-        fpga_send_jtag_mem_cmd(self, JS320_JTAG_OP_MEM_READ,
+        fpga_send_jtag_mem_cmd(self, MB_STDMSG_MEM_OP_READ,
                                 offset, FW_PAGE_SIZE,
                                 NULL, 0, 1000);
         self->send_idx++;
@@ -515,8 +523,8 @@ static void fpga_enter_erase(struct js320_fwup_s * self) {
     self->error_count = 0;
     JSDRV_LOGI("fwup fpga: erase %u blocks", self->erase_block_count);
     self->fpga_state = FPGA_ERASE;
-    fpga_send_jtag_mem_cmd(self, JS320_JTAG_OP_MEM_ERASE_64K,
-                            0, 0, NULL, 0, 5000);
+    fpga_send_jtag_mem_cmd(self, MB_STDMSG_MEM_OP_ERASE,
+                            0, FLASH_BLOCK_64K, NULL, 0, 5000);
 }
 
 static void fpga_enter_write(struct js320_fwup_s * self) {
@@ -599,16 +607,20 @@ static void fpga_on_cmd(struct js320_fwup_s * self,
 
 static void fpga_on_dev_rsp(struct js320_fwup_s * self,
                               const struct jsdrv_union_s * value) {
-    if (value->size < sizeof(struct js320_jtag_cmd_s)) {
+    uint32_t hdr_offset = 0;
+    if (value->type == JSDRV_UNION_STDMSG) {
+        hdr_offset = sizeof(struct mb_stdmsg_header_s);
+    }
+    if (value->size < hdr_offset + sizeof(struct mb_stdmsg_mem_s)) {
         JSDRV_LOGW("fwup fpga: rsp too short (%u bytes)", value->size);
         return;
     }
 
-    const struct js320_jtag_cmd_s * rsp = (const struct js320_jtag_cmd_s *) value->value.bin;
+    const struct mb_stdmsg_mem_s * rsp = (const struct mb_stdmsg_mem_s *) (value->value.bin + hdr_offset);
 
-    if (rsp->flags != 0) {
+    if (rsp->status != 0) {
         JSDRV_LOGW("fwup fpga: device error status=%u op=%u offset=0x%06X",
-                   rsp->flags, rsp->operation, rsp->offset);
+                   rsp->status, rsp->operation, rsp->offset);
         self->error_count++;
         if (self->error_code == 0) {
             self->error_code = JSDRV_ERROR_IO;
@@ -633,8 +645,8 @@ static void fpga_on_dev_rsp(struct js320_fwup_s * self,
                     fpga_enter_write(self);
                 } else {
                     uint32_t offset = self->erase_block_idx * FLASH_BLOCK_64K;
-                    fpga_send_jtag_mem_cmd(self, JS320_JTAG_OP_MEM_ERASE_64K,
-                                            offset, 0, NULL, 0, 5000);
+                    fpga_send_jtag_mem_cmd(self, MB_STDMSG_MEM_OP_ERASE,
+                                            offset, FLASH_BLOCK_64K, NULL, 0, 5000);
                 }
             }
             break;
@@ -654,10 +666,10 @@ static void fpga_on_dev_rsp(struct js320_fwup_s * self,
 
         case FPGA_VERIFY: {
             self->recv_idx++;
-            if (rsp->flags == 0 && self->error_code == 0) {
+            if (rsp->status == 0 && self->error_code == 0) {
                 uint32_t page_idx = rsp->offset / FW_PAGE_SIZE;
-                uint32_t data_size = value->size - sizeof(struct js320_jtag_cmd_s);
-                const uint8_t * read_data = value->value.bin + sizeof(struct js320_jtag_cmd_s);
+                uint32_t data_size = value->size - hdr_offset - sizeof(struct mb_stdmsg_mem_s);
+                const uint8_t * read_data = value->value.bin + hdr_offset + sizeof(struct mb_stdmsg_mem_s);
                 uint8_t expected[FW_PAGE_SIZE];
                 fpga_get_page_data(self, page_idx, expected);
                 if (data_size >= FW_PAGE_SIZE &&
@@ -768,12 +780,12 @@ bool js320_fwup_handle_publish(struct js320_fwup_s * fwup,
                                 const char * subtopic,
                                 const struct jsdrv_union_s * value) {
     if (fwup->ctrl_state != CTRL_IDLE &&
-        0 == strcmp(subtopic, "c/fwup/!rsp")) {
+        0 == strcmp(subtopic, "h/!rsp")) {
         ctrl_on_dev_rsp(fwup, value);
         return true;
     }
     if (fwup->fpga_state != FPGA_IDLE &&
-        0 == strcmp(subtopic, "c/jtag/!rsp")) {
+        0 == strcmp(subtopic, "h/!rsp")) {
         fpga_on_dev_rsp(fwup, value);
         return true;
     }

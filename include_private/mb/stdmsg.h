@@ -1,5 +1,6 @@
 /*
- * Copyright 2024-2025 Jetperch LLC
+ * SPDX-FileCopyrightText: Copyright 2024-2025 Jetperch LLC
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,12 +72,14 @@ enum mb_stdmsg_type_e {
     MB_STDMSG_TIMESYNC_MAP = 0x04,    // see mb_timesync_map_v1_s in mb/timesync.h
     MB_STDMSG_COMM_STATS = 0x05,      // see mb_comm_stats_v1_s in mb/comm/stats.h
     MB_STDMSG_THROUGHPUT = 0x06,      // raw data
-
-    // todo firmware update
+    MB_STDMSG_MEM = 0x07,             // see mb_stdmsg_mem_s
 
     MB_STDMSG_USER = 0x80,
     MB_STDMSG_USER_LAST = 0xff,
 };
+
+// Forward declaration for mb/msg.h
+struct mb_msg_s;
 
 /**
  * @brief The standardized message header for Minibitty binary payloads.
@@ -91,7 +94,7 @@ enum mb_stdmsg_type_e {
 struct mb_stdmsg_header_s {
     uint16_t version;          ///< major.minor version: Minibitty version for type < MB_STDMSG_USER, else app version
     uint8_t type;              ///< The mb_stdmsg_type_e.  Apps define >= MB_STDMSG_USER.
-    uint8_t rsv_u8;            ///< Reserved for future use.  Set to 0.
+    uint8_t origin_prefix;     ///< The message origin pubsub prefix character.
     uint32_t metadata;         ///< Arbitrary metadata defined by type.
 };
 
@@ -108,9 +111,8 @@ struct mb_stdmsg_header_s {
  * The frame metadata field is reserved and must be set to 0.
  *
  * The mb_stdmsg_header_s.metadata field is defined as:
- * - metadata[31:24]: Reserved, set to 0
- * - metadata[23:16]: The source pubsub prefix, used for confirmations and errors.
- * - metadata[15:8]: tracking id for confirmation responses, or zero for unconfirmed.
+ * - metadata[32:16]: tracking id for confirmation responses, or zero for unconfirmed.
+ * - metadata[15:8]: Reserved, set to 0
  * - metadata[7:6]: size LSB
  * - metadata[5:4]: reserved, set to 0.
  * - metadata[3:0]: the published value type (pointer values not allowed)
@@ -119,11 +121,11 @@ struct mb_stdmsg_header_s {
  * back to the origin.
  *
  * On error, the target pubsub instance publishes a mb_stdmsg_pubsub_response_s
- * to the {origin_prefix}/!err.
+ * to {origin_prefix}/./!err.
  *
  * Confirmed delivery works similarly.  Whenever the metadata tracking id
  * field is nonzero, the target pubsub instance publishes a
- * mb_stdmsg_pubsub_response_s to {origin_prefix}/!rsp
+ * mb_stdmsg_pubsub_response_s to {origin_prefix}/./!rsp
  *
  * Since the PubSub instance completes the publish operation before
  * publishing the response, the system guarantees that all subscribers
@@ -148,6 +150,9 @@ struct mb_stdmsg_pubsub_response_s {
     uint8_t return_code;
 };
 
+// forward declaration for mb/pubsub.h
+char mb_pubsub_prefix_get(void);
+
 /**
  * @brief Format a standard message header.
  *
@@ -163,7 +168,7 @@ static inline uint32_t * mb_stdmsg_header_init(struct mb_stdmsg_header_s * heade
         header->version = 0;  // todo
     }
     header->type = type;
-    header->rsv_u8 = 0;
+    header->origin_prefix = mb_pubsub_prefix_get();
     header->metadata = meta;
     return (uint32_t *) (header + 1);
 }
@@ -176,6 +181,89 @@ static inline uint32_t * mb_stdmsg_header_init(struct mb_stdmsg_header_s * heade
  * @return 0 or error code.
  */
 uint8_t mb_stdmsg_pubsub_value_size(struct mb_msg_s * msg, uint16_t * size);
+
+
+/**
+ * @brief The mb_stdmsg_mem_s operation.
+ */
+enum mb_stdmsg_mem_op_e {
+    MB_STDMSG_MEM_OP_INVALID = 0,
+    MB_STDMSG_MEM_OP_READ = 1,
+    MB_STDMSG_MEM_OP_WRITE = 2,
+    MB_STDMSG_MEM_OP_ERASE = 3,
+    MB_STDMSG_MEM_OP_CUSTOM_START = 8,
+};
+
+/**
+ * @brief Memory transaction header for read, write and erase operations.
+ *
+ * Some targets may constrain the arguments.  For example, flash may
+ * only accept write operations aligned to pages.
+ *
+ * Commands are published as MB_VALUE_STDMSG with type MB_STDMSG_MEM.
+ * The target implements a "{prefix}/!cmd" subscription.
+ * The response is published to "{origin_prefix}/!rsp" where
+ * origin_prefix comes from the command's mb_stdmsg_header_s.
+ *
+ * For WRITE commands, data[length] follows this header.
+ * For READ responses, data[length] follows this header.
+ *
+ * Size: 24 bytes (excluding flexible array member).
+ */
+struct mb_stdmsg_mem_s {
+    uint32_t transaction_id;    ///< Arbitrary transaction id, provided by initiator.
+    uint8_t target;             ///< The target memory region, such as a firmware image.
+    uint8_t operation;          ///< mb_stdmsg_mem_op_e or custom operation >= CUSTOM_START.
+    uint8_t flags;              ///< Reserved for additional operation flags.
+    uint8_t status;             ///< Command completion status: 0=success, else mb_error_code_e.
+    uint16_t timeout_ms;        ///< Transaction timeout, in milliseconds.
+    uint16_t rsv1_u16;          ///< Reserved, write 0.
+    uint32_t offset;            ///< The offset, as defined by the target.
+    uint32_t length;            ///< The operation data length, in bytes.
+    uint32_t delay_us;          ///< Optional post-operation delay in microseconds.
+    uint8_t data[];             ///< Variable-length payload for WRITE/READ operations.
+};
+
+/**
+ * @brief Send a header-only memory operation response to the origin.
+ *
+ * Copies the command header, sets the status, and publishes as
+ * MB_STDMSG_MEM to {origin_prefix}/!rsp.
+ *
+ * @param origin_prefix The origin pubsub prefix character.
+ * @param cmd The command to respond to.
+ * @param status The response status (0=success, else mb_error_code_e).
+ */
+void mb_stdmsg_mem_respond(uint8_t origin_prefix,
+        const struct mb_stdmsg_mem_s * cmd, uint8_t status);
+
+/**
+ * @brief Create a memory operation response with data, to the origin.
+ *
+ * Allocates a message, copies the command header, sets the status,
+ * and targets {origin_prefix}/!rsp as MB_STDMSG_MEM.
+ * The caller must fill in the data payload and send the message via
+ * mb_task_send(mb_context->services[MB_TASK_SERVICE_PUBSUB], msg).
+ *
+ * After calling this function, access the response struct and data:
+ * @code
+ * struct mb_stdmsg_mem_s * rsp = (struct mb_stdmsg_mem_s *)
+ *     (msg->value.bin + MB_PUBSUB_MSG_VALUE_OFFSET
+ *      + sizeof(struct mb_stdmsg_header_s));
+ * uint8_t * data = rsp->data;
+ * @endcode
+ *
+ * @param origin_prefix The origin pubsub prefix character.
+ * @param cmd The command to respond to.
+ * @param status The response status (0=success, else mb_error_code_e).
+ * @param data_alloc_length The data allocation size in bytes.
+ * @return The message ready for data fill and send via
+ *      mb_task_send(mb_context->services[MB_TASK_SERVICE_PUBSUB], msg).
+ */
+struct mb_msg_s * mb_stdmsg_mem_respond_data(
+        uint8_t origin_prefix,
+        const struct mb_stdmsg_mem_s * cmd, uint8_t status,
+        uint32_t data_alloc_length);
 
 MB_CPP_GUARD_END
 
