@@ -339,6 +339,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
     cdef np.npy_intp shape[1]
     cdef uint8_t[:] u8_mem
     cdef int32_t idx
+    cdef uint8_t * u8_ptr;
     cdef uint16_t * u16_ptr;
     cdef uint32_t * u32_ptr;
     cdef uint64_t * u64_ptr;
@@ -481,6 +482,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
             else:
                 v = value[0].value.bin[:value[0].size]
         elif t == c_jsdrv.JSDRV_UNION_STDMSG:
+            u8_ptr = <uint8_t *> &value[0].value.bin[0]
             u16_ptr = <uint16_t *> &value[0].value.bin[0]
             u32_ptr = <uint32_t *> &value[0].value.bin[0]
             u64_ptr = <uint64_t *> &value[0].value.bin[0]
@@ -500,6 +502,17 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 v['frame_error'] = u32_ptr[8]
                 v['link_error'] = u32_ptr[9]
                 v['app_error'] = u32_ptr[10]
+            elif value[0].value.bin[2] == 0x07:  # MB_STDMSG_MEM
+                v['transaction_id'] = u32_ptr[2]
+                v['target'] = u8_ptr[12]
+                v['operation'] = u8_ptr[13]
+                v['flags'] = u8_ptr[14]
+                v['status'] = u8_ptr[15]
+                v['timeout_ms'] = u16_ptr[8]
+                v['offset'] = u32_ptr[5]
+                v['length'] = u32_ptr[6]
+                v['delay_us'] = u32_ptr[7]
+                v['data'] = u8_ptr[32:32 + v['length']]
         elif t == c_jsdrv.JSDRV_UNION_F32:
             v = value[0].value.f32
         elif t == c_jsdrv.JSDRV_UNION_F64:
