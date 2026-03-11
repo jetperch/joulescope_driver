@@ -859,7 +859,7 @@ cdef class Driver:
             v.app = c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_REQ
             v.size = <uint32_t> len(value)
         elif isinstance(value, StdMsg):
-            byte_str = bytes(value)
+            byte_str = value
             v.type = c_jsdrv.JSDRV_UNION_STDMSG
             v.value.bin = <const uint8_t *> byte_str
             v.size = <uint32_t> len(value)
