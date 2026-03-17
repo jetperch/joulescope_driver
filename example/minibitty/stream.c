@@ -76,6 +76,8 @@ static int run(struct app_s * self, const char * device) {
 
     PUBLISH_U32("s/i/range/mode", 5);       // manual
     PUBLISH_U32("s/i/range/select", 0x84);
+    PUBLISH_U32("s/i/i0_sel", 2);
+    PUBLISH_U32("s/i/i1_sel", 2);
     PUBLISH_U32("s/i/i2_sel", 2);
     PUBLISH_U32("s/adc/0/sel", 2);
     PUBLISH_U32("s/adc/0/ctrl", 1);

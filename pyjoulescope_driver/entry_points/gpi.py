@@ -38,7 +38,7 @@ def on_cmd(args):
             try:
                 d.open(device, 'restore')
                 gpi = _query_gpi_value(d, device)
-                print(f'{device}: 0x{gpi:02x}')
+                print(f'{device}: 0x{gpi:08x}')
                 d.close(device)
             except Exception:
                 print(f'{device} unavailable')
