@@ -482,37 +482,54 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
             else:
                 v = value[0].value.bin[:value[0].size]
         elif t == c_jsdrv.JSDRV_UNION_STDMSG:
-            u8_ptr = <uint8_t *> &value[0].value.bin[0]
-            u16_ptr = <uint16_t *> &value[0].value.bin[0]
-            u32_ptr = <uint32_t *> &value[0].value.bin[0]
-            u64_ptr = <uint64_t *> &value[0].value.bin[0]
-            v = {
-                'dtype': 'stdmsg',
-                'version': u16_ptr[0],
-                'version_major': value[0].value.bin[0],
-                'version_minor': value[0].value.bin[1],
-                'metadata': u32_ptr[1],
-            }
-            if value[0].value.bin[2] == 0x05: # MB_STDMSG_COMM_STATS
-                v['stdmsg_type'] = 'comm_stats'
-                v['counter_start'] = u64_ptr[1]
-                v['counter_end'] = u64_ptr[2]
-                v['frames'] = u32_ptr[6]
-                v['bytes'] = u32_ptr[7]
-                v['frame_error'] = u32_ptr[8]
-                v['link_error'] = u32_ptr[9]
-                v['app_error'] = u32_ptr[10]
-            elif value[0].value.bin[2] == 0x07:  # MB_STDMSG_MEM
-                v['transaction_id'] = u32_ptr[2]
-                v['target'] = u8_ptr[12]
-                v['operation'] = u8_ptr[13]
-                v['flags'] = u8_ptr[14]
-                v['status'] = u8_ptr[15]
-                v['timeout_ms'] = u16_ptr[8]
-                v['offset'] = u32_ptr[5]
-                v['length'] = u32_ptr[6]
-                v['delay_us'] = u32_ptr[7]
-                v['data'] = u8_ptr[32:32 + v['length']]
+            if value[0].size < 8:
+                _log_c.warning('STDMSG malformed: size %d < 8 byte header', value[0].size)
+                v = None
+            else:
+                u8_ptr = <uint8_t *> &value[0].value.bin[0]
+                u16_ptr = <uint16_t *> &value[0].value.bin[0]
+                u32_ptr = <uint32_t *> &value[0].value.bin[0]
+                u64_ptr = <uint64_t *> &value[0].value.bin[0]
+                v = {
+                    'dtype': 'stdmsg',
+                    'version': u16_ptr[0],
+                    'version_major': value[0].value.bin[0],
+                    'version_minor': value[0].value.bin[1],
+                    'metadata': u32_ptr[1],
+                }
+                if value[0].value.bin[2] == 0x05: # MB_STDMSG_COMM_STATS
+                    if value[0].size < 44:
+                        _log_c.warning('MB_STDMSG_COMM_STATS malformed: size %d < 44', value[0].size)
+                        v = None
+                    else:
+                        v['stdmsg_type'] = 'comm_stats'
+                        v['counter_start'] = u64_ptr[1]
+                        v['counter_end'] = u64_ptr[2]
+                        v['frames'] = u32_ptr[6]
+                        v['bytes'] = u32_ptr[7]
+                        v['frame_error'] = u32_ptr[8]
+                        v['link_error'] = u32_ptr[9]
+                        v['app_error'] = u32_ptr[10]
+                elif value[0].value.bin[2] == 0x07:  # MB_STDMSG_MEM
+                    if value[0].size < 32:
+                        _log_c.warning('MB_STDMSG_MEM malformed: size %d < 32 byte header', value[0].size)
+                        v = None
+                    else:
+                        v['transaction_id'] = u32_ptr[2]
+                        v['target'] = u8_ptr[12]
+                        v['operation'] = u8_ptr[13]
+                        v['flags'] = u8_ptr[14]
+                        v['status'] = u8_ptr[15]
+                        v['timeout_ms'] = u16_ptr[8]
+                        v['offset'] = u32_ptr[5]
+                        v['length'] = u32_ptr[6]
+                        v['delay_us'] = u32_ptr[7]
+                        if 32 + v['length'] > value[0].size:
+                            _log_c.warning('MB_STDMSG_MEM malformed: length %d exceeds buffer size %d',
+                                           v['length'], value[0].size)
+                            v = None
+                        else:
+                            v['data'] = bytes(u8_ptr[32:32 + v['length']])
         elif t == c_jsdrv.JSDRV_UNION_F32:
             v = value[0].value.f32
         elif t == c_jsdrv.JSDRV_UNION_F64:
