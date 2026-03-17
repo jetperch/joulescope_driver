@@ -1,4 +1,4 @@
-# Copyright 2022 Jetperch LLC
+# Copyright 2026 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,18 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .version import *
-from . import time64
-from .record import Record
-from .stdmsg import StdMsg
-from .binding import Driver, ElementType, Field, ErrorCode, LogLevel, SubscribeFlags, calibration_hash
+class StdMsg(bytes):
+    """Binary value published as JSDRV_UNION_STDMSG.
 
-
-__all__ = [
-    'Driver', 'Record', 'StdMsg',
-    'ElementType', 'Field', 'ErrorCode', 'LogLevel', 'SubscribeFlags',
-    'calibration_hash',
-    'time64',
-    '__version__', '__title__', '__description__', '__url__',
-    '__author__', '__author_email__', '__license__',
-    '__copyright__']
+    Use this instead of ``bytes`` when publishing a value that
+    starts with an ``mb_stdmsg_header_s`` so the device receives
+    it as ``MB_VALUE_STDMSG``.
+    """
+    pass

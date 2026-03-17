@@ -171,7 +171,7 @@ int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_
         case 0: priority = THREAD_PRIORITY_NORMAL; break;
         case 1: priority = THREAD_PRIORITY_ABOVE_NORMAL; break;
         case 2: priority = THREAD_PRIORITY_HIGHEST; break;
-        default: priority = 0;
+        default: priority = 0; break;
     }
     if (!SetThreadPriority(thread->thread, priority)) {
         WINDOWS_LOGE("%s", "SetThreadPriority");

@@ -28,7 +28,7 @@ from libc.math cimport isfinite, NAN
 from libc.string cimport memset, strcpy
 
 from collections.abc import Iterable, Mapping
-from . import StdMsg
+from .stdmsg import StdMsg
 import json
 import logging
 import numpy as np

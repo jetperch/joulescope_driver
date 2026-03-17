@@ -41,7 +41,7 @@ void on_data(void * user_data, const char * topic, const struct jsdrv_union_s * 
     // do something
     if (counter == 1000) {
         const uint32_t * p32 = &value->value.u32;
-        printf("%d\n", p32[32]);
+        printf("0x%08x %d\n", p32[32], p32[32]);
         counter = 0;
     } else {
         ++counter;
@@ -70,14 +70,14 @@ static int run(struct app_s * self, const char * device) {
     PUBLISH_U32("s/led/blue", 0xf0);
     PUBLISH_U32("s/led/en", 1);
 
-    //PUBLISH_U32("s/adc/0/sel", 0);
-    //PUBLISH_U32("s/adc/0/ctrl", 1);
+    //PUBLISH_U32("v/range/mode", 1);
+    //PUBLISH_U32("v/range/select", 1);
 
-    PUBLISH_U32("s/adc/0/sel", 3);
-    PUBLISH_U32("i/range/mode", 5);
-    PUBLISH_U32("i/range/select", 0);
-    PUBLISH_U32("v/range/mode", 1);
-    PUBLISH_U32("v/range/select", 1);
+
+    PUBLISH_U32("s/i/range/mode", 5);       // manual
+    PUBLISH_U32("s/i/range/select", 0x84);
+    PUBLISH_U32("s/i/i2_sel", 2);
+    PUBLISH_U32("s/adc/0/sel", 2);
     PUBLISH_U32("s/adc/0/ctrl", 1);
 
     jsdrv_topic_set(&topic, self->device.topic);

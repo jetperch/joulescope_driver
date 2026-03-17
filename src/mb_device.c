@@ -698,6 +698,7 @@ static void handle_stream_in_frame(struct jsdrvp_mb_dev_s * d, uint32_t * p_u32)
             return;
         default:
             JSDRV_LOGW("unexpected frame type: 0x%02x", frame_type);
+            break;
     };
 
     if (d->in_frame_id != frame_id) {
