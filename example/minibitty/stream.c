@@ -33,7 +33,7 @@ enum loopback_location_e {
     LOCATION_PUBSUB = 1,
 };
 
-void on_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+void on_i32_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     static uint32_t counter = 0;
     (void) user_data;
     (void) topic;
@@ -45,6 +45,37 @@ void on_data(void * user_data, const char * topic, const struct jsdrv_union_s * 
         counter = 0;
     } else {
         ++counter;
+    }
+}
+
+void on_f32_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) value->value.bin;
+    static double f_mean = 0.0;
+    static uint32_t counter = 0;
+    (void) user_data;
+    (void) topic;
+    (void) value;
+
+    const float * f32 = (const float *) &signal->data[0];
+
+    for (uint32_t i = 0; i < signal->element_count; ++i) {
+        f_mean += (double) f32[i];
+    }
+    counter += signal->element_count;
+
+    if (counter >= 500000) {
+        f_mean /= counter;
+        printf("%f", f_mean);
+        //for (uint32_t i = 0; i < signal->element_count; ++i) {
+        //    if (0 == (i & 0x7)) {
+        //        printf("\n    %f", f32[i]);
+        //    } else {
+        //        printf(", %f", f32[i]);
+        //    }
+        //}
+        printf("\n");
+        f_mean = 0.0;
+        counter = 0;
     }
 }
 
@@ -74,22 +105,38 @@ static int run(struct app_s * self, const char * device) {
     //PUBLISH_U32("v/range/select", 1);
 
 
-    PUBLISH_U32("s/i/range/mode", 5);       // manual
-    PUBLISH_U32("s/i/range/select", 0x84);
-    PUBLISH_U32("s/i/i0_sel", 2);
-    PUBLISH_U32("s/i/i1_sel", 2);
-    PUBLISH_U32("s/i/i2_sel", 2);
-    PUBLISH_U32("s/adc/0/sel", 2);
-    PUBLISH_U32("s/adc/0/ctrl", 1);
+    // manual current
+    if (0) {
+        PUBLISH_U32("s/i/range/mode", 5);       // manual
+        PUBLISH_U32("s/i/range/select", 0x84);
+        PUBLISH_U32("s/i/i0_sel", 2);
+        PUBLISH_U32("s/i/i1_sel", 2);
+        PUBLISH_U32("s/i/i2_sel", 2);
+        PUBLISH_U32("s/adc/0/sel", 2);
+        PUBLISH_U32("s/adc/0/ctrl", 1);
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, "s/adc/0/!data");
+        jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_i32_data, NULL, 0);
+    } else {
+        PUBLISH_U32("s/i/range/mode", 5);       // manual
+        PUBLISH_U32("s/i/range/select", 0x84);
+        PUBLISH_U32("s/i/i0_sel", 2);
+        PUBLISH_U32("s/i/i1_sel", 2);
+        PUBLISH_U32("s/i/i2_sel", 2);
+        PUBLISH_U32("s/i/ctrl", 1);
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, "s/i/!data");
+        jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_f32_data, NULL, 0);
+    }
 
-    jsdrv_topic_set(&topic, self->device.topic);
-    jsdrv_topic_append(&topic, "s/adc/0/!data");
-    jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_data, NULL, 0);
 
     while (!quit_) {
     }
 
     PUBLISH_U32("s/adc/0/ctrl", 0);
+    PUBLISH_U32("s/adc/1/ctrl", 0);
+    PUBLISH_U32("s/i/ctrl", 0);
+
 
     jsdrv_close(self->context, device, JSDRV_TIMEOUT_MS_DEFAULT);
     return 0;
