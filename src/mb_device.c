@@ -669,15 +669,25 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
         jsdrvp_msg_free(d->context, m);
     } else if (jsdrv_cstr_ends_with(publish->topic, "/!rsp")
                && (value_type == JSDRV_UNION_STDMSG)
-               && value_size >= (sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_pubsub_response_s))) {
-        // Confirmed delivery response: device publishes to {origin_prefix}/!rsp
-        // with a STDMSG value containing mb_stdmsg_pubsub_response_s.
+               && value_size >= sizeof(struct mb_stdmsg_header_s)) {
+        // Responses arrive on {origin_prefix}/!rsp as STDMSG values.
+        // Check inner type: only handle confirmed delivery (PUBSUB_RESPONSE).
+        // All other types (e.g. MEM) fall through to the upper driver.
         struct mb_stdmsg_header_s * rsp_hdr = (struct mb_stdmsg_header_s *) &publish->value;
-        struct mb_stdmsg_pubsub_response_s * rsp =
-            (struct mb_stdmsg_pubsub_response_s *) (rsp_hdr + 1);
-        JSDRV_LOGI("confirmed delivery rsp topic=%s rc=%d", rsp->topic, (int) rsp->return_code);
-        send_return_code_to_frontend(d, rsp->topic, (int32_t) rsp->return_code);
-        jsdrvp_msg_free(d->context, m);
+        if (rsp_hdr->type == MB_STDMSG_PUBSUB_RESPONSE
+                && value_size >= (sizeof(struct mb_stdmsg_header_s)
+                    + sizeof(struct mb_stdmsg_pubsub_response_s))) {
+            struct mb_stdmsg_pubsub_response_s * rsp =
+                (struct mb_stdmsg_pubsub_response_s *) (rsp_hdr + 1);
+            JSDRV_LOGI("confirmed delivery rsp topic=%s rc=%d", rsp->topic, (int) rsp->return_code);
+            send_return_code_to_frontend(d, rsp->topic, (int32_t) rsp->return_code);
+            jsdrvp_msg_free(d->context, m);
+        } else if (d->drv && d->drv->handle_publish
+                   && d->drv->handle_publish(d->drv, d, publish->topic, &m->value)) {
+            jsdrvp_msg_free(d->context, m);
+        } else {
+            jsdrvp_backend_send(d->context, m);
+        }
     } else if (d->drv && d->drv->handle_publish
                && d->drv->handle_publish(d->drv, d, publish->topic, &m->value)) {
         jsdrvp_msg_free(d->context, m);
