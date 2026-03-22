@@ -94,7 +94,7 @@ static int32_t device_initialize(const char * device, void * user_data) {
     char t[2 * JSDRV_TOPIC_LENGTH_MAX];
     printf("device_open %s\n", device);
 
-    if (jsdrv_cstr_starts_with(device, "u/js220")) {
+    if (jsdrv_cstr_starts_with(device, "u/js220") || jsdrv_cstr_starts_with(device, "u/js320")) {
         ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_DEFAULTS, 0));
         ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto")));
         ROE(publish(self, device, "s/stats/ctrl", &jsdrv_union_u8_r(1)));

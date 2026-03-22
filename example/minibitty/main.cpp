@@ -134,6 +134,7 @@ const struct command_s COMMANDS[] = {
         {"info", on_info, "List connected devices and display device details"},
         {"loopback", on_loopback, "Loopback data to test throughput and error rate"},
         {"stream", on_stream, "Stream data"},
+        {"pubsub_test", on_pubsub_test, "Regression test for MB pubsub API features"},
         {"throughput", on_throughput, "Perform comm throughput test"},
         {"version", on_version, "Display version and platform information"},
         {"help", on_help, "Display help"},

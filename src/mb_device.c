@@ -84,7 +84,6 @@ enum state_e {
     ST_LL_BULK_OPEN,
     ST_LINK_REQUEST,
     ST_LINK_IDENTITY,
-    // todo pubsub state update / restore
     ST_OPEN,
 
     // graceful disconnect
@@ -101,7 +100,9 @@ struct jsdrvp_mb_dev_s {
     struct jsdrvp_mb_drv_s * drv;  // optional device-specific upper driver
     uint16_t out_frame_id;
     uint16_t in_frame_id;
+    uint16_t tracking_id_next;  // for confirmed delivery, wraps but skips 0
     uint64_t in_frame_count;
+    int32_t open_mode;          // jsdrv_device_open_mode_e
     int64_t timeout_utc;      // <= 0 to disable timeout
     int64_t drv_timeout_utc;  // upper driver timeout, <= 0 to disable
 
@@ -145,6 +146,16 @@ static void send_to_frontend(struct jsdrvp_mb_dev_s * d, const char * subtopic, 
 static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, const struct jsdrv_union_s * value);
 static void send_to_device(struct jsdrvp_mb_dev_s * d, enum mb_frame_service_type_e service_type, uint16_t metadata,
                            const uint32_t * data, uint32_t length_u32);
+
+static void send_return_code_to_frontend(struct jsdrvp_mb_dev_s * d, const char * subtopic, int32_t rc) {
+    struct jsdrv_topic_s full;
+    jsdrv_topic_set(&full, d->ll.prefix);
+    jsdrv_topic_append(&full, subtopic);
+    jsdrv_topic_suffix_add(&full, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
+    JSDRV_LOGI("send_return_code %s = %d", full.topic, (int) rc);
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, full.topic, &jsdrv_union_i32(rc));
+    jsdrvp_backend_send(d->context, m);
+}
 
 static void send_frame_ctrl_to_device(struct jsdrvp_mb_dev_s * d, uint8_t ctrl) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_USBBK_MSG_BULK_OUT_DATA, &jsdrv_union_i32(0));
@@ -211,9 +222,32 @@ static bool on_link_identify(struct jsdrvp_mb_dev_s * self, uint8_t event) {
 static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     timeout_clear(self);
+
+    // Notify upper driver (publishes metadata)
     if (self->drv && self->drv->on_open) {
         self->drv->on_open(self->drv, self, &self->identity);
     }
+
+    // State restore based on open mode.
+    // Subscribe/unsubscribe on subtopics (not the device prefix itself)
+    // to replay retained values without removing the original device subscriber.
+    if (1 == self->open_mode) {  // JSDRV_DEVICE_OPEN_MODE_RESUME
+        static const char * const subtrees[] = {"h", "c", "s", NULL};
+        for (const char * const * st = subtrees; *st; ++st) {
+            struct jsdrv_topic_s topic;
+            jsdrv_topic_set(&topic, self->ll.prefix);
+            jsdrv_topic_append(&topic, *st);
+            jsdrvp_device_subscribe(self->context, self->ll.prefix, topic.topic,
+                JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
+            jsdrvp_device_unsubscribe(self->context, self->ll.prefix, topic.topic,
+                JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
+        }
+    } else if (0 == self->open_mode) {  // JSDRV_DEVICE_OPEN_MODE_DEFAULTS
+        if (self->drv && self->drv->publish_defaults) {
+            self->drv->publish_defaults(self->drv, self);
+        }
+    }
+
     send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
     return true;
 }
@@ -435,7 +469,20 @@ static void send_to_device(struct jsdrvp_mb_dev_s * d, enum mb_frame_service_typ
     msg_queue_push(d->ll.cmd_q, m);
 }
 
-static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
+static uint16_t tracking_id_alloc(struct jsdrvp_mb_dev_s * d) {
+    uint16_t id = d->tracking_id_next;
+    if (0 == id) {
+        id = 1;
+    }
+    d->tracking_id_next = id + 1;
+    if (0 == d->tracking_id_next) {
+        d->tracking_id_next = 1;
+    }
+    return id;
+}
+
+static void publish_to_device_confirmed(struct jsdrvp_mb_dev_s * d, const char * topic,
+                                        const struct jsdrv_union_s * value, bool confirmed) {
     uint32_t value_size = (value->size < 8) ? 8 : value->size;  // keep things simple
     uint32_t length_u8 = sizeof(struct mb_stdmsg_header_s) + MB_TOPIC_SIZE_MAX + value_size;  // topic and value
     uint32_t length_u32 = (length_u8 + 3) >> 2;  // round up
@@ -446,13 +493,15 @@ static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, co
 
     uint8_t * data_u8 = &m->payload.bin[FRAME_HEADER_SIZE_U8];
 
+    uint16_t tracking_id = confirmed ? tracking_id_alloc(d) : 0;
+
     // Populate stdmsg header
     struct mb_stdmsg_header_s hdr;
     hdr.version = 0;
     hdr.type = MB_STDMSG_PUBLISH;
     hdr.origin_prefix = 'h';
     hdr.metadata = 0
-        | (0 << 8)                      // tracking id
+        | (((uint32_t) tracking_id) << 16)
         | ((length_u8 & 0x0003U) << 6)  // size LSB
         | (value->type & 0x000fU);
     jsdrv_memcpy(data_u8, &hdr, sizeof(hdr));
@@ -475,6 +524,10 @@ static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, co
     msg_queue_push(d->ll.cmd_q, m);
 }
 
+static void publish_to_device(struct jsdrvp_mb_dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
+    publish_to_device_confirmed(d, topic, value, false);
+}
+
 static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
     bool rv = true;
     if (!msg) {
@@ -494,6 +547,11 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGE("handle_cmd mismatch %s, %s", msg->topic, d->ll.prefix);
     } else if (topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
         if (0 == strcmp(JSDRV_MSG_OPEN, topic)) {
+            if ((msg->value.type == JSDRV_UNION_U32) || (msg->value.type == JSDRV_UNION_I32)) {
+                d->open_mode = msg->value.value.i32;
+            } else {
+                d->open_mode = 0;  // JSDRV_DEVICE_OPEN_MODE_DEFAULTS
+            }
             state_machine_process(d, EV_API_OPEN_REQUEST);
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, topic)) {
             state_machine_process(d, EV_API_CLOSE_REQUEST);
@@ -512,6 +570,7 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         if (0 == strcmp("h/link/!ping", topic)) {
             send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING,
                 (uint32_t *) msg->value.value.bin, (msg->value.size + 3) >> 2);
+            send_return_code_to_frontend(d, topic, 0);
         } else if (0 == strcmp("h/in/frecord", topic)) {
             if (NULL != d->file_in) {
                 fclose(d->file_in);
@@ -519,10 +578,13 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
             if (msg->value.size) {
                 d->file_in = fopen(msg->value.value.str, "wb");
             }
+            send_return_code_to_frontend(d, topic, 0);
+        } else {
+            JSDRV_LOGW("handle_cmd unsupported h/ topic: %s", topic);
+            send_return_code_to_frontend(d, topic, JSDRV_ERROR_NOT_SUPPORTED);
         }
-        // silently drop unrecognized h/ or ./ topics
     } else {
-        publish_to_device(d, topic, &msg->value);
+        publish_to_device_confirmed(d, topic, &msg->value, msg->source != 0);
     }
     jsdrvp_msg_free(d->context, msg);
     return rv;
@@ -605,6 +667,17 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
             && jsdrv_cstr_casecmp(PUBSUB_DISCONNECT_STR, m->payload.str)) {
         state_machine_process(d, EV_PUBSUB_FLUSH);
         jsdrvp_msg_free(d->context, m);
+    } else if (jsdrv_cstr_ends_with(publish->topic, "/!rsp")
+               && (value_type == JSDRV_UNION_STDMSG)
+               && value_size >= (sizeof(struct mb_stdmsg_header_s) + sizeof(struct mb_stdmsg_pubsub_response_s))) {
+        // Confirmed delivery response: device publishes to {origin_prefix}/!rsp
+        // with a STDMSG value containing mb_stdmsg_pubsub_response_s.
+        struct mb_stdmsg_header_s * rsp_hdr = (struct mb_stdmsg_header_s *) &publish->value;
+        struct mb_stdmsg_pubsub_response_s * rsp =
+            (struct mb_stdmsg_pubsub_response_s *) (rsp_hdr + 1);
+        JSDRV_LOGI("confirmed delivery rsp topic=%s rc=%d", rsp->topic, (int) rsp->return_code);
+        send_return_code_to_frontend(d, rsp->topic, (int32_t) rsp->return_code);
+        jsdrvp_msg_free(d->context, m);
     } else if (d->drv && d->drv->handle_publish
                && d->drv->handle_publish(d->drv, d, publish->topic, &m->value)) {
         jsdrvp_msg_free(d->context, m);
@@ -622,9 +695,13 @@ static void handle_in_stdmsg(struct jsdrvp_mb_dev_s * d, uint16_t metadata, uint
         case MB_STDMSG_PUBLISH:
             handle_in_publish(d, hdr->metadata, (struct mb_stdmsg_publish_s *) data, length - 2);
             break;
-        case MB_STDMSG_PUBSUB_RESPONSE:
-            // todo
+        case MB_STDMSG_PUBSUB_RESPONSE: {
+            struct mb_stdmsg_pubsub_response_s * rsp =
+                (struct mb_stdmsg_pubsub_response_s *) data;
+            send_return_code_to_frontend(d, rsp->topic,
+                (int32_t) rsp->return_code);
             break;
+        }
         case MB_STDMSG_TIMESYNC_SYNC:
             // todo
             break;
@@ -949,4 +1026,16 @@ void jsdrvp_mb_dev_backend_send(struct jsdrvp_mb_dev_s * dev, struct jsdrvp_msg_
 
 void jsdrvp_mb_dev_set_timeout(struct jsdrvp_mb_dev_s * dev, int64_t timeout_utc) {
     dev->drv_timeout_utc = timeout_utc;
+}
+
+void jsdrvp_mb_dev_send_return_code(struct jsdrvp_mb_dev_s * dev, const char * subtopic, int32_t rc) {
+    send_return_code_to_frontend(dev, subtopic, rc);
+}
+
+const char * jsdrvp_mb_dev_state_str(struct jsdrvp_mb_dev_s * dev) {
+    return state_machine_states[dev->state].name;
+}
+
+int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev) {
+    return dev->open_mode;
 }

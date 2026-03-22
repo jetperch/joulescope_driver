@@ -134,6 +134,19 @@ struct jsdrvp_mb_drv_s {
                        struct jsdrvp_mb_dev_s * dev);
 
     /**
+     * @brief Called to publish factory default values for all configurable topics.
+     *
+     * Called when the device is opened with JSDRV_DEVICE_OPEN_MODE_DEFAULTS.
+     * The upper driver should publish default values for all parameters
+     * to the physical device via jsdrvp_mb_dev_publish_to_device().
+     *
+     * @param drv This driver instance.
+     * @param dev The mb_device handle for calling service functions.
+     */
+    void (*publish_defaults)(struct jsdrvp_mb_drv_s * drv,
+                             struct jsdrvp_mb_dev_s * dev);
+
+    /**
      * @brief Called to destroy the upper driver instance.
      *
      * @param drv This driver instance.  Free all resources including drv itself.
@@ -217,6 +230,27 @@ void jsdrvp_mb_dev_backend_send(struct jsdrvp_mb_dev_s * dev,
  * Only one timeout may be active at a time; calling again replaces the previous.
  */
 void jsdrvp_mb_dev_set_timeout(struct jsdrvp_mb_dev_s * dev, int64_t timeout_utc);
+
+/**
+ * @brief Send a return code to the frontend pubsub.
+ *
+ * @param dev The mb_device handle.
+ * @param subtopic The subtopic (without device prefix) to send the return code for.
+ * @param rc The return code (0=success, else error code).
+ *
+ * Appends the '#' suffix and sends to the frontend pubsub.
+ */
+void jsdrvp_mb_dev_send_return_code(struct jsdrvp_mb_dev_s * dev,
+                                     const char * subtopic,
+                                     int32_t rc);
+
+/**
+ * @brief Get the device open mode.
+ *
+ * @param dev The mb_device handle.
+ * @return The open mode (jsdrv_device_open_mode_e).
+ */
+int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev);
 
 JSDRV_CPP_GUARD_END
 

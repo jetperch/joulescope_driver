@@ -105,8 +105,8 @@ static int run(struct app_s * self, const char * device) {
     //PUBLISH_U32("v/range/select", 1);
 
 
-    // manual current
     if (0) {
+        // manual current ADCs
         PUBLISH_U32("s/i/range/mode", 5);       // manual
         PUBLISH_U32("s/i/range/select", 0x84);
         PUBLISH_U32("s/i/i0_sel", 2);
@@ -117,7 +117,8 @@ static int run(struct app_s * self, const char * device) {
         jsdrv_topic_set(&topic, self->device.topic);
         jsdrv_topic_append(&topic, "s/adc/0/!data");
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_i32_data, NULL, 0);
-    } else {
+    } else if (0) {
+        // manual current calibration
         PUBLISH_U32("s/i/range/mode", 5);       // manual
         PUBLISH_U32("s/i/range/select", 0x84);
         PUBLISH_U32("s/i/i0_sel", 2);
@@ -127,15 +128,26 @@ static int run(struct app_s * self, const char * device) {
         jsdrv_topic_set(&topic, self->device.topic);
         jsdrv_topic_append(&topic, "s/i/!data");
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_f32_data, NULL, 0);
+    } else if (1) {
+        // manual voltage
+        PUBLISH_U32("s/v/range/mode", 1);       // manual
+        PUBLISH_U32("s/v/range/select:", 0);    // 15 V
+        PUBLISH_U32("s/v/ctrl", 1);
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, "s/v/!data");
+        jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_f32_data, NULL, 0);
     }
 
 
     while (!quit_) {
+        Sleep(10);
     }
 
     PUBLISH_U32("s/adc/0/ctrl", 0);
     PUBLISH_U32("s/adc/1/ctrl", 0);
     PUBLISH_U32("s/i/ctrl", 0);
+    PUBLISH_U32("s/v/ctrl", 0);
+    PUBLISH_U32("s/p/ctrl", 0);
 
 
     jsdrv_close(self->context, device, JSDRV_TIMEOUT_MS_DEFAULT);
