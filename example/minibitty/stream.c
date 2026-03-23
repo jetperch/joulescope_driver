@@ -82,11 +82,15 @@ void on_f32_data(void * user_data, const char * topic, const struct jsdrv_union_
 #define PUBLISH_U32(topic_, value_) \
     jsdrv_topic_set(&topic, self->device.topic); \
     jsdrv_topic_append(&topic, topic_); \
-    jsdrv_publish(self->context, topic.topic, &jsdrv_union_u32(value_), 0)
+    rc = jsdrv_publish(self->context, topic.topic, &jsdrv_union_u32(value_), JSDRV_TIMEOUT_MS_DEFAULT); \
+    if (rc) { \
+        printf("publish %s failed with %d\n", topic.topic, (int) rc); \
+    }
 
 
 static int run(struct app_s * self, const char * device) {
     struct jsdrv_topic_s topic;
+    int32_t rc = 0;
 
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
     Sleep(100);     // todo improved way to detect sensor ready
@@ -117,7 +121,7 @@ static int run(struct app_s * self, const char * device) {
         jsdrv_topic_set(&topic, self->device.topic);
         jsdrv_topic_append(&topic, "s/adc/0/!data");
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_i32_data, NULL, 0);
-    } else if (0) {
+    } else if (1) {
         // manual current calibration
         PUBLISH_U32("s/i/range/mode", 5);       // manual
         PUBLISH_U32("s/i/range/select", 0x84);

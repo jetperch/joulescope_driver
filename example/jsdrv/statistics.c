@@ -84,7 +84,7 @@ static int32_t publish(struct app_s * self, const char * device, const char * to
     printf("Publish %s => %s\n", t.topic, buf);
     int32_t rc = jsdrv_publish(self->context, t.topic, value, JSDRV_TIMEOUT_MS_DEFAULT);
     if (rc) {
-        printf("publish %s failed with %d\n", topic, (int) rc);
+        printf("publish %s failed with %d\n", t.topic, (int) rc);
     }
     return rc;
 }
@@ -94,9 +94,15 @@ static int32_t device_initialize(const char * device, void * user_data) {
     char t[2 * JSDRV_TOPIC_LENGTH_MAX];
     printf("device_open %s\n", device);
 
-    if (jsdrv_cstr_starts_with(device, "u/js220") || jsdrv_cstr_starts_with(device, "u/js320")) {
+    if (jsdrv_cstr_starts_with(device, "u/js220")) {
         ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_DEFAULTS, 0));
         ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto")));
+        ROE(publish(self, device, "s/stats/ctrl", &jsdrv_union_u8_r(1)));
+        snprintf(t, sizeof(t), "%s/s/stats/value", device);
+        jsdrv_subscribe(self->context, t, JSDRV_SFLAG_PUB, on_statistics_value, self, JSDRV_TIMEOUT_MS_DEFAULT);
+    } else if (jsdrv_cstr_starts_with(device, "u/js320")) {
+        ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_DEFAULTS, JSDRV_TIMEOUT_MS_DEFAULT));
+        ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_u8_r(5)));  // manual
         ROE(publish(self, device, "s/stats/ctrl", &jsdrv_union_u8_r(1)));
         snprintf(t, sizeof(t), "%s/s/stats/value", device);
         jsdrv_subscribe(self->context, t, JSDRV_SFLAG_PUB, on_statistics_value, self, JSDRV_TIMEOUT_MS_DEFAULT);

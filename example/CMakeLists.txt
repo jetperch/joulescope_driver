@@ -58,9 +58,11 @@ add_executable(minibitty_exe
         minibitty/fpga_mem.c
         minibitty/hotplug.c
         minibitty/info.c
+        minibitty/pubsub_info.c
         minibitty/pubsub_sniffer.c
         minibitty/pubsub_test.c
         minibitty/loopback.c
+        minibitty/mem.c
         minibitty/stream.c
         minibitty/throughput.c
         minibitty/version.c

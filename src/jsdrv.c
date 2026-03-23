@@ -141,7 +141,8 @@ struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const s
             case JSDRV_UNION_STR:
                 m->value.value.str = m->payload.str;
                 break;
-            case JSDRV_UNION_BIN:
+            case JSDRV_UNION_BIN:   // intentional fall-through
+            case JSDRV_UNION_STDMSG:
                 if (m->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
                     uint8_t *ptr = jsdrv_alloc(m->value.size);
                     memcpy(ptr, m->value.value.bin, m->value.size);
@@ -171,7 +172,8 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_value(struct jsdrv_context_s * context, c
                 m->value.size = (uint32_t) (strlen(value->value.str) + 1);
             }
             /* intentional fall-through */
-        case JSDRV_UNION_BIN:
+        case JSDRV_UNION_BIN:   /* intentional fall-through */
+        case JSDRV_UNION_STDMSG:
             if (value->size > sizeof(m->payload.bin)) {
                 JSDRV_LOGD2("publish %s size %d using heap", topic, (int) value->size);
                 uint8_t * ptr = jsdrv_alloc(value->size);

@@ -79,17 +79,6 @@ static void test_fail(const char * name, const char * detail) {
 
 // --- Callbacks ---
 
-static void on_return_code(void * user_data,
-                           const char * topic,
-                           const struct jsdrv_union_s * value) {
-    (void) user_data;
-    if (value->type == JSDRV_UNION_I32) {
-        ts_.rc_received = value->value.i32;
-        jsdrv_cstr_copy(ts_.rc_topic, topic, sizeof(ts_.rc_topic));
-        ts_.rc_valid = true;
-    }
-}
-
 static void on_metadata(void * user_data,
                         const char * topic,
                         const struct jsdrv_union_s * value) {
@@ -98,17 +87,6 @@ static void on_metadata(void * user_data,
         jsdrv_cstr_copy(ts_.meta_topic, topic, sizeof(ts_.meta_topic));
         jsdrv_cstr_copy(ts_.meta_json, value->value.str, sizeof(ts_.meta_json));
         ts_.meta_received = true;
-    }
-}
-
-static void on_publish(void * user_data,
-                       const char * topic,
-                       const struct jsdrv_union_s * value) {
-    (void) user_data;
-    (void) topic;
-    if (value->type == JSDRV_UNION_U32 || value->type == JSDRV_UNION_I32) {
-        ts_.pub_value = value->value.i32;
-        ts_.pub_received = true;
     }
 }
 
