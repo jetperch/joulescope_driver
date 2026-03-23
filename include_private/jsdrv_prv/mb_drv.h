@@ -31,6 +31,7 @@
 #define JSDRV_PRV_MB_DRV_H_
 
 #include "jsdrv/cmacro_inc.h"
+#include "jsdrv/time.h"
 #include "mb/comm/frame.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -251,6 +252,14 @@ void jsdrvp_mb_dev_send_return_code(struct jsdrvp_mb_dev_s * dev,
  * @return The open mode (jsdrv_device_open_mode_e).
  */
 int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev);
+
+/**
+ * @brief Get the current time mapping.
+ *
+ * @param dev The mb_device handle.
+ * @return Pointer to the device's time_map.
+ */
+const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(struct jsdrvp_mb_dev_s * dev);
 
 JSDRV_CPP_GUARD_END
 

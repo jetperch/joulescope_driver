@@ -209,7 +209,10 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
             break;  // unreachable (validated above)
     }
 
-    // todo signal->time_map
+    const struct jsdrv_time_map_s * tmap = jsdrvp_mb_dev_time_map(dev);
+    if (tmap) {
+        signal->time_map = *tmap;
+    }
 
     // process topic
     struct jsdrv_topic_s topic;

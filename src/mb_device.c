@@ -629,6 +629,56 @@ static void handle_in_trace(struct jsdrvp_mb_dev_s * d, uint16_t metadata, uint3
     send_to_frontend(d, "h/!trace", &jsdrv_union_bin((uint8_t *) data, length * 4));
 }
 
+static void handle_in_timesync_sync(struct jsdrvp_mb_dev_s * d,
+        struct mb_stdmsg_publish_s * publish, uint32_t value_size) {
+    int64_t utc_recv = jsdrv_time_utc();
+    uint32_t body_size = value_size - sizeof(struct mb_stdmsg_header_s);
+    if (body_size < 32) {
+        JSDRV_LOGW("timesync_sync too short: %" PRIu32, value_size);
+        return;
+    }
+    struct mb_stdmsg_header_s * inner = (struct mb_stdmsg_header_s *) &publish->value;
+    uint64_t * src = (uint64_t *) (inner + 1);
+
+    // Build response: inner TIMESYNC_SYNC header + body
+    uint8_t resp_buf[sizeof(struct mb_stdmsg_header_s) + 32];
+    struct mb_stdmsg_header_s * resp_hdr = (struct mb_stdmsg_header_s *) resp_buf;
+    resp_hdr->version = 0;
+    resp_hdr->type = MB_STDMSG_TIMESYNC_SYNC;
+    resp_hdr->origin_prefix = 'h';
+    resp_hdr->metadata = 0;
+
+    uint64_t * body = (uint64_t *) (resp_hdr + 1);
+    body[0] = src[0];                          // count_start: echo
+    body[1] = (uint64_t) utc_recv;             // utc_recv
+    body[2] = (uint64_t) jsdrv_time_utc();     // utc_send
+    body[3] = 0;                               // count_end: device fills
+
+    struct jsdrv_union_s value = jsdrv_union_bin(resp_buf, sizeof(resp_buf));
+    value.type = JSDRV_UNION_STDMSG;
+    publish_to_device(d, "./ts/!rsp", &value);
+    JSDRV_LOGD2("timesync sync rsp: count=%" PRIu64 " utc_recv=%" PRIi64,
+                src[0], utc_recv);
+}
+
+static void handle_in_timesync_map(struct jsdrvp_mb_dev_s * d,
+        struct mb_stdmsg_publish_s * publish, uint32_t value_size) {
+    uint32_t body_size = value_size - sizeof(struct mb_stdmsg_header_s);
+    if (body_size < 32) {
+        JSDRV_LOGW("timesync_map too short: %" PRIu32, value_size);
+        return;
+    }
+    struct mb_stdmsg_header_s * inner = (struct mb_stdmsg_header_s *) &publish->value;
+    uint64_t * body = (uint64_t *) (inner + 1);
+
+    d->time_map.offset_time = (int64_t) body[0];
+    d->time_map.offset_counter = body[1];
+    d->time_map.counter_rate = ((double) body[2]) / ((double) (1ULL << 32));
+    JSDRV_LOGD1("timesync map: utc=%" PRIi64 " counter=%" PRIu64 " rate=%f",
+                d->time_map.offset_time, d->time_map.offset_counter,
+                d->time_map.counter_rate);
+}
+
 static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, struct mb_stdmsg_publish_s * publish, uint8_t length) {
     uint8_t value_type = (uint8_t) (metadata & 0x0000000fU);
     uint8_t size_lsb = (uint8_t) ((metadata & 0x000000C0U) >> 6);
@@ -660,6 +710,21 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
         memcpy(m->payload.bin, publish->value.bin, m->value.size);
     } else {
         m->value.value.u64 = publish->value.u64;
+    }
+
+    // Check for timesync STDMSG values
+    if ((value_type == JSDRV_UNION_STDMSG)
+            && (value_size >= sizeof(struct mb_stdmsg_header_s))) {
+        struct mb_stdmsg_header_s * inner_hdr = (struct mb_stdmsg_header_s *) &publish->value;
+        if (inner_hdr->type == MB_STDMSG_TIMESYNC_SYNC) {
+            handle_in_timesync_sync(d, publish, value_size);
+            jsdrvp_msg_free(d->context, m);
+            return;
+        } else if (inner_hdr->type == MB_STDMSG_TIMESYNC_MAP) {
+            handle_in_timesync_map(d, publish, value_size);
+            jsdrvp_msg_free(d->context, m);
+            return;
+        }
     }
 
     if (jsdrv_cstr_ends_with(topic.topic, "/./!pong")
@@ -1048,4 +1113,8 @@ const char * jsdrvp_mb_dev_state_str(struct jsdrvp_mb_dev_s * dev) {
 
 int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev) {
     return dev->open_mode;
+}
+
+const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(struct jsdrvp_mb_dev_s * dev) {
+    return &dev->time_map;
 }
