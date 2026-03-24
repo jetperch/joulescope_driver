@@ -524,12 +524,8 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                         v['offset'] = u32_ptr[5]
                         v['length'] = u32_ptr[6]
                         v['delay_us'] = u32_ptr[7]
-                        if 32 + v['length'] > value[0].size:
-                            _log_c.warning('MB_STDMSG_MEM malformed: length %d exceeds buffer size %d',
-                                           v['length'], value[0].size)
-                            v = None
-                        else:
-                            v['data'] = bytes(u8_ptr[32:32 + v['length']])
+                        data_size = value[0].size - 32
+                        v['data'] = bytes(u8_ptr[32:32 + data_size])
         elif t == c_jsdrv.JSDRV_UNION_F32:
             v = value[0].value.f32
         elif t == c_jsdrv.JSDRV_UNION_F64:

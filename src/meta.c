@@ -27,8 +27,12 @@ struct dtype_map_s {
     uint8_t dtype;
 };
 
-
 const struct dtype_map_s dtype_map[] = {
+        {"str", JSDRV_UNION_STR},
+        {"json", JSDRV_UNION_JSON},
+        {"bin", JSDRV_UNION_BIN},
+        {"std", JSDRV_UNION_BIN},
+        {"frm", JSDRV_UNION_BIN},
         {"u8", JSDRV_UNION_U8},
         {"u16", JSDRV_UNION_U16},
         {"u32", JSDRV_UNION_U32},

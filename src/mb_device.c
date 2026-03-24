@@ -165,7 +165,7 @@ char mb_pubsub_prefix_get(void) {
 }
 
 static void timeout_set(struct jsdrvp_mb_dev_s * self) {
-    self->timeout_utc = jsdrv_time_utc() + JSDRV_TIME_SECOND;
+    self->timeout_utc = jsdrv_time_utc() + (JSDRV_TIME_SECOND / 4);
 }
 
 static void timeout_clear(struct jsdrvp_mb_dev_s * self) {
