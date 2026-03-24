@@ -1190,7 +1190,6 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
                && value_size >= sizeof(struct mb_stdmsg_header_s)) {
         // Route to state fetch if active
         struct mb_stdmsg_header_s * rsp_hdr = (struct mb_stdmsg_header_s *) &publish->value;
-        JSDRV_LOGI("!rsp: type=%u size=%u sf_phase=%u", rsp_hdr->type, value_size, d->state_fetch.phase);
         if (d->state_fetch.phase != STATE_FETCH_PHASE_IDLE
                 && value_size >= sizeof(struct mb_stdmsg_header_s) + 4) {
             // Match on transaction_id (first 4 bytes after inner stdmsg header)
