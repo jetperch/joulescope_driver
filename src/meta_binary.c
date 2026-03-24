@@ -217,6 +217,7 @@ int32_t meta_binary_parse(
 
     uint32_t offset = MB_PUBSUB_META_HEADER_SIZE;
     char json[2048];
+    int json_sz = (int) sizeof(json);
 
     for (uint16_t i = 0; i < hdr->topic_count; ++i) {
         if (offset + MB_PUBSUB_META_ENTRY_HEADER_SIZE > hdr->total_size) {
@@ -233,21 +234,21 @@ int32_t meta_binary_parse(
 
         // Build JSON metadata
         int pos = 0;
-        pos += snprintf(json + pos, sizeof(json) - pos, "{\"dtype\": \"%s\"",
+        pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "{\"dtype\": \"%s\"",
                         dtype_to_str(entry->dtype));
 
         const char * brief = str_get(blob, blob_size, hdr, entry->brief_str_offset);
         if (brief) {
             char escaped[512];
             json_escape_str(escaped, sizeof(escaped), brief);
-            pos += snprintf(json + pos, sizeof(json) - pos, ", \"brief\": \"%s\"", escaped);
+            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"brief\": \"%s\"", escaped);
         }
 
         const char * detail = str_get(blob, blob_size, hdr, entry->detail_str_offset);
         if (detail) {
             char escaped[512];
             json_escape_str(escaped, sizeof(escaped), detail);
-            pos += snprintf(json + pos, sizeof(json) - pos, ", \"detail\": \"%s\"", escaped);
+            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"detail\": \"%s\"", escaped);
         }
 
         // Default value
@@ -255,26 +256,26 @@ int32_t meta_binary_parse(
             const uint8_t * def_bytes = (const uint8_t *)(entry + 1);
             char def_str[64];
             format_default(def_str, sizeof(def_str), entry->dtype, def_bytes);
-            pos += snprintf(json + pos, sizeof(json) - pos, ", \"default\": %s", def_str);
+            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"default\": %s", def_str);
         }
 
         // Options
-        if (entry->options_offset) {
+        if (entry->options_offset && entry->options_offset < entry->entry_size) {
             const struct meta_options_header_s * opts =
                 (const struct meta_options_header_s *)
                 ((const uint8_t *)entry + entry->options_offset);
             const uint8_t * opt_data = (const uint8_t *)(opts + 1);
-            pos += snprintf(json + pos, sizeof(json) - pos, ", \"options\": [");
+            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"options\": [");
             for (uint8_t j = 0; j < opts->count; ++j) {
                 if (j > 0) {
-                    pos += snprintf(json + pos, sizeof(json) - pos, ", ");
+                    pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", ");
                 }
                 // value (8 bytes) + alts_per_option * 2 bytes
                 char val_str[64];
                 format_option_value(val_str, sizeof(val_str), entry->dtype, opt_data);
                 opt_data += 8;
 
-                pos += snprintf(json + pos, sizeof(json) - pos, "[%s", val_str);
+                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "[%s", val_str);
                 for (uint8_t a = 0; a < opts->alts_per_option; ++a) {
                     uint16_t alt_idx;
                     memcpy(&alt_idx, opt_data, 2);
@@ -283,16 +284,16 @@ int32_t meta_binary_parse(
                     if (alt) {
                         char escaped[128];
                         json_escape_str(escaped, sizeof(escaped), alt);
-                        pos += snprintf(json + pos, sizeof(json) - pos, ", \"%s\"", escaped);
+                        pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"%s\"", escaped);
                     }
                 }
-                pos += snprintf(json + pos, sizeof(json) - pos, "]");
+                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "]");
             }
-            pos += snprintf(json + pos, sizeof(json) - pos, "]");
+            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "]");
         }
 
         // Range
-        if (entry->range_offset) {
+        if (entry->range_offset && entry->range_offset + sizeof(struct meta_range_s) <= entry->entry_size) {
             const struct meta_range_s * range =
                 (const struct meta_range_s *)
                 ((const uint8_t *)entry + entry->range_offset);
@@ -304,10 +305,10 @@ int32_t meta_binary_parse(
             uint64_t step_u64;
             memcpy(&step_u64, &range->v_step, 8);
             if (step_u64 > 1) {
-                pos += snprintf(json + pos, sizeof(json) - pos,
+                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0),
                                 ", \"range\": [%s, %s, %s]", min_str, max_str, step_str);
             } else {
-                pos += snprintf(json + pos, sizeof(json) - pos,
+                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0),
                                 ", \"range\": [%s, %s]", min_str, max_str);
             }
         }
@@ -315,29 +316,29 @@ int32_t meta_binary_parse(
         // Format hint
         const char * format = str_get(blob, blob_size, hdr, entry->format_str_offset);
         if (format) {
-            pos += snprintf(json + pos, sizeof(json) - pos, ", \"format\": \"%s\"", format);
+            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"format\": \"%s\"", format);
         }
 
         // Flags
         uint8_t flags = entry->flags & ~MB_PUBSUB_META_FLAG_HAS_DEFAULT;
         if (flags) {
-            pos += snprintf(json + pos, sizeof(json) - pos, ", \"flags\": [");
+            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"flags\": [");
             int first = 1;
             if (flags & MB_PUBSUB_META_FLAG_RO) {
-                pos += snprintf(json + pos, sizeof(json) - pos, "\"ro\"");
+                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "\"ro\"");
                 first = 0;
             }
             if (flags & MB_PUBSUB_META_FLAG_HIDE) {
-                pos += snprintf(json + pos, sizeof(json) - pos, "%s\"hide\"", first ? "" : ", ");
+                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "%s\"hide\"", first ? "" : ", ");
                 first = 0;
             }
             if (flags & MB_PUBSUB_META_FLAG_DEV) {
-                pos += snprintf(json + pos, sizeof(json) - pos, "%s\"dev\"", first ? "" : ", ");
+                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "%s\"dev\"", first ? "" : ", ");
             }
-            pos += snprintf(json + pos, sizeof(json) - pos, "]");
+            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "]");
         }
 
-        pos += snprintf(json + pos, sizeof(json) - pos, "}");
+        pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "}");
 
         if (on_topic) {
             on_topic(user_data, topic, json);

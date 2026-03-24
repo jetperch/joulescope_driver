@@ -480,8 +480,9 @@ static void meta_fetch_on_topic(void * user_data, const char * topic, const char
     struct jsdrvp_mb_dev_s * self = (struct jsdrvp_mb_dev_s *) user_data;
     // Replace leading "./" with the blob's instance prefix
     char resolved[64];
-    if (topic[0] == '.' && topic[1] == '/') {
-        resolved[0] = self->state_fetch.blobs[self->state_fetch.blob_idx].topic[0];
+    struct state_fetch_s * sf = &self->state_fetch;
+    if (topic[0] == '.' && topic[1] == '/' && sf->blob_idx < sf->blob_count) {
+        resolved[0] = sf->blobs[sf->blob_idx].topic[0];
         jsdrv_cstr_copy(resolved + 1, topic + 1, sizeof(resolved) - 1);
     } else {
         jsdrv_cstr_copy(resolved, topic, sizeof(resolved));
@@ -594,6 +595,10 @@ static void state_fetch_on_meta_rsp(struct jsdrvp_mb_dev_s * self,
             goto next_blob;
         }
         sf->meta_buf = jsdrv_alloc(sf->meta_total_size);
+        if (!sf->meta_buf) {
+            JSDRV_LOGW("state_fetch: meta alloc failed size=%u", sf->meta_total_size);
+            goto next_blob;
+        }
         sf->meta_buf_size = sf->meta_total_size;
         // Copy first page
         uint32_t copy = (length > sf->meta_total_size) ? sf->meta_total_size : length;
