@@ -136,6 +136,7 @@ const struct command_s COMMANDS[] = {
         {"mem", on_mem, "Memory read/write/erase/verify via stdmsg_mem protocol"},
         {"stream", on_stream, "Stream data"},
         {"pubsub_info", on_pubsub_info, "Display PubSub instance info"},
+        {"state_get", on_state_get, "Full !state GET stress test"},
         {"pubsub_test", on_pubsub_test, "Regression test for MB pubsub API features"},
         {"throughput", on_throughput, "Perform comm throughput test"},
         {"version", on_version, "Display version and platform information"},

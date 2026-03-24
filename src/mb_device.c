@@ -34,6 +34,7 @@
 #include "mb/comm/frame.h"
 #include "mb/comm/link.h"
 #include "mb/stdmsg.h"
+#include "jsdrv_prv/meta_binary.h"
 
 
 #define FRAME_SIZE_U8           (512U)
@@ -45,6 +46,48 @@
 #define PAYLOAD_SIZE_MAX_U32    (PAYLOAD_SIZE_MAX_U8 >> 2)
 #define MB_TOPIC_SIZE_MAX       (32U)
 #define PUBSUB_DISCONNECT_STR   "h|disconnect"
+
+// Hard-coded pubsub prefixes for state fetch (until distributed discovery)
+static const char STATE_FETCH_PREFIXES[] = {'c', 's', 0};
+
+#define STATE_FETCH_PHASE_IDLE      0
+#define STATE_FETCH_PHASE_GET_INIT  1
+#define STATE_FETCH_PHASE_GET_NEXT  2
+#define STATE_FETCH_PHASE_META_HDR  3
+#define STATE_FETCH_PHASE_META_DATA 4
+
+#define STATE_FETCH_META_BLOBS_MAX  8
+#define STATE_FETCH_META_PAGE_SIZE  256
+
+#ifndef MB_STDMSG_STATE
+#define MB_STDMSG_STATE 0x08
+#endif
+#ifndef MB_STDMSG_PUBSUB_INFO
+#define MB_STDMSG_PUBSUB_INFO 0x09
+#endif
+
+struct state_fetch_blob_s {
+    uint8_t  blob_type;
+    uint8_t  target;
+    uint16_t page_size;
+    uint32_t offset;
+    char     topic[32];
+};
+
+struct state_fetch_s {
+    uint8_t  prefix_idx;
+    uint8_t  phase;
+    uint32_t transaction_id;
+    // metadata blob info captured from ././info entries
+    struct state_fetch_blob_s blobs[STATE_FETCH_META_BLOBS_MAX];
+    uint8_t  blob_count;
+    uint8_t  blob_idx;
+    // metadata blob read buffer
+    uint8_t * meta_buf;
+    uint32_t meta_buf_size;
+    uint32_t meta_buf_offset;
+    uint32_t meta_total_size;
+};
 
 // todo move to an appropriate place
 #define MB_USB_EP_BULK_IN  0x82
@@ -114,6 +157,7 @@ struct jsdrvp_mb_dev_s {
 
     struct mb_link_identity_s identity;  // received device identity
     struct jsdrv_time_map_s time_map;
+    struct state_fetch_s state_fetch;
 };
 
 char mb_pubsub_prefix_get(void) {
@@ -219,18 +263,400 @@ static bool on_link_identify(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     return true;
 }
 
+// --- State fetch: !state GET to restore device retained values ---
+
+static void state_fetch_start(struct jsdrvp_mb_dev_s * self);
+static void state_fetch_send_get_init(struct jsdrvp_mb_dev_s * self);
+static void state_fetch_send_get_next(struct jsdrvp_mb_dev_s * self);
+static void state_fetch_advance_prefix(struct jsdrvp_mb_dev_s * self);
+static void state_fetch_start_meta(struct jsdrvp_mb_dev_s * self);
+static void state_fetch_send_meta_read(struct jsdrvp_mb_dev_s * self);
+static void state_fetch_complete(struct jsdrvp_mb_dev_s * self);
+
+static void state_fetch_publish_state(struct jsdrvp_mb_dev_s * self,
+                                       const char * topic, uint8_t value_type,
+                                       const void * value, uint32_t size) {
+    struct jsdrv_union_s v;
+    v.type = value_type;
+    v.size = size;
+    v.flags = JSDRV_UNION_FLAG_RETAIN;
+    v.app = 0;
+    if (size <= 8) {
+        v.value.u64 = 0;
+        memcpy(&v.value.u64, value, size);
+    } else {
+        v.value.bin = value;
+    }
+    send_to_frontend(self, topic, &v);
+}
+
+static void state_fetch_publish_stdmsg_to_device(struct jsdrvp_mb_dev_s * self,
+                                                   const char * topic,
+                                                   uint8_t stdmsg_type,
+                                                   const void * payload,
+                                                   uint16_t payload_size) {
+    uint8_t buf[128];
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = stdmsg_type;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    if (payload && payload_size > 0) {
+        memcpy(buf + sizeof(*hdr), payload, payload_size);
+    }
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = sizeof(*hdr) + payload_size;
+    v.value.bin = buf;
+    v.flags = 0;
+    v.app = 0;
+    publish_to_device(self, topic, &v);
+}
+
+static void state_fetch_start(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    memset(sf, 0, sizeof(*sf));
+    sf->prefix_idx = 0;
+    sf->transaction_id = 0x5F00;
+    state_fetch_send_get_init(self);
+}
+
+static void state_fetch_send_get_init(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+    if (!prefix) {
+        state_fetch_start_meta(self);
+        return;
+    }
+    sf->phase = STATE_FETCH_PHASE_GET_INIT;
+    sf->transaction_id++;
+
+    // Build state header: transaction_id(u32), type(u8)=GET_INIT, flags, status, rsv
+    uint8_t payload[8];
+    memset(payload, 0, sizeof(payload));
+    uint32_t txn = sf->transaction_id;
+    memcpy(payload, &txn, 4);
+    payload[4] = 1;  // MB_STDMSG_STATE_TYPE_GET_INIT
+
+    char topic[16];
+    topic[0] = prefix; topic[1] = '/'; topic[2] = '.'; topic[3] = '/';
+    topic[4] = '!'; topic[5] = 's'; topic[6] = 't'; topic[7] = 'a';
+    topic[8] = 't'; topic[9] = 'e'; topic[10] = '\0';
+
+    JSDRV_LOGI("state_fetch: GET_INIT for '%c'", prefix);
+    state_fetch_publish_stdmsg_to_device(self, topic, MB_STDMSG_STATE, payload, 8);
+    timeout_set(self);
+}
+
+static void state_fetch_send_get_next(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+    sf->phase = STATE_FETCH_PHASE_GET_NEXT;
+
+    uint8_t payload[8];
+    memset(payload, 0, sizeof(payload));
+    uint32_t txn = sf->transaction_id;
+    memcpy(payload, &txn, 4);
+    payload[4] = 3;  // MB_STDMSG_STATE_TYPE_GET_NEXT
+
+    char topic[16];
+    topic[0] = prefix; topic[1] = '/'; topic[2] = '.'; topic[3] = '/';
+    topic[4] = '!'; topic[5] = 's'; topic[6] = 't'; topic[7] = 'a';
+    topic[8] = 't'; topic[9] = 'e'; topic[10] = '\0';
+
+    state_fetch_publish_stdmsg_to_device(self, topic, MB_STDMSG_STATE, payload, 8);
+    timeout_set(self);
+}
+
+static void state_fetch_process_info_entry(struct jsdrvp_mb_dev_s * self,
+                                            const uint8_t * value_data,
+                                            uint16_t value_size) {
+    // value_data is the STDMSG value: [inner_stdmsg_hdr(8)][mb_pubsub_info_s + blobs]
+    struct state_fetch_s * sf = &self->state_fetch;
+    if (value_size < 8 + 4) return;  // need at least stdmsg_hdr + info header
+
+    const uint8_t * info_data = value_data + 8;  // skip inner stdmsg header
+    uint8_t blob_count = info_data[1];  // info_s.blob_count
+
+    const uint8_t * blob_data = info_data + 4;  // skip info header
+    for (uint8_t i = 0; i < blob_count && sf->blob_count < STATE_FETCH_META_BLOBS_MAX; ++i) {
+        if ((uint32_t)(blob_data - value_data) + 40 > value_size) break;
+        struct state_fetch_blob_s * b = &sf->blobs[sf->blob_count];
+        b->blob_type = blob_data[0];
+        b->target = blob_data[1];
+        memcpy(&b->page_size, blob_data + 2, 2);
+        memcpy(&b->offset, blob_data + 4, 4);
+        memcpy(b->topic, blob_data + 8, 32);
+        sf->blob_count++;
+        blob_data += 40;
+    }
+    JSDRV_LOGI("state_fetch: captured %u blobs from ././info", sf->blob_count);
+}
+
+static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
+                                const struct jsdrv_union_s * value) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    if (value->type != JSDRV_UNION_STDMSG) return;
+    if (value->size < 8 + 8) return;  // stdmsg_hdr + state_header
+
+    const uint8_t * data = value->value.bin;
+    // Skip stdmsg header to get state header
+    const uint8_t * sh = data + 8;
+    uint8_t state_type = sh[4];
+    uint8_t state_flags = sh[5];
+    uint8_t status = sh[6];
+
+    timeout_clear(self);
+
+    if (sf->phase == STATE_FETCH_PHASE_GET_INIT) {
+        if (status != 0) {
+            JSDRV_LOGW("state_fetch: GET_INIT failed status=%u", status);
+            state_fetch_advance_prefix(self);
+            return;
+        }
+        state_fetch_send_get_next(self);
+        return;
+    }
+
+    if (sf->phase == STATE_FETCH_PHASE_GET_NEXT) {
+        if (state_type != 2) return;  // not GET_RSP
+        if (status != 0) {
+            JSDRV_LOGW("state_fetch: GET_NEXT failed status=%u", status);
+            state_fetch_advance_prefix(self);
+            return;
+        }
+
+        // Parse state entries
+        uint32_t offset = 8 + 8;  // stdmsg_hdr + state_header
+        while (offset + 48 <= value->size) {  // 48 = min entry size (32 topic + 8 header + 8 value)
+            const char * topic = (const char *)(data + offset);
+            uint8_t vtype = data[offset + 32];
+            uint16_t vsize;
+            memcpy(&vsize, data + offset + 34, 2);
+            const uint8_t * vdata = data + offset + 40;
+            uint16_t padded = (vsize + 7) & ~7;
+            if (padded < 8) padded = 8;
+            uint32_t entry_size = 40 + padded;
+
+            if (offset + entry_size > value->size) break;
+            if (topic[0] == '\0') break;
+
+            // Publish the retained value to the host pubsub
+            state_fetch_publish_state(self, topic, vtype, vdata, vsize);
+
+            // Check if this is the ././info topic
+            char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+            char info_topic[16];
+            info_topic[0] = prefix; info_topic[1] = '/';
+            info_topic[2] = '.'; info_topic[3] = '/';
+            info_topic[4] = 'i'; info_topic[5] = 'n';
+            info_topic[6] = 'f'; info_topic[7] = 'o';
+            info_topic[8] = '\0';
+            if (0 == strcmp(topic, info_topic) && vtype == JSDRV_UNION_STDMSG) {
+                state_fetch_process_info_entry(self, vdata, vsize);
+            }
+
+            offset += entry_size;
+        }
+
+        if (state_flags & 0x02) {  // MB_STDMSG_STATE_FLAG_END
+            state_fetch_advance_prefix(self);
+        } else {
+            state_fetch_send_get_next(self);
+        }
+        return;
+    }
+}
+
+static void state_fetch_advance_prefix(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    sf->prefix_idx++;
+    state_fetch_send_get_init(self);
+}
+
+// --- Metadata fetch: read binary blobs via memory protocol ---
+
+static void meta_fetch_on_topic(void * user_data, const char * topic, const char * json_meta) {
+    struct jsdrvp_mb_dev_s * self = (struct jsdrvp_mb_dev_s *) user_data;
+    // Publish as {device}/{topic}$ with JSON value
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(self->context);
+    struct jsdrv_topic_s t;
+    jsdrv_topic_set(&t, self->ll.prefix);
+    jsdrv_topic_append(&t, topic);
+    size_t tlen = strlen(t.topic);
+    t.topic[tlen] = '$';
+    t.topic[tlen + 1] = '\0';
+    jsdrv_cstr_copy(m->topic, t.topic, sizeof(m->topic));
+    m->value.type = JSDRV_UNION_JSON;
+    m->value.size = (uint32_t)(strlen(json_meta) + 1);
+    m->value.flags = JSDRV_UNION_FLAG_RETAIN;
+    m->value.app = 0;
+    if (m->value.size <= sizeof(m->payload.bin)) {
+        m->value.value.str = m->payload.str;
+        memcpy(m->payload.str, json_meta, m->value.size);
+    } else {
+        char * ptr = jsdrv_alloc(m->value.size);
+        memcpy(ptr, json_meta, m->value.size);
+        m->value.value.str = ptr;
+        m->value.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
+    }
+    jsdrvp_backend_send(self->context, m);
+}
+
+static void state_fetch_start_meta(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+
+    // Find the next pubsub_meta blob from current blob_idx
+    while (sf->blob_idx < sf->blob_count) {
+        if (sf->blobs[sf->blob_idx].blob_type == 1) {  // pubsub_meta
+            break;
+        }
+        sf->blob_idx++;
+    }
+    if (sf->blob_idx >= sf->blob_count) {
+        state_fetch_complete(self);
+        return;
+    }
+
+    // Read first page to get header
+    sf->phase = STATE_FETCH_PHASE_META_HDR;
+    sf->meta_buf_offset = 0;
+    sf->meta_total_size = 0;
+    if (sf->meta_buf) { jsdrv_free(sf->meta_buf); sf->meta_buf = NULL; }
+    state_fetch_send_meta_read(self);
+}
+
+static void state_fetch_send_meta_read(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    struct state_fetch_blob_s * blob = &sf->blobs[sf->blob_idx];
+
+    uint32_t read_offset = blob->offset + sf->meta_buf_offset;
+    uint32_t page_size = blob->page_size ? blob->page_size : STATE_FETCH_META_PAGE_SIZE;
+
+    // Build mb_stdmsg_mem_s READ command
+    uint8_t payload[24];
+    memset(payload, 0, sizeof(payload));
+    sf->transaction_id++;
+    uint32_t txn = sf->transaction_id;
+    memcpy(payload + 0, &txn, 4);     // transaction_id
+    payload[4] = blob->target;         // target
+    payload[5] = 1;                    // operation = READ
+    uint16_t timeout_ms = 5000;
+    memcpy(payload + 8, &timeout_ms, 2);  // timeout_ms
+    memcpy(payload + 12, &read_offset, 4);  // offset
+    memcpy(payload + 16, &page_size, 4);    // length
+
+    state_fetch_publish_stdmsg_to_device(self, blob->topic, 0x07, payload, 24);
+    timeout_set(self);
+}
+
+static void state_fetch_on_meta_rsp(struct jsdrvp_mb_dev_s * self,
+                                     const struct jsdrv_union_s * value) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    timeout_clear(self);
+
+    if (value->type != JSDRV_UNION_STDMSG) return;
+    uint32_t hdr_off = 8;  // skip stdmsg header
+    if (value->size < hdr_off + 24) return;
+
+    const uint8_t * mem_rsp = value->value.bin + hdr_off;
+    uint8_t status = mem_rsp[7];
+    uint32_t length;
+    memcpy(&length, mem_rsp + 16, 4);
+
+    if (status != 0) {
+        JSDRV_LOGW("state_fetch: meta READ failed status=%u", status);
+        // Skip this blob, try next
+        goto next_blob;
+    }
+
+    const uint8_t * data = mem_rsp + 24;
+    uint32_t data_size = value->size - hdr_off - 24;
+    if (length > data_size) length = data_size;
+
+    if (sf->phase == STATE_FETCH_PHASE_META_HDR) {
+        // Parse header to get total_size
+        if (length < 32 || memcmp(data, "MBtm_1.0", 8) != 0) {
+            JSDRV_LOGW("state_fetch: meta blob bad magic");
+            goto next_blob;
+        }
+        memcpy(&sf->meta_total_size, data + 12, 4);
+        if (sf->meta_total_size == 0 || sf->meta_total_size > 64 * 1024) {
+            JSDRV_LOGW("state_fetch: meta total_size=%u invalid", sf->meta_total_size);
+            goto next_blob;
+        }
+        sf->meta_buf = jsdrv_alloc(sf->meta_total_size);
+        sf->meta_buf_size = sf->meta_total_size;
+        // Copy first page
+        uint32_t copy = (length > sf->meta_total_size) ? sf->meta_total_size : length;
+        memcpy(sf->meta_buf, data, copy);
+        sf->meta_buf_offset = copy;
+        sf->phase = STATE_FETCH_PHASE_META_DATA;
+
+        if (sf->meta_buf_offset >= sf->meta_total_size) {
+            goto parse_blob;
+        }
+        state_fetch_send_meta_read(self);
+        return;
+    }
+
+    if (sf->phase == STATE_FETCH_PHASE_META_DATA) {
+        uint32_t remaining = sf->meta_total_size - sf->meta_buf_offset;
+        uint32_t copy = (length > remaining) ? remaining : length;
+        memcpy(sf->meta_buf + sf->meta_buf_offset, data, copy);
+        sf->meta_buf_offset += copy;
+
+        if (sf->meta_buf_offset >= sf->meta_total_size) {
+            goto parse_blob;
+        }
+        state_fetch_send_meta_read(self);
+        return;
+    }
+    return;
+
+parse_blob:
+    JSDRV_LOGI("state_fetch: parsing %u byte metadata blob", sf->meta_total_size);
+    meta_binary_parse(sf->meta_buf, sf->meta_total_size, meta_fetch_on_topic, self);
+    // fall through to next_blob
+
+next_blob:
+    if (sf->meta_buf) { jsdrv_free(sf->meta_buf); sf->meta_buf = NULL; }
+    sf->blob_idx++;
+    while (sf->blob_idx < sf->blob_count) {
+        if (sf->blobs[sf->blob_idx].blob_type == 1) break;
+        sf->blob_idx++;
+    }
+    if (sf->blob_idx >= sf->blob_count) {
+        state_fetch_complete(self);
+    } else {
+        JSDRV_LOGI("state_fetch: reading meta blob %u (type=%u topic=%s offset=0x%x)",
+                    sf->blob_idx, sf->blobs[sf->blob_idx].blob_type,
+                    sf->blobs[sf->blob_idx].topic, sf->blobs[sf->blob_idx].offset);
+        sf->phase = STATE_FETCH_PHASE_META_HDR;
+        sf->meta_buf_offset = 0;
+        sf->meta_total_size = 0;
+        state_fetch_send_meta_read(self);
+    }
+}
+
+static void state_fetch_complete(struct jsdrvp_mb_dev_s * self) {
+    self->state_fetch.phase = STATE_FETCH_PHASE_IDLE;
+    JSDRV_LOGI("state_fetch: complete, signaling OPEN");
+    send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
+}
+
+// --- End state fetch ---
+
 static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     timeout_clear(self);
 
-    // Notify upper driver (publishes metadata)
+    // Notify upper driver
     if (self->drv && self->drv->on_open) {
         self->drv->on_open(self->drv, self, &self->identity);
     }
 
-    // State restore based on open mode.
-    // Subscribe/unsubscribe on subtopics (not the device prefix itself)
-    // to replay retained values without removing the original device subscriber.
+    // State restore: replay host-cached values
     if (1 == self->open_mode) {  // JSDRV_DEVICE_OPEN_MODE_RESUME
         static const char * const subtrees[] = {"h", "c", "s", NULL};
         for (const char * const * st = subtrees; *st; ++st) {
@@ -248,7 +674,8 @@ static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
         }
     }
 
-    send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
+    // Fetch device state + metadata, then signal OPEN when complete
+    state_fetch_start(self);
     return true;
 }
 
@@ -323,7 +750,33 @@ const struct state_machine_transition_s state_machine_link_identity[] = {
     TRANSITION_END
 };
 
+static bool on_open_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) event;
+    struct state_fetch_s * sf = &self->state_fetch;
+    if (sf->phase == STATE_FETCH_PHASE_IDLE) {
+        return false;
+    }
+    if (sf->phase == STATE_FETCH_PHASE_GET_INIT
+            || sf->phase == STATE_FETCH_PHASE_GET_NEXT) {
+        char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+        JSDRV_LOGW("state_fetch: timeout waiting for !state response from '%c'", prefix);
+        state_fetch_advance_prefix(self);
+    } else {
+        struct state_fetch_blob_s * blob = &sf->blobs[sf->blob_idx];
+        JSDRV_LOGW("state_fetch: timeout reading metadata blob at %s offset=0x%x",
+                    blob->topic, blob->offset);
+        if (sf->meta_buf) {
+            jsdrv_free(sf->meta_buf);
+            sf->meta_buf = NULL;
+        }
+        sf->blob_idx++;
+        state_fetch_start_meta(self);
+    }
+    return false;  // stay in ST_OPEN
+}
+
 const struct state_machine_transition_s state_machine_open[] = {
+    {EV_TIMEOUT, ST_OPEN, on_open_timeout},
     {EV_API_CLOSE_REQUEST, ST_PUBSUB_FLUSH, NULL},
     // todo handle detect link lost
     TRANSITION_END
@@ -735,10 +1188,28 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
     } else if (jsdrv_cstr_ends_with(publish->topic, "/!rsp")
                && (value_type == JSDRV_UNION_STDMSG)
                && value_size >= sizeof(struct mb_stdmsg_header_s)) {
-        // Responses arrive on {origin_prefix}/!rsp as STDMSG values.
+        // Route to state fetch if active
+        struct mb_stdmsg_header_s * rsp_hdr = (struct mb_stdmsg_header_s *) &publish->value;
+        JSDRV_LOGI("!rsp: type=%u size=%u sf_phase=%u", rsp_hdr->type, value_size, d->state_fetch.phase);
+        if (d->state_fetch.phase != STATE_FETCH_PHASE_IDLE
+                && value_size >= sizeof(struct mb_stdmsg_header_s) + 4) {
+            // Match on transaction_id (first 4 bytes after inner stdmsg header)
+            uint32_t rsp_txn;
+            memcpy(&rsp_txn, (const uint8_t *)&publish->value + sizeof(struct mb_stdmsg_header_s), 4);
+            if (rsp_txn == d->state_fetch.transaction_id) {
+                if (rsp_hdr->type == MB_STDMSG_STATE) {
+                    state_fetch_on_rsp(d, &m->value);
+                    jsdrvp_msg_free(d->context, m);
+                    return;
+                } else if (rsp_hdr->type == 0x07) {  // MB_STDMSG_MEM
+                    state_fetch_on_meta_rsp(d, &m->value);
+                    jsdrvp_msg_free(d->context, m);
+                    return;
+                }
+            }
+        }
         // Check inner type: only handle confirmed delivery (PUBSUB_RESPONSE).
         // All other types (e.g. MEM) fall through to the upper driver.
-        struct mb_stdmsg_header_s * rsp_hdr = (struct mb_stdmsg_header_s *) &publish->value;
         if (rsp_hdr->type == MB_STDMSG_PUBSUB_RESPONSE
                 && value_size >= (sizeof(struct mb_stdmsg_header_s)
                     + sizeof(struct mb_stdmsg_pubsub_response_s))) {
@@ -1004,6 +1475,10 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
             ;
         }
 
+        if ((d->timeout_utc > 0) && (jsdrv_time_utc() >= d->timeout_utc)) {
+            d->timeout_utc = 0;
+            state_machine_process(d, EV_TIMEOUT);
+        }
         if ((d->drv_timeout_utc > 0) && (jsdrv_time_utc() >= d->drv_timeout_utc)) {
             d->drv_timeout_utc = 0;
             if (d->drv && d->drv->on_timeout) {

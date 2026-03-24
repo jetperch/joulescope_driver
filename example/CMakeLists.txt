@@ -59,6 +59,7 @@ add_executable(minibitty_exe
         minibitty/hotplug.c
         minibitty/info.c
         minibitty/pubsub_info.c
+        minibitty/state_get.c
         minibitty/pubsub_sniffer.c
         minibitty/pubsub_test.c
         minibitty/loopback.c

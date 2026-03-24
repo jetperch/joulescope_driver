@@ -63,7 +63,7 @@ static void on_pub(void * user_data, const char * topic, const struct jsdrv_unio
 }
 
 static int device_info(struct app_s * self, const char * device) {
-    ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
+    ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 10000));
     // printf("device_info start");
     if (self->verbose) {
         printf("device: %s\n", device);

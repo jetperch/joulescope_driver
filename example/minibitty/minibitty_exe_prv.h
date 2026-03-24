@@ -98,6 +98,7 @@ int on_mem(struct app_s * self, int argc, char * argv[]);
 int on_stream(struct app_s * self, int argc, char * argv[]);
 int on_throughput(struct app_s * self, int argc, char * argv[]);
 int on_pubsub_info(struct app_s * self, int argc, char * argv[]);
+int on_state_get(struct app_s * self, int argc, char * argv[]);
 int on_pubsub_sniffer(struct app_s * self, int argc, char * argv[]);
 int on_pubsub_test(struct app_s * self, int argc, char * argv[]);
 int on_version(struct app_s * self, int argc, char * argv[]);
