@@ -478,11 +478,19 @@ static void state_fetch_advance_prefix(struct jsdrvp_mb_dev_s * self) {
 
 static void meta_fetch_on_topic(void * user_data, const char * topic, const char * json_meta) {
     struct jsdrvp_mb_dev_s * self = (struct jsdrvp_mb_dev_s *) user_data;
-    // Publish as {device}/{topic}$ with JSON value
+    // Replace leading "./" with the blob's instance prefix
+    char resolved[64];
+    if (topic[0] == '.' && topic[1] == '/') {
+        resolved[0] = self->state_fetch.blobs[self->state_fetch.blob_idx].topic[0];
+        jsdrv_cstr_copy(resolved + 1, topic + 1, sizeof(resolved) - 1);
+    } else {
+        jsdrv_cstr_copy(resolved, topic, sizeof(resolved));
+    }
+    // Publish as {device}/{resolved_topic}$ with JSON value
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(self->context);
     struct jsdrv_topic_s t;
     jsdrv_topic_set(&t, self->ll.prefix);
-    jsdrv_topic_append(&t, topic);
+    jsdrv_topic_append(&t, resolved);
     size_t tlen = strlen(t.topic);
     t.topic[tlen] = '$';
     t.topic[tlen + 1] = '\0';
