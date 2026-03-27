@@ -298,6 +298,8 @@ void jsdrv_thread_sleep_ms(uint32_t duration_ms) {
 struct jsdrv_os_sem_s {
 #ifdef __APPLE__
     dispatch_semaphore_t dsema;
+    int32_t initial_count;
+    volatile int32_t balance;  // track net waits for safe free
 #else
     sem_t sem;
 #endif
@@ -308,6 +310,8 @@ jsdrv_os_sem_t jsdrv_os_sem_alloc(int32_t initial_count, int32_t max_count) {
     jsdrv_os_sem_t sem = jsdrv_alloc_clr(sizeof(*sem));
     sem->max_count = max_count;
 #ifdef __APPLE__
+    sem->initial_count = initial_count;
+    sem->balance = 0;
     sem->dsema = dispatch_semaphore_create(initial_count);
     if (!sem->dsema) {
         jsdrv_free(sem);
@@ -325,6 +329,12 @@ jsdrv_os_sem_t jsdrv_os_sem_alloc(int32_t initial_count, int32_t max_count) {
 void jsdrv_os_sem_free(jsdrv_os_sem_t sem) {
     if (NULL != sem) {
 #ifdef __APPLE__
+        // dispatch_semaphore traps if released with count < initial.
+        // Signal to restore the count before releasing.
+        while (sem->balance > 0) {
+            dispatch_semaphore_signal(sem->dsema);
+            --sem->balance;
+        }
         dispatch_release(sem->dsema);
 #else
         sem_destroy(&sem->sem);
@@ -339,7 +349,11 @@ int32_t jsdrv_os_sem_wait(jsdrv_os_sem_t sem, uint32_t timeout_ms) {
         DISPATCH_TIME_NOW,
         (int64_t) timeout_ms * 1000000LL);
     long rc = dispatch_semaphore_wait(sem->dsema, dt);
-    return (rc == 0) ? 0 : JSDRV_ERROR_TIMED_OUT;
+    if (rc == 0) {
+        ++sem->balance;
+        return 0;
+    }
+    return JSDRV_ERROR_TIMED_OUT;
 #else
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -362,6 +376,7 @@ int32_t jsdrv_os_sem_wait(jsdrv_os_sem_t sem, uint32_t timeout_ms) {
 
 void jsdrv_os_sem_release(jsdrv_os_sem_t sem) {
 #ifdef __APPLE__
+    --sem->balance;
     dispatch_semaphore_signal(sem->dsema);
 #else
     sem_post(&sem->sem);
