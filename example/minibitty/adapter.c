@@ -18,13 +18,14 @@
 #include "minibitty_exe_prv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/platform.h"
+#include "jsdrv_prv/log.h"
+#include "jsdrv/os_thread.h"
 #include "adapter_tracy.h"
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
-#include <windows.h>  // todo remove
-
-#define COUNTER_FMT "%10lu "
+#define COUNTER_FMT "%10" PRIu32 " "
 
 
 const char * MB_OBJ_NAME[16] = {
@@ -105,7 +106,7 @@ static void on_trace_print(void * user_data, const char * topic, const struct js
                 if (length == 0) {
                     printf(COUNTER_FMT "%s.%d exit\n", counter, obj_name, obj_id);
                 } else if (length == 1) {
-                    printf(COUNTER_FMT "%s.%d exit %lu\n", counter, obj_name, obj_id, p32[0]);
+                    printf(COUNTER_FMT "%s.%d exit %" PRIu32 "\n", counter, obj_name, obj_id, p32[0]);
                 } else {
                     JSDRV_LOGW("exit length invalid");
                 }
@@ -189,7 +190,7 @@ int on_adapter(struct app_s * self, int argc, char * argv[]) {
     }
 
     while (!quit_) {
-        Sleep(10);
+        jsdrv_thread_sleep_ms(10);
     }
 
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);

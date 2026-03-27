@@ -74,7 +74,11 @@ add_executable(minibitty_exe
 target_compile_features(minibitty_exe PUBLIC cxx_std_11)
 #set_target_properties(minibitty_exe PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
 add_dependencies(minibitty_exe jsdrv)
-target_link_libraries(minibitty_exe jsdrv ws2_32 dbghelp advapi32 user32)
+if (WIN32)
+    target_link_libraries(minibitty_exe jsdrv ws2_32 dbghelp advapi32 user32)
+else()
+    target_link_libraries(minibitty_exe jsdrv)
+endif()
 set_target_properties(minibitty_exe PROPERTIES OUTPUT_NAME minibitty)
 
 add_executable(fuzz fuzz.c)

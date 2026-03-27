@@ -29,7 +29,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <windows.h>
+#include "jsdrv/os_event.h"
+#include "jsdrv/os_thread.h"
 
 #ifndef MB_STDMSG_PUBSUB_INFO
 #define MB_STDMSG_PUBSUB_INFO 0x09
@@ -93,7 +94,7 @@ struct state_entry_s {
 
 
 struct pubsub_info_state_s {
-    HANDLE event;
+    jsdrv_os_event_t event;
     int received;
     uint8_t rsp_buf[512];
     uint32_t rsp_size;
@@ -129,7 +130,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
     memcpy(state_.rsp_buf, value->value.bin + sizeof(struct mb_stdmsg_header_s), payload_size);
     state_.rsp_size = payload_size;
     state_.received = 1;
-    SetEvent(state_.event);
+    jsdrv_os_event_signal(state_.event);
 }
 
 static int state_publish(struct app_s * self, const char * prefix,
@@ -184,8 +185,8 @@ static int state_publish(struct app_s * self, const char * prefix,
 
 static int wait_rsp(uint32_t timeout_ms) {
     state_.received = 0;
-    DWORD result = WaitForSingleObject(state_.event, timeout_ms);
-    if (result != WAIT_OBJECT_0) {
+    int32_t result = jsdrv_os_event_wait(state_.event, timeout_ms);
+    if (result) {
         return 1;
     }
     return (state_.received > 0) ? 0 : 1;
@@ -267,7 +268,7 @@ int on_pubsub_info(struct app_s * self, int argc, char * argv[]) {
     ROE(app_match(self, device_filter));
 
     memset(&state_, 0, sizeof(state_));
-    state_.event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    state_.event = jsdrv_os_event_alloc();
 
     // Subscribe to {device}/h/!rsp before open
     struct jsdrv_topic_s rsp_topic;
@@ -278,7 +279,7 @@ int on_pubsub_info(struct app_s * self, int argc, char * argv[]) {
 
     ROE(jsdrv_open(self->context, self->device.topic,
                    JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
-    Sleep(500);
+    jsdrv_thread_sleep_ms(500);
 
     // Build target topic: {prefix}/./info
     char target_topic[MB_TOPIC_LENGTH_MAX];
@@ -300,7 +301,7 @@ int on_pubsub_info(struct app_s * self, int argc, char * argv[]) {
         printf("ERROR: publish GET_INIT failed: %d\n", pub_rc);
         jsdrv_unsubscribe(self->context, rsp_topic.topic, on_rsp, NULL, 0);
         jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-        CloseHandle(state_.event);
+        jsdrv_os_event_free(state_.event);
         return 1;
     }
 
@@ -309,7 +310,7 @@ int on_pubsub_info(struct app_s * self, int argc, char * argv[]) {
         printf("ERROR: no GET_INIT response\n");
         jsdrv_unsubscribe(self->context, rsp_topic.topic, on_rsp, NULL, 0);
         jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-        CloseHandle(state_.event);
+        jsdrv_os_event_free(state_.event);
         return 1;
     }
 
@@ -319,7 +320,7 @@ int on_pubsub_info(struct app_s * self, int argc, char * argv[]) {
         printf("ERROR: GET_INIT status=%u\n", rsp_hdr->status);
         jsdrv_unsubscribe(self->context, rsp_topic.topic, on_rsp, NULL, 0);
         jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-        CloseHandle(state_.event);
+        jsdrv_os_event_free(state_.event);
         return 1;
     }
 
@@ -329,7 +330,7 @@ int on_pubsub_info(struct app_s * self, int argc, char * argv[]) {
         printf("ERROR: publish GET_NEXT failed: %d\n", pub_rc);
         jsdrv_unsubscribe(self->context, rsp_topic.topic, on_rsp, NULL, 0);
         jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-        CloseHandle(state_.event);
+        jsdrv_os_event_free(state_.event);
         return 1;
     }
 
@@ -338,7 +339,7 @@ int on_pubsub_info(struct app_s * self, int argc, char * argv[]) {
         printf("ERROR: no GET_NEXT response\n");
         jsdrv_unsubscribe(self->context, rsp_topic.topic, on_rsp, NULL, 0);
         jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-        CloseHandle(state_.event);
+        jsdrv_os_event_free(state_.event);
         return 1;
     }
 
@@ -371,6 +372,6 @@ int on_pubsub_info(struct app_s * self, int argc, char * argv[]) {
 
     jsdrv_unsubscribe(self->context, rsp_topic.topic, on_rsp, NULL, 0);
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-    CloseHandle(state_.event);
+    jsdrv_os_event_free(state_.event);
     return rc;
 }

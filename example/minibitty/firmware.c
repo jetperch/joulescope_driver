@@ -20,7 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <windows.h>
+#include "jsdrv/os_event.h"
+#include "jsdrv/os_thread.h"
 
 
 #define PIPELINE_MAX        16U
@@ -53,7 +54,7 @@ struct firmware_s {
     struct app_s * app;
     uint32_t transaction_id;
     int32_t rsp_status;
-    HANDLE event;
+    jsdrv_os_event_t event;
 };
 
 static struct firmware_s fw_;
@@ -75,7 +76,7 @@ static void on_fwup_rsp(void * user_data, const char * topic, const struct jsdrv
                    rsp->transaction_id, rsp->status);
         }
     }
-    SetEvent(fw_.event);
+    jsdrv_os_event_signal(fw_.event);
 }
 
 static uint8_t * file_read(const char * path, uint32_t * size_out) {
@@ -116,11 +117,11 @@ static int setup(struct app_s * self) {
 
     memset(&fw_, 0, sizeof(fw_));
     fw_.app = self;
-    fw_.event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    fw_.event = jsdrv_os_event_alloc();
 
     ROE(jsdrv_open(self->context, self->device.topic,
                    JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
-    Sleep(500);
+    jsdrv_thread_sleep_ms(500);
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "h/fwup/ctrl/!rsp");
@@ -137,7 +138,7 @@ static int teardown(struct app_s * self, int rc) {
     jsdrv_unsubscribe(self->context, topic.topic, on_fwup_rsp, NULL, 0);
 
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-    CloseHandle(fw_.event);
+    jsdrv_os_event_free(fw_.event);
     return rc;
 }
 
@@ -166,7 +167,7 @@ static int fwup_ctrl_send(uint8_t op, uint8_t image_slot,
     }
 
     fw_.rsp_status = 1;
-    ResetEvent(fw_.event);
+    jsdrv_os_event_reset(fw_.event);
 
     struct jsdrv_topic_s topic;
     jsdrv_topic_set(&topic, fw_.app->device.topic);
@@ -179,8 +180,8 @@ static int fwup_ctrl_send(uint8_t op, uint8_t image_slot,
         return pub_rc;
     }
 
-    DWORD result = WaitForSingleObject(fw_.event, timeout_ms);
-    if (result != WAIT_OBJECT_0) {
+    int32_t result = jsdrv_os_event_wait(fw_.event, timeout_ms);
+    if (result) {
         printf("ERROR: timeout waiting for response\n");
         return 1;
     }

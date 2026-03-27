@@ -17,10 +17,10 @@
 #include "minibitty_exe_prv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/platform.h"
+#include "jsdrv/os_event.h"
 #include <stdio.h>
 #include <string.h>
-
-#include <windows.h>  // todo remove
+#include <inttypes.h>
 
 
 #define MB_TOPIC_LENGTH_MAX (32U)
@@ -41,7 +41,7 @@ struct loopback_s {
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     volatile uint64_t ping_count;   // current TX ping count
     volatile uint64_t pong_count;   // current RX pong count
-    HANDLE event;
+    jsdrv_os_event_t event;
 };
 
 struct loopback_s loopback_ = {
@@ -72,19 +72,20 @@ static void on_pong(void * user_data, const char * topic, const struct jsdrv_uni
     for (uint32_t i = 0; i < loopback_.size_u32; ++i) {
         if (p_u32[i] != (uint32_t) (loopback_.pong_count + i)) {
             if (0 == loopback_.pong_count) {
-                printf("ERROR pong unsynced: %llu %lu %u: %lu != %lu\n",
+                printf("ERROR pong unsynced: %" PRIu64 " %" PRIu32 " %u: %" PRIu32 " != %" PRIu32 "\n",
                     loopback_.pong_count, value->size, i,
                     p_u32[i], (uint32_t) (loopback_.pong_count + i));
                 return;
             }
-            printf("ERROR pong %llu %lu %u: %lu != %lu\n", loopback_.pong_count, value->size, i,
+            printf("ERROR pong %" PRIu64 " %" PRIu32 " %u: %" PRIu32 " != %" PRIu32 "\n",
+                loopback_.pong_count, value->size, i,
                 p_u32[i], (uint32_t) (loopback_.pong_count + i));
             quit_ = true;
             return;
         }
     }
     loopback_.pong_count++;
-    SetEvent(loopback_.event);
+    jsdrv_os_event_signal(loopback_.event);
 }
 
 static int link_lookback(struct app_s * self, const char * device) {
@@ -122,7 +123,7 @@ static int link_lookback(struct app_s * self, const char * device) {
 
 
     while (!quit_) {
-        ResetEvent(loopback_.event);
+        jsdrv_os_event_reset(loopback_.event);
         if (loopback_.count && (loopback_.ping_count >= loopback_.count) && (loopback_.pong_count >= loopback_.count)) {
             break;
         }
@@ -142,12 +143,12 @@ static int link_lookback(struct app_s * self, const char * device) {
         time_delta = time_now - time_prev;
         if (time_delta > JSDRV_TIME_SECOND) {
             uint64_t pong_delta = loopback_.pong_count - pong_prev;
-            printf("Throughput: %llu frames = %llu bytes\n", pong_delta, pong_delta * loopback_.size_u32 * 4);
+            printf("Throughput: %" PRIu64 " frames = %" PRIu64 " bytes\n", pong_delta, pong_delta * loopback_.size_u32 * 4);
             fflush(stdout);
             time_prev = time_now;
             pong_prev = loopback_.pong_count;
         }
-        WaitForSingleObject(loopback_.event, 1);
+        jsdrv_os_event_wait(loopback_.event, 1);
     }
 
     jsdrv_close(self->context, device, JSDRV_TIMEOUT_MS_DEFAULT);
@@ -219,12 +220,7 @@ int on_loopback(struct app_s * self, int argc, char * argv[]) {
 
     ROE(app_match(self, device_filter));
 
-    loopback_.event = CreateEvent(
-            NULL,  // default security attributes
-            TRUE,  // manual reset event
-            TRUE,  // start signalled to pend initial transactions
-            NULL   // no name
-    );
+    loopback_.event = jsdrv_os_event_alloc();
 
     // todo loopback @ pubsub layer
 

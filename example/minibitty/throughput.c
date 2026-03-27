@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <windows.h>  // todo remove
+#include "jsdrv/os_thread.h"
 
 
 static void on_device_stats(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
@@ -110,7 +110,7 @@ int on_throughput(struct app_s * self, int argc, char * argv[]) {
     jsdrv_publish(self->context, topic.topic, &jsdrv_union_u8(1), 0);  // USBD task
 
     while (!quit_) {
-        Sleep(10);
+        jsdrv_thread_sleep_ms(10);
     }
 
     jsdrv_publish(self->context, topic.topic, &jsdrv_union_u8(0), 0);

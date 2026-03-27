@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <windows.h>  // todo remove
+#include "jsdrv/os_thread.h"
 
 
 #define MB_TOPIC_LENGTH_MAX (32U)
@@ -93,7 +93,7 @@ static int run(struct app_s * self, const char * device) {
     int32_t rc = 0;
 
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
-    Sleep(100);     // todo improved way to detect sensor ready
+    jsdrv_thread_sleep_ms(100);     // todo improved way to detect sensor ready
 
     PUBLISH_U32("c/led/red", 0);
     PUBLISH_U32("c/led/green", 0x0f);
@@ -144,7 +144,7 @@ static int run(struct app_s * self, const char * device) {
 
 
     while (!quit_) {
-        Sleep(10);
+        jsdrv_thread_sleep_ms(10);
     }
 
     PUBLISH_U32("s/adc/0/ctrl", 0);

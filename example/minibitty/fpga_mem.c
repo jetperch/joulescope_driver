@@ -21,7 +21,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <windows.h>
+#include "jsdrv/os_atomic.h"
+#include "jsdrv/os_event.h"
+#include "jsdrv/os_sem.h"
+#include "jsdrv/os_thread.h"
 
 
 #define FLASH_PAGE_SIZE     256U
@@ -39,12 +42,12 @@ enum js320_jtag_op_e {
 struct fpga_mem_s {
     struct app_s * app;
     uint32_t transaction_id;
-    volatile LONG outstanding;
-    volatile LONG error_count;
+    jsdrv_os_atomic_t outstanding;
+    jsdrv_os_atomic_t error_count;
     uint8_t * read_buf;
     uint32_t read_buf_offset;
     uint32_t read_buf_length;
-    HANDLE semaphore;
+    jsdrv_os_sem_t semaphore;
     uint32_t pipeline_depth;
 };
 
@@ -75,7 +78,7 @@ struct fwup_state_s {
     struct app_s * app;
     uint32_t transaction_id;
     int32_t rsp_status;
-    HANDLE event;
+    jsdrv_os_event_t event;
 };
 
 static struct fwup_state_s fwup_;
@@ -96,7 +99,7 @@ static void on_fwup_fpga_rsp(void * user_data, const char * topic,
                    rsp->transaction_id, rsp->status);
         }
     }
-    SetEvent(fwup_.event);
+    jsdrv_os_event_signal(fwup_.event);
 }
 
 
@@ -164,18 +167,18 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
     }
 
     if (rsp->status != 0) {
-        InterlockedIncrement(&fpga_mem_.error_count);
+        JSDRV_OS_ATOMIC_INC(&fpga_mem_.error_count);
     }
-    InterlockedDecrement(&fpga_mem_.outstanding);
-    ReleaseSemaphore(fpga_mem_.semaphore, 1, NULL);
+    JSDRV_OS_ATOMIC_DEC(&fpga_mem_.outstanding);
+    jsdrv_os_sem_release(fpga_mem_.semaphore);
 }
 
 static int pipeline_send(struct fpga_mem_s * fm, uint8_t op, uint32_t offset, uint32_t length,
                           const uint8_t * data, uint32_t data_size, uint32_t timeout_ms) {
     // If pipeline is full, wait for one slot to free
-    while (fm->outstanding >= (LONG) fm->pipeline_depth) {
-        DWORD result = WaitForSingleObject(fm->semaphore, timeout_ms + 5000);
-        if (result != WAIT_OBJECT_0) {
+    while (fm->outstanding >= (int32_t) fm->pipeline_depth) {
+        int32_t result = jsdrv_os_sem_wait(fm->semaphore, timeout_ms + 5000);
+        if (result) {
             printf("ERROR: timeout waiting for pipeline slot\n");
             return 1;
         }
@@ -204,7 +207,7 @@ static int pipeline_send(struct fpga_mem_s * fm, uint8_t op, uint32_t offset, ui
         memcpy(cmd->data, data, data_size);
     }
 
-    InterlockedIncrement(&fm->outstanding);
+    JSDRV_OS_ATOMIC_INC(&fm->outstanding);
     jsdrv_topic_set(&topic, fm->app->device.topic);
     jsdrv_topic_append(&topic, "c/jtag/!cmd");
     struct jsdrv_union_s v;
@@ -213,7 +216,7 @@ static int pipeline_send(struct fpga_mem_s * fm, uint8_t op, uint32_t offset, ui
     v.value.bin = buf;
     int32_t pub_rc = jsdrv_publish(fm->app->context, topic.topic, &v, 0);
     if (pub_rc) {
-        InterlockedDecrement(&fm->outstanding);
+        JSDRV_OS_ATOMIC_DEC(&fm->outstanding);
         printf("ERROR: jsdrv_publish failed: %d\n", pub_rc);
         return pub_rc;
     }
@@ -222,8 +225,8 @@ static int pipeline_send(struct fpga_mem_s * fm, uint8_t op, uint32_t offset, ui
 
 static int pipeline_drain(struct fpga_mem_s * fm, uint32_t timeout_ms) {
     while (fm->outstanding > 0) {
-        DWORD result = WaitForSingleObject(fm->semaphore, timeout_ms + 5000);
-        if (result != WAIT_OBJECT_0) {
+        int32_t result = jsdrv_os_sem_wait(fm->semaphore, timeout_ms + 5000);
+        if (result) {
             printf("ERROR: timeout waiting for pipeline drain (%ld outstanding)\n", fm->outstanding);
             return 1;
         }
@@ -306,17 +309,17 @@ static int setup_common(struct app_s * self) {
 
     memset(&fpga_mem_, 0, sizeof(fpga_mem_));
     fpga_mem_.app = self;
-    fpga_mem_.semaphore = CreateSemaphore(NULL, 0, PIPELINE_MAX, NULL);
+    fpga_mem_.semaphore = jsdrv_os_sem_alloc(0, PIPELINE_MAX);
     fpga_mem_.pipeline_depth = 1;  // default synchronous, overridden by callers
 
     ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
-    Sleep(500);  // todo replace with controlled interlock when available
+    jsdrv_thread_sleep_ms(500);  // todo replace with controlled interlock when available
 
     // Activate JTAG mode
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "c/mode");
     jsdrv_publish(self->context, topic.topic, &jsdrv_union_u32(2), 0);
-    Sleep(100);  // allow mode switch to take effect
+    jsdrv_thread_sleep_ms(100);  // allow mode switch to take effect
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "h/!rsp");
@@ -337,7 +340,7 @@ static int teardown_common(struct app_s * self, int rc) {
     jsdrv_publish(self->context, topic.topic, &jsdrv_union_u32(0), 0);
 
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-    CloseHandle(fpga_mem_.semaphore);
+    jsdrv_os_sem_free(fpga_mem_.semaphore);
     return rc;
 }
 
@@ -458,11 +461,11 @@ static int setup_fwup(struct app_s * self) {
 
     memset(&fwup_, 0, sizeof(fwup_));
     fwup_.app = self;
-    fwup_.event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    fwup_.event = jsdrv_os_event_alloc();
 
     ROE(jsdrv_open(self->context, self->device.topic,
                    JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
-    Sleep(500);
+    jsdrv_thread_sleep_ms(500);
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "h/fwup/fpga/!rsp");
@@ -479,7 +482,7 @@ static int teardown_fwup(struct app_s * self, int rc) {
     jsdrv_unsubscribe(self->context, topic.topic, on_fwup_fpga_rsp, NULL, 0);
 
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-    CloseHandle(fwup_.event);
+    jsdrv_os_event_free(fwup_.event);
     return rc;
 }
 
@@ -511,7 +514,7 @@ static int do_program(struct app_s * self, const char * image_path, uint32_t pip
     free(image);
 
     fwup_.rsp_status = 1;
-    ResetEvent(fwup_.event);
+    jsdrv_os_event_reset(fwup_.event);
 
     struct jsdrv_topic_s topic;
     jsdrv_topic_set(&topic, fwup_.app->device.topic);
@@ -525,9 +528,9 @@ static int do_program(struct app_s * self, const char * image_path, uint32_t pip
         return pub_rc;
     }
 
-    DWORD result = WaitForSingleObject(fwup_.event, 120000);
+    int32_t result = jsdrv_os_event_wait(fwup_.event, 120000);
     int rc;
-    if (result != WAIT_OBJECT_0) {
+    if (result) {
         printf("ERROR: timeout waiting for FPGA programming response\n");
         rc = 1;
     } else {
@@ -583,7 +586,7 @@ static void on_aes_rsp(void * user_data, const char * topic, const struct jsdrv_
         const struct aes_rsp_s * rsp = (const struct aes_rsp_s *) value->value.bin;
         aes_rsp_status_ = rsp->status;
     }
-    ReleaseSemaphore(fpga_mem_.semaphore, 1, NULL);
+    jsdrv_os_sem_release(fpga_mem_.semaphore);
 }
 
 static int do_prog_aes_key(struct app_s * self, const uint8_t * key,
@@ -623,8 +626,8 @@ static int do_prog_aes_key(struct app_s * self, const uint8_t * key,
         rc = pub_rc;
     } else {
         // Wait for response (up to 15s for burn delays)
-        DWORD result = WaitForSingleObject(fpga_mem_.semaphore, 15000);
-        if (result != WAIT_OBJECT_0) {
+        int32_t result = jsdrv_os_sem_wait(fpga_mem_.semaphore, 15000);
+        if (result) {
             printf("ERROR: timeout waiting for AES response\n");
             rc = 1;
         } else if (aes_rsp_status_ != 0) {

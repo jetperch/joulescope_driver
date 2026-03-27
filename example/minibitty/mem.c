@@ -29,7 +29,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <windows.h>
+#include "jsdrv/os_atomic.h"
+#include "jsdrv/os_sem.h"
+#include "jsdrv/os_thread.h"
 
 
 #define FLASH_PAGE_SIZE     256U
@@ -42,12 +44,12 @@ struct mem_s {
     char cmd_topic[128];
     uint8_t target;
     uint32_t transaction_id;
-    volatile LONG outstanding;
-    volatile LONG error_count;
+    jsdrv_os_atomic_t outstanding;
+    jsdrv_os_atomic_t error_count;
     uint8_t * read_buf;
     uint32_t read_buf_offset;
     uint32_t read_buf_length;
-    HANDLE semaphore;
+    jsdrv_os_sem_t semaphore;
     uint32_t pipeline_depth;
 };
 
@@ -102,17 +104,17 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
     }
 
     if (rsp->status != 0) {
-        InterlockedIncrement(&mem_.error_count);
+        JSDRV_OS_ATOMIC_INC(&mem_.error_count);
     }
-    InterlockedDecrement(&mem_.outstanding);
-    ReleaseSemaphore(mem_.semaphore, 1, NULL);
+    JSDRV_OS_ATOMIC_DEC(&mem_.outstanding);
+    jsdrv_os_sem_release(mem_.semaphore);
 }
 
 static int pipeline_send(uint8_t op, uint32_t offset, uint32_t length,
                           const uint8_t * data, uint32_t data_size, uint32_t timeout_ms) {
-    while (mem_.outstanding >= (LONG) mem_.pipeline_depth) {
-        DWORD result = WaitForSingleObject(mem_.semaphore, timeout_ms + 5000);
-        if (result != WAIT_OBJECT_0) {
+    while (mem_.outstanding >= (int32_t) mem_.pipeline_depth) {
+        int32_t result = jsdrv_os_sem_wait(mem_.semaphore, timeout_ms + 5000);
+        if (result) {
             printf("ERROR: timeout waiting for pipeline slot\n");
             return 1;
         }
@@ -142,7 +144,7 @@ static int pipeline_send(uint8_t op, uint32_t offset, uint32_t length,
         memcpy(cmd->data, data, data_size);
     }
 
-    InterlockedIncrement(&mem_.outstanding);
+    JSDRV_OS_ATOMIC_INC(&mem_.outstanding);
     jsdrv_topic_set(&topic, mem_.app->device.topic);
     jsdrv_topic_append(&topic, mem_.cmd_topic);
     struct jsdrv_union_s v;
@@ -151,7 +153,7 @@ static int pipeline_send(uint8_t op, uint32_t offset, uint32_t length,
     v.value.bin = buf;
     int32_t pub_rc = jsdrv_publish(mem_.app->context, topic.topic, &v, 0);
     if (pub_rc) {
-        InterlockedDecrement(&mem_.outstanding);
+        JSDRV_OS_ATOMIC_DEC(&mem_.outstanding);
         printf("ERROR: jsdrv_publish failed: %d\n", pub_rc);
         return pub_rc;
     }
@@ -160,8 +162,8 @@ static int pipeline_send(uint8_t op, uint32_t offset, uint32_t length,
 
 static int pipeline_drain(uint32_t timeout_ms) {
     while (mem_.outstanding > 0) {
-        DWORD result = WaitForSingleObject(mem_.semaphore, timeout_ms + 5000);
-        if (result != WAIT_OBJECT_0) {
+        int32_t result = jsdrv_os_sem_wait(mem_.semaphore, timeout_ms + 5000);
+        if (result) {
             printf("ERROR: timeout waiting for pipeline drain (%ld outstanding)\n", mem_.outstanding);
             return 1;
         }
@@ -252,11 +254,11 @@ static int setup(struct app_s * self) {
 
     memset(&mem_, 0, sizeof(mem_));
     mem_.app = self;
-    mem_.semaphore = CreateSemaphore(NULL, 0, PIPELINE_MAX, NULL);
+    mem_.semaphore = jsdrv_os_sem_alloc(0, PIPELINE_MAX);
     mem_.pipeline_depth = 1;
 
     ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
-    Sleep(500);
+    jsdrv_thread_sleep_ms(500);
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "h/!rsp");
@@ -272,7 +274,7 @@ static int teardown(struct app_s * self, int rc) {
     jsdrv_unsubscribe(self->context, topic.topic, on_rsp, NULL, 0);
 
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-    CloseHandle(mem_.semaphore);
+    jsdrv_os_sem_free(mem_.semaphore);
     return rc;
 }
 

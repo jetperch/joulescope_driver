@@ -31,12 +31,7 @@
 #include <string.h>
 #include <inttypes.h>
 
-#if _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#define Sleep(ms) usleep((ms) * 1000)
-#endif
+#include "jsdrv/os_thread.h"
 
 // --- Test state ---
 
@@ -170,7 +165,7 @@ static int test_metadata(struct app_s * self) {
         JSDRV_SFLAG_METADATA_RSP | JSDRV_SFLAG_RETAIN,
         on_metadata, NULL, 0));
 
-    Sleep(200);
+    jsdrv_thread_sleep_ms(200);
 
     if (ts_.meta_received) {
         char detail[256];
@@ -207,7 +202,7 @@ static int test_state_restore(struct app_s * self) {
     val.flags |= JSDRV_UNION_FLAG_RETAIN;
     rc = jsdrv_publish(self->context, topic.topic, &val, 0);
     TEST_ASSERT("publish retained value", rc == 0, "publish failed");
-    Sleep(100);
+    jsdrv_thread_sleep_ms(100);
 
     // Verify retained value is queryable
     struct jsdrv_union_s qval = jsdrv_union_i32(0);
@@ -227,7 +222,7 @@ static int test_state_restore(struct app_s * self) {
         printf("  Cannot continue: close failed\n");
         return 0;
     }
-    Sleep(1000);
+    jsdrv_thread_sleep_ms(1000);
 
     // Verify retained value persists across close
     qval = jsdrv_union_i32(0);
@@ -247,7 +242,7 @@ static int test_state_restore(struct app_s * self) {
         printf("  Cannot continue: reopen failed\n");
         return 0;
     }
-    Sleep(500);
+    jsdrv_thread_sleep_ms(500);
 
     // Verify retained value still queryable after resume
     // (state restore replays it TO the device via cmd_q,
@@ -279,7 +274,7 @@ static int test_open_modes(struct app_s * self) {
         printf("  Cannot continue: close failed\n");
         return 0;
     }
-    Sleep(1000);
+    jsdrv_thread_sleep_ms(1000);
 
     // Open with DEFAULTS mode (0)
     printf("  opening DEFAULTS...\n");
@@ -295,7 +290,7 @@ static int test_open_modes(struct app_s * self) {
         printf("  close failed rc=%d, cannot continue\n", rc);
         return 0;
     }
-    Sleep(1000);
+    jsdrv_thread_sleep_ms(1000);
 
     // Open with RESUME mode (1)
     printf("  opening RESUME...\n");
@@ -342,7 +337,7 @@ int on_pubsub_test(struct app_s * self, int argc, char * argv[]) {
     // Open device initially with RESUME mode
     printf("Opening device...\n");
     ROE(jsdrv_open(self->context, self->device.topic, 1, 5000));
-    Sleep(500);
+    jsdrv_thread_sleep_ms(500);
     printf("Device open.\n");
 
     // Run test suites

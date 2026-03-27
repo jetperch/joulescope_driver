@@ -59,6 +59,8 @@ target_link_libraries(topic_test cmocka)
 ADD_CMOCKA_TEST(union_test)
 ADD_CMOCKA_TEST(version_test)
 
+ADD_CMOCKA_TEST(os_test)
+
 add_executable(pubsub_test pubsub_test.c)
 add_dependencies(pubsub_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(pubsub_test jsdrv_support_objlib tinyprintf cmocka)

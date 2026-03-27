@@ -37,6 +37,7 @@
 #include "jsdrv_prv/msg_queue.h"
 #include <assert.h>
 #include <cstdlib>
+#include <cstring>
 #include <cstdio>
 #include <map>
 #include <jsdrv_prv/frontend.h>
@@ -228,6 +229,7 @@ void Profiler::StartWorker() {
     m_thread = new tracy::Thread(tracy::Profiler::LaunchWorker, this);
 }
 
+__attribute__((used))
 static BroadcastMessage& GetBroadcastMessage( const char* procname, size_t pnsz, int& len, int port ) {
     static BroadcastMessage msg;
 

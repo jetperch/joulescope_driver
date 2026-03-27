@@ -1,5 +1,5 @@
 /*
-* Copyright 2014-2022 Jetperch LLC
+* Copyright 2014-2026 Jetperch LLC
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -18,21 +18,15 @@
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/assert.h"
 #include "jsdrv/cstr.h"
-#include "jsdrv_prv/event.h"
-#include "jsdrv_prv/mutex.h"
-#include "jsdrv_prv/thread.h"
+#include "jsdrv/os_event.h"
+#include "jsdrv/os_mutex.h"
+#include "jsdrv/os_thread.h"
+#include "jsdrv/os_sem.h"
 #include "jsdrv/time.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 // https://stackoverflow.com/questions/1387064/how-to-get-the-error-message-from-the-error-code-returned-by-getlasterror
-// This functions fills a caller-defined character buffer (pBuffer)
-// of max length (cchBufferLength) with the human-readable error message
-// for a Win32 error code (dwErrorCode).
-//
-// Returns TRUE if successful, or FALSE otherwise.
-// If successful, pBuffer is guaranteed to be NUL-terminated.
-// On failure, the contents of pBuffer are undefined.
 BOOL GetErrorMessage(DWORD dwErrorCode, char * pBuffer, DWORD cchBufferLength) {
     char* p = pBuffer;
     if (cchBufferLength == 0) {
@@ -41,7 +35,7 @@ BOOL GetErrorMessage(DWORD dwErrorCode, char * pBuffer, DWORD cchBufferLength) {
     pBuffer[0] = 0;
 
     DWORD cchMsg = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                                  NULL,  /* (not used with FORMAT_MESSAGE_FROM_SYSTEM) */
+                                  NULL,
                                   dwErrorCode,
                                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                                   pBuffer,
@@ -59,10 +53,6 @@ BOOL GetErrorMessage(DWORD dwErrorCode, char * pBuffer, DWORD cchBufferLength) {
 }
 
 int64_t jsdrv_time_utc(void) {
-    // Contains a 64-bit value representing the number of 100-nanosecond intervals since January 1, 1601 (UTC).
-    // python
-    // import dateutil.parser
-    // dateutil.parser.parse('2018-01-01T00:00:00Z').timestamp() - dateutil.parser.parse('1601-01-01T00:00:00Z').timestamp()
     static const int64_t offset_s = 131592384000000000LL;  // 100 ns
     static const uint64_t frequency = 10000000; // 100 ns
     FILETIME filetime;
@@ -76,14 +66,13 @@ uint32_t jsdrv_time_ms_u32(void) {
     return GetTickCount();
 }
 
+// --- Mutex ---
+
 jsdrv_os_mutex_t jsdrv_os_mutex_alloc(const char * name) {
     jsdrv_os_mutex_t mutex;
     JSDRV_LOGI("mutex alloc '%s'", name);
     mutex = jsdrv_alloc_clr(sizeof(*mutex));
-    mutex->mutex = CreateMutex(
-            NULL,                   // default security attributes
-            FALSE,                  // initially not owned
-            NULL);                  // unnamed mutex
+    mutex->mutex = CreateMutex(NULL, FALSE, NULL);
     JSDRV_ASSERT_ALLOC(mutex->mutex);
     jsdrv_cstr_copy(mutex->name, name, sizeof(mutex->name));
     return mutex;
@@ -121,23 +110,22 @@ void jsdrv_os_mutex_unlock(jsdrv_os_mutex_t mutex) {
     }
 }
 
+// --- Fatal ---
+
 void jsdrv_fatal(const char * file, uint32_t line, const char * msg) {
     printf("FATAL: %s:%u %s\n", file, line, msg);
     fflush(stdout);
     exit(1);
 }
 
-void jsdrv_os_event_free(jsdrv_os_event_t ev) {
-    CloseHandle(ev);
-}
+// --- Event ---
 
 jsdrv_os_event_t jsdrv_os_event_alloc(void) {
-    return CreateEvent(
-            NULL,  // default security attributes
-            TRUE,  // manual reset event
-            FALSE, // start unsignaled
-            NULL   // no name
-    );
+    return CreateEvent(NULL, TRUE, FALSE, NULL);
+}
+
+void jsdrv_os_event_free(jsdrv_os_event_t ev) {
+    CloseHandle(ev);
 }
 
 void jsdrv_os_event_signal(jsdrv_os_event_t ev) {
@@ -148,14 +136,18 @@ void jsdrv_os_event_reset(jsdrv_os_event_t ev) {
     ResetEvent(ev);
 }
 
+int32_t jsdrv_os_event_wait(jsdrv_os_event_t ev, uint32_t timeout_ms) {
+    DWORD rc = WaitForSingleObject(ev, timeout_ms);
+    if (WAIT_OBJECT_0 == rc) {
+        return 0;
+    }
+    return JSDRV_ERROR_TIMED_OUT;
+}
+
+// --- Thread ---
+
 int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg, int priority) {
-    thread->thread = CreateThread(
-            NULL,                   // default security attributes
-            0,                      // use default stack size
-            fn,                     // thread function name
-            fn_arg,                 // argument to thread function
-            0,                      // use default creation flags
-            &thread->thread_id);    // returns the thread identifier
+    thread->thread = CreateThread(NULL, 0, fn, fn_arg, 0, &thread->thread_id);
     if (thread->thread == NULL) {
         JSDRV_LOGE("CreateThread failed");
         return JSDRV_ERROR_UNSPECIFIED;
@@ -183,7 +175,7 @@ int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
     int32_t rv = 0;
     if (WAIT_OBJECT_0 != WaitForSingleObject(thread->thread, timeout_ms)) {
         JSDRV_LOGE("jsdrv thread not closed cleanly");
-        rv = JSDRV_ERROR_UNSPECIFIED;
+        rv = JSDRV_ERROR_TIMED_OUT;
     }
     CloseHandle(thread->thread);
     thread->thread = NULL;
@@ -198,6 +190,43 @@ bool jsdrv_thread_is_current(jsdrv_thread_t const * thread) {
 void jsdrv_thread_sleep_ms(uint32_t duration_ms) {
     Sleep(duration_ms);
 }
+
+// --- Semaphore ---
+
+struct jsdrv_os_sem_s {
+    HANDLE handle;
+};
+
+jsdrv_os_sem_t jsdrv_os_sem_alloc(int32_t initial_count, int32_t max_count) {
+    jsdrv_os_sem_t sem = jsdrv_alloc_clr(sizeof(*sem));
+    sem->handle = CreateSemaphore(NULL, initial_count, max_count, NULL);
+    if (NULL == sem->handle) {
+        jsdrv_free(sem);
+        return NULL;
+    }
+    return sem;
+}
+
+void jsdrv_os_sem_free(jsdrv_os_sem_t sem) {
+    if (NULL != sem) {
+        CloseHandle(sem->handle);
+        jsdrv_free(sem);
+    }
+}
+
+int32_t jsdrv_os_sem_wait(jsdrv_os_sem_t sem, uint32_t timeout_ms) {
+    DWORD rc = WaitForSingleObject(sem->handle, timeout_ms);
+    if (WAIT_OBJECT_0 == rc) {
+        return 0;
+    }
+    return JSDRV_ERROR_TIMED_OUT;
+}
+
+void jsdrv_os_sem_release(jsdrv_os_sem_t sem) {
+    ReleaseSemaphore(sem->handle, 1, NULL);
+}
+
+// --- Heap ---
 
 static jsdrv_os_mutex_t heap_mutex = NULL;
 
@@ -216,6 +245,8 @@ void * jsdrv_alloc(size_t size_bytes) {
     jsdrv_os_mutex_unlock(heap_mutex);
     return ptr;
 }
+
+// --- Platform ---
 
 int32_t jsdrv_platform_initialize(void) {
     heap_mutex = jsdrv_os_mutex_alloc("heap");

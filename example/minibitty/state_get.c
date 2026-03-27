@@ -26,7 +26,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include <windows.h>
+#include "jsdrv/os_atomic.h"
+#include "jsdrv/os_sem.h"
+#include "jsdrv/os_thread.h"
 
 #ifndef MB_STDMSG_STATE
 #define MB_STDMSG_STATE 0x08
@@ -66,11 +68,11 @@ struct state_entry_s {
 };
 
 struct state_get_s {
-    HANDLE semaphore;
-    volatile LONG outstanding;
-    volatile LONG error_count;
-    volatile LONG entry_count;
-    volatile LONG end_seen;
+    jsdrv_os_sem_t semaphore;
+    jsdrv_os_atomic_t outstanding;
+    jsdrv_os_atomic_t error_count;
+    jsdrv_os_atomic_t entry_count;
+    jsdrv_os_atomic_t end_seen;
     uint32_t pipeline_depth;
     int verbose;
 };
@@ -94,7 +96,7 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
 
     if (rsp->status != 0) {
         if (!sg_.end_seen) {
-            InterlockedIncrement(&sg_.error_count);
+            JSDRV_OS_ATOMIC_INC(&sg_.error_count);
         }
     } else if (rsp->type == STATE_TYPE_GET_RSP) {
         // Count entries
@@ -106,18 +108,18 @@ static void on_rsp(void * user_data, const char * topic, const struct jsdrv_unio
             if (sg_.verbose) {
                 printf("  %s type=%u size=%u\n", entry->topic, entry->value_type, entry->size);
             }
-            InterlockedIncrement(&sg_.entry_count);
+            JSDRV_OS_ATOMIC_INC(&sg_.entry_count);
             uint16_t padded = (entry->size + 7) & ~7;
             if (padded < 8) padded = 8;
             offset += 40 + padded;
         }
         if (rsp->flags & STATE_FLAG_END) {
-            InterlockedExchange(&sg_.end_seen, 1);
+            JSDRV_OS_ATOMIC_SET(&sg_.end_seen, 1);
         }
     }
 
-    InterlockedDecrement(&sg_.outstanding);
-    ReleaseSemaphore(sg_.semaphore, 1, NULL);
+    JSDRV_OS_ATOMIC_DEC(&sg_.outstanding);
+    jsdrv_os_sem_release(sg_.semaphore);
 }
 
 static int state_publish(struct app_s * self, const char * prefix,
@@ -153,17 +155,17 @@ static int state_publish(struct app_s * self, const char * prefix,
 }
 
 static int pipeline_wait_slot(uint32_t timeout_ms) {
-    while (sg_.outstanding >= (LONG) sg_.pipeline_depth) {
-        DWORD result = WaitForSingleObject(sg_.semaphore, timeout_ms);
-        if (result != WAIT_OBJECT_0) return 1;
+    while (sg_.outstanding >= (int32_t) sg_.pipeline_depth) {
+        int32_t result = jsdrv_os_sem_wait(sg_.semaphore, timeout_ms);
+        if (result) return 1;
     }
     return (sg_.error_count > 0) ? 1 : 0;
 }
 
 static int pipeline_drain(uint32_t timeout_ms) {
     while (sg_.outstanding > 0) {
-        DWORD result = WaitForSingleObject(sg_.semaphore, timeout_ms);
-        if (result != WAIT_OBJECT_0) return 1;
+        int32_t result = jsdrv_os_sem_wait(sg_.semaphore, timeout_ms);
+        if (result) return 1;
     }
     return (sg_.error_count > 0) ? 1 : 0;
 }
@@ -176,7 +178,7 @@ static int do_one_state_get(struct app_s * self, const char * prefix,
     sg_.end_seen = 0;
 
     // GET_INIT (synchronous, pipeline depth 1)
-    InterlockedIncrement(&sg_.outstanding);
+    JSDRV_OS_ATOMIC_INC(&sg_.outstanding);
     int32_t pub_rc = state_publish(self, prefix, STATE_TYPE_GET_INIT, txn_id);
     if (pub_rc) return -1;
     if (pipeline_drain(3000)) return -1;
@@ -185,10 +187,10 @@ static int do_one_state_get(struct app_s * self, const char * prefix,
     while (!sg_.end_seen) {
         if (pipeline_wait_slot(3000)) return -1;
         if (sg_.end_seen) break;
-        InterlockedIncrement(&sg_.outstanding);
+        JSDRV_OS_ATOMIC_INC(&sg_.outstanding);
         pub_rc = state_publish(self, prefix, STATE_TYPE_GET_NEXT, txn_id);
         if (pub_rc) {
-            InterlockedDecrement(&sg_.outstanding);
+            JSDRV_OS_ATOMIC_DEC(&sg_.outstanding);
             return -1;
         }
     }
@@ -262,7 +264,7 @@ int on_state_get(struct app_s * self, int argc, char * argv[]) {
     ROE(app_match(self, device_filter));
 
     memset(&sg_, 0, sizeof(sg_));
-    sg_.semaphore = CreateSemaphore(NULL, 0, PIPELINE_MAX, NULL);
+    sg_.semaphore = jsdrv_os_sem_alloc(0, PIPELINE_MAX);
     sg_.pipeline_depth = pipeline;
 
     struct jsdrv_topic_s rsp_topic;
@@ -273,7 +275,7 @@ int on_state_get(struct app_s * self, int argc, char * argv[]) {
 
     ROE(jsdrv_open(self->context, self->device.topic,
                    JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
-    Sleep(500);
+    jsdrv_thread_sleep_ms(500);
 
     int rc = 0;
     uint32_t txn_id = 0x7700;
@@ -296,6 +298,6 @@ int on_state_get(struct app_s * self, int argc, char * argv[]) {
 
     jsdrv_unsubscribe(self->context, rsp_topic.topic, on_rsp, NULL, 0);
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
-    CloseHandle(sg_.semaphore);
+    jsdrv_os_sem_free(sg_.semaphore);
     return rc;
 }
