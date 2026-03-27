@@ -82,6 +82,23 @@ void jsdrv_os_mutex_free(jsdrv_os_mutex_t mutex) {
 void jsdrv_os_mutex_lock(jsdrv_os_mutex_t mutex) {
     char msg[128];
     if (NULL != mutex) {
+#ifdef __APPLE__
+        // macOS does not provide pthread_mutex_timedlock.
+        // Use trylock with polling as a deadlock safety net.
+        uint32_t elapsed = 0;
+        while (elapsed < JSDRV_CONFIG_OS_MUTEX_LOCK_TIMEOUT_MS) {
+            int rc = pthread_mutex_trylock(&mutex->mutex);
+            if (rc == 0) {
+                return;
+            }
+            struct timespec ts = {0, 1000000L};  // 1 ms
+            nanosleep(&ts, NULL);
+            ++elapsed;
+        }
+        snprintf(msg, sizeof(msg),
+                 "mutex lock '%s' timed out", mutex->name);
+        JSDRV_FATAL(msg);
+#else
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
         uint64_t ns = (uint64_t) ts.tv_nsec
@@ -95,6 +112,7 @@ void jsdrv_os_mutex_lock(jsdrv_os_mutex_t mutex) {
         snprintf(msg, sizeof(msg),
                  "mutex lock '%s' failed %d", mutex->name, rc);
         JSDRV_FATAL(msg);
+#endif
     }
 }
 
@@ -226,12 +244,15 @@ static void * join_helper_fn(void * arg) {
 }
 
 int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
-    struct join_helper_s helper;
-    helper.target = *thread;
-    helper.done = 0;
+    // Heap-allocate so the detached helper can safely write
+    // to it even if we return early on timeout.
+    struct join_helper_s * helper = jsdrv_alloc_clr(sizeof(*helper));
+    helper->target = *thread;
+    helper->done = 0;
 
     pthread_t helper_thread;
-    if (pthread_create(&helper_thread, NULL, join_helper_fn, &helper)) {
+    if (pthread_create(&helper_thread, NULL, join_helper_fn, helper)) {
+        jsdrv_free(helper);
         // Fallback: blocking join
         pthread_join(*thread, NULL);
         return 0;
@@ -240,7 +261,7 @@ int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
 
     uint32_t elapsed = 0;
     uint32_t step = 1;
-    while (!helper.done && elapsed < timeout_ms) {
+    while (!helper->done && elapsed < timeout_ms) {
         struct timespec ts;
         ts.tv_sec = 0;
         ts.tv_nsec = step * 1000000L;
@@ -251,10 +272,13 @@ int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
         }
     }
 
-    if (!helper.done) {
+    if (!helper->done) {
+        // helper is leaked intentionally: the detached thread
+        // still holds a reference and will write done=1 later.
         JSDRV_LOGE("jsdrv_thread_join timed out");
         return JSDRV_ERROR_TIMED_OUT;
     }
+    jsdrv_free(helper);
     return 0;
 }
 

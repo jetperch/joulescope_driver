@@ -229,7 +229,6 @@ void Profiler::StartWorker() {
     m_thread = new tracy::Thread(tracy::Profiler::LaunchWorker, this);
 }
 
-__attribute__((used))
 static BroadcastMessage& GetBroadcastMessage( const char* procname, size_t pnsz, int& len, int port ) {
     static BroadcastMessage msg;
 
