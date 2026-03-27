@@ -276,18 +276,29 @@ static void state_fetch_complete(struct jsdrvp_mb_dev_s * self);
 static void state_fetch_publish_state(struct jsdrvp_mb_dev_s * self,
                                        const char * topic, uint8_t value_type,
                                        const void * value, uint32_t size) {
-    struct jsdrv_union_s v;
-    v.type = value_type;
-    v.size = size;
-    v.flags = JSDRV_UNION_FLAG_RETAIN;
-    v.app = 0;
-    if (size <= 8) {
-        v.value.u64 = 0;
-        memcpy(&v.value.u64, value, size);
-    } else {
-        v.value.bin = value;
+    // Build message with fully-qualified device topic, same as handle_in_publish
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(self->context);
+    struct jsdrv_topic_s t;
+    jsdrv_topic_set(&t, self->ll.prefix);
+    jsdrv_topic_append(&t, topic);
+    jsdrv_cstr_copy(m->topic, t.topic, sizeof(m->topic));
+    m->value.type = value_type;
+    m->value.size = size;
+    m->value.flags = JSDRV_UNION_FLAG_RETAIN;
+    m->value.app = 0;
+    if (    0
+            || (value_type == JSDRV_UNION_STR)
+            || (value_type == JSDRV_UNION_JSON)
+            || (value_type == JSDRV_UNION_BIN)
+            || (value_type == JSDRV_UNION_STDMSG)
+            || (value_type == JSDRV_UNION_FRAME)) {
+        m->value.value.bin = m->payload.bin;
+        memcpy(m->payload.bin, value, size);
+    } else if (size <= 8) {
+        m->value.value.u64 = 0;
+        memcpy(&m->value.value.u64, value, size);
     }
-    send_to_frontend(self, topic, &v);
+    jsdrvp_backend_send(self->context, m);
 }
 
 static void state_fetch_publish_stdmsg_to_device(struct jsdrvp_mb_dev_s * self,
@@ -419,7 +430,11 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
     }
 
     if (sf->phase == STATE_FETCH_PHASE_GET_NEXT) {
-        if (state_type != 2) return;  // not GET_RSP
+        if (state_type != 2) {  // not GET_RSP
+            JSDRV_LOGW("state_fetch: GET_NEXT unexpected state_type=%u, advancing", state_type);
+            state_fetch_advance_prefix(self);
+            return;
+        }
         if (status != 0) {
             JSDRV_LOGW("state_fetch: GET_NEXT failed status=%u", status);
             state_fetch_advance_prefix(self);
