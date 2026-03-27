@@ -227,12 +227,12 @@ static int pipeline_drain(struct fpga_mem_s * fm, uint32_t timeout_ms) {
     while (fm->outstanding > 0) {
         int32_t result = jsdrv_os_sem_wait(fm->semaphore, timeout_ms + 5000);
         if (result) {
-            printf("ERROR: timeout waiting for pipeline drain (%ld outstanding)\n", fm->outstanding);
+            printf("ERROR: timeout waiting for pipeline drain (%d outstanding)\n", (int) JSDRV_OS_ATOMIC_GET(&fm->outstanding));
             return 1;
         }
     }
-    if (fm->error_count > 0) {
-        printf("ERROR: %ld commands failed during pipeline\n", fm->error_count);
+    if (JSDRV_OS_ATOMIC_GET(&fm->error_count) > 0) {
+        printf("ERROR: %d commands failed during pipeline\n", (int) JSDRV_OS_ATOMIC_GET(&fm->error_count));
         return 1;
     }
     return 0;

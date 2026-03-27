@@ -184,6 +184,7 @@ static int state_publish(struct app_s * self, const char * prefix,
 }
 
 static int wait_rsp(uint32_t timeout_ms) {
+    jsdrv_os_event_reset(state_.event);
     state_.received = 0;
     int32_t result = jsdrv_os_event_wait(state_.event, timeout_ms);
     if (result) {

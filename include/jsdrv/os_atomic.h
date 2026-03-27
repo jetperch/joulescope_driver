@@ -39,6 +39,8 @@
  * @{
  */
 
+// Prefer MSVC Interlocked on Windows for broadest compatibility
+// (stdatomic.h requires MSVC >= VS2022 17.5 with /std:c17).
 #if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L) \
     && !defined(__STDC_NO_ATOMICS__) && !defined(_WIN32)
   #include <stdatomic.h>
@@ -65,6 +67,9 @@
   #define JSDRV_OS_ATOMIC_GET(p)      InterlockedCompareExchange((p), 0, 0)
 
 #elif defined(__GNUC__) || defined(__clang__)
+  // Pre-C11 fallback using GCC/Clang builtins.
+  // Note: __sync_lock_test_and_set has acquire (not full)
+  // barrier semantics, which is sufficient for x86 and ARM.
   typedef volatile int32_t jsdrv_os_atomic_t;
 
   #define JSDRV_OS_ATOMIC_INC(p)      (__sync_add_and_fetch((p), 1))

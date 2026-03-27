@@ -84,6 +84,10 @@ JSDRV_API int32_t jsdrv_thread_create(jsdrv_thread_t * thread,
  * @param thread The thread instance.
  * @param timeout_ms The maximum time to wait in milliseconds.
  * @return 0 on success, or JSDRV_ERROR_TIMED_OUT.
+ *
+ * On POSIX, a timed-out join leaks a small helper allocation
+ * (~24 bytes) because the detached join thread cannot be
+ * safely cancelled.  This is acceptable for rare timeout paths.
  */
 JSDRV_API int32_t jsdrv_thread_join(jsdrv_thread_t * thread,
                                      uint32_t timeout_ms);

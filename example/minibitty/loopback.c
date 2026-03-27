@@ -221,6 +221,7 @@ int on_loopback(struct app_s * self, int argc, char * argv[]) {
     ROE(app_match(self, device_filter));
 
     loopback_.event = jsdrv_os_event_alloc();
+    jsdrv_os_event_signal(loopback_.event);  // start signaled to pend initial transactions
 
     // todo loopback @ pubsub layer
 

@@ -164,12 +164,12 @@ static int pipeline_drain(uint32_t timeout_ms) {
     while (mem_.outstanding > 0) {
         int32_t result = jsdrv_os_sem_wait(mem_.semaphore, timeout_ms + 5000);
         if (result) {
-            printf("ERROR: timeout waiting for pipeline drain (%ld outstanding)\n", mem_.outstanding);
+            printf("ERROR: timeout waiting for pipeline drain (%d outstanding)\n", (int) JSDRV_OS_ATOMIC_GET(&mem_.outstanding));
             return 1;
         }
     }
-    if (mem_.error_count > 0) {
-        printf("ERROR: %ld commands failed during pipeline\n", mem_.error_count);
+    if (JSDRV_OS_ATOMIC_GET(&mem_.error_count) > 0) {
+        printf("ERROR: %d commands failed during pipeline\n", (int) JSDRV_OS_ATOMIC_GET(&mem_.error_count));
         return 1;
     }
     return 0;

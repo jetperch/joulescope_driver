@@ -157,9 +157,11 @@ jsdrv_os_event_t jsdrv_os_event_alloc(void) {
 }
 
 void jsdrv_os_event_free(jsdrv_os_event_t ev) {
-    close(ev->fd_signal);
-    close(ev->fd_poll);
-    jsdrv_free(ev);
+    if (NULL != ev) {
+        close(ev->fd_signal);
+        close(ev->fd_poll);
+        jsdrv_free(ev);
+    }
 }
 
 void jsdrv_os_event_signal(jsdrv_os_event_t ev) {
