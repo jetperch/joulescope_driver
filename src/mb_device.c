@@ -56,6 +56,8 @@ static const char STATE_FETCH_PREFIXES[] = {'c', 's', 0};
 #define STATE_FETCH_PHASE_META_HDR  3
 #define STATE_FETCH_PHASE_META_DATA 4
 
+#define STATE_FETCH_GET_INIT_RETRY_MAX      15
+#define STATE_FETCH_GET_INIT_RETRY_TIMEOUT  (JSDRV_TIME_SECOND / 20)  // 50 ms
 #define STATE_FETCH_META_BLOBS_MAX  8
 #define STATE_FETCH_META_PAGE_SIZE  256
 
@@ -77,6 +79,7 @@ struct state_fetch_blob_s {
 struct state_fetch_s {
     uint8_t  prefix_idx;
     uint8_t  phase;
+    uint8_t  retry_count;
     uint32_t transaction_id;
     // metadata blob info captured from ././info entries
     struct state_fetch_blob_s blobs[STATE_FETCH_META_BLOBS_MAX];
@@ -486,6 +489,7 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
 static void state_fetch_advance_prefix(struct jsdrvp_mb_dev_s * self) {
     struct state_fetch_s * sf = &self->state_fetch;
     sf->prefix_idx++;
+    sf->retry_count = 0;
     state_fetch_send_get_init(self);
 }
 
@@ -785,6 +789,16 @@ static bool on_open_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
         return false;
     }
     if (sf->phase == STATE_FETCH_PHASE_GET_INIT
+            && sf->retry_count < STATE_FETCH_GET_INIT_RETRY_MAX) {
+        char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+        sf->retry_count++;
+        JSDRV_LOGI("state_fetch: retry GET_INIT for '%c' (%u/%u)",
+                   prefix, sf->retry_count,
+                   STATE_FETCH_GET_INIT_RETRY_MAX);
+        state_fetch_send_get_init(self);
+        self->timeout_utc = jsdrv_time_utc()
+                + STATE_FETCH_GET_INIT_RETRY_TIMEOUT;
+    } else if (sf->phase == STATE_FETCH_PHASE_GET_INIT
             || sf->phase == STATE_FETCH_PHASE_GET_NEXT) {
         char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
         JSDRV_LOGW("state_fetch: timeout waiting for !state response from '%c'", prefix);

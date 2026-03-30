@@ -224,14 +224,30 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
     jsdrvp_mb_dev_backend_send(dev, m);
 }
 
+static bool handle_cmd(struct js320_drv_s * self,
+                            const char * subtopic,
+                            const struct jsdrv_union_s * value) {
+    if (0 == strcmp(subtopic, "h/fs")) {
+        return true;  // todo
+    } else if (0 == strcmp(subtopic, "h/i_scale")) {
+        return true;  // todo
+    } else if (0 == strcmp(subtopic, "h/v_scale")) {
+        return true; // todo
+    } else {
+        return false;
+    }
+}
+
+
 static bool js320_handle_cmd(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
                               const char * subtopic, const struct jsdrv_union_s * value) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     (void) dev;
-    if (js320_fwup_handle_cmd(self->fwup, subtopic, value)) {
-        return true;
-    }
-    return js320_jtag_handle_cmd(self->jtag, subtopic, value);
+    return (false
+        || handle_cmd(self, subtopic, value)
+        || js320_fwup_handle_cmd(self->fwup, subtopic, value)
+        || js320_jtag_handle_cmd(self->jtag, subtopic, value)
+    );
 }
 
 static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
