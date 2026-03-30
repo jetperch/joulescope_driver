@@ -4,9 +4,9 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
-## 2.0.0
+## 2.0.1
 
-2024 Dec 11 [in progress]
+2026 Mar 24 [in progress]
 
 * Added Minibitty support for 3rd generation Joulescope products.
 
