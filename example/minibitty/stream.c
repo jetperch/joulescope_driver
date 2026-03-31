@@ -33,12 +33,25 @@ enum loopback_location_e {
     LOCATION_PUBSUB = 1,
 };
 
+void on_u4_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    static uint32_t counter = 0;
+    (void) user_data;
+    (void) topic;
+    (void) value;
+    if (counter == 1000) {
+        const uint32_t * p32 = &value->value.u32;
+        printf("%d\n", p32[32] & 0x0f);
+        counter = 0;
+    } else {
+        ++counter;
+    }
+}
+
 void on_i32_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     static uint32_t counter = 0;
     (void) user_data;
     (void) topic;
     (void) value;
-    // do something
     if (counter == 1000) {
         const uint32_t * p32 = &value->value.u32;
         printf("0x%08x %d\n", p32[32], p32[32]);
@@ -124,17 +137,19 @@ static int run(struct app_s * self, const char * device) {
     } else if (1) {
         // manual current calibration
         PUBLISH_U32("s/stats/ctrl", 1);         // stream statistics
-        PUBLISH_U32("s/i/range/mode", 5);       // manual
-        PUBLISH_U32("s/i/range/select", 0x84);
+        PUBLISH_U32("s/i/range/mode", 4);       // auto
+        //PUBLISH_U32("s/i/range/mode", 5);       // manual
+        //PUBLISH_U32("s/i/range/select", 0x84);
         PUBLISH_U32("s/i/i0_sel", 2);
         PUBLISH_U32("s/i/i1_sel", 2);
         PUBLISH_U32("s/i/i2_sel", 2);
         PUBLISH_U32("s/i/ctrl", 1);
         PUBLISH_U32("s/v/ctrl", 1);
+        PUBLISH_U32("s/i/range/ctrl", 1);
         jsdrv_topic_set(&topic, self->device.topic);
         jsdrv_topic_append(&topic, "s/i/!data");
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_f32_data, NULL, 0);
-    } else if (1) {
+    } else if (0) {
         // manual voltage
         PUBLISH_U32("s/v/range/mode", 1);       // manual
         PUBLISH_U32("s/v/range/select:", 0);    // 15 V
@@ -142,6 +157,12 @@ static int run(struct app_s * self, const char * device) {
         jsdrv_topic_set(&topic, self->device.topic);
         jsdrv_topic_append(&topic, "s/v/!data");
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_f32_data, NULL, 0);
+    } else if (1) {
+        // current range
+        PUBLISH_U32("s/i/range/ctrl", 1);
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, "s/i/range/!data");
+        jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_u4_data, NULL, 0);
     }
 
 
@@ -151,10 +172,11 @@ static int run(struct app_s * self, const char * device) {
 
     PUBLISH_U32("s/adc/0/ctrl", 0);
     PUBLISH_U32("s/adc/1/ctrl", 0);
+    PUBLISH_U32("s/i/range/ctrl", 0);
     PUBLISH_U32("s/i/ctrl", 0);
     PUBLISH_U32("s/v/ctrl", 0);
     PUBLISH_U32("s/p/ctrl", 0);
-
+    PUBLISH_U32("s/stats/ctrl", 0);
 
     jsdrv_close(self->context, device, JSDRV_TIMEOUT_MS_DEFAULT);
     return 0;
