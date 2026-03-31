@@ -22,6 +22,7 @@
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/js320_fwup.h"
 #include "jsdrv_prv/js320_jtag.h"
+#include "jsdrv_prv/js320_stats.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/mb_drv.h"
 #include "jsdrv_prv/platform.h"
@@ -35,6 +36,8 @@ struct js320_drv_s {
     struct jsdrvp_mb_dev_s * dev;
     struct js320_jtag_s * jtag;
     struct js320_fwup_s * fwup;
+    double i_scale;
+    double v_scale;
 };
 
 // --- Streaming signal helpers ---
@@ -88,14 +91,65 @@ static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s 
     JSDRV_LOGI("JS320 driver closed");
 }
 
+static void js320_handle_statistics(struct js320_drv_s * self,
+                                    struct jsdrvp_mb_dev_s * dev,
+                                    const uint32_t * data, uint8_t length) {
+    uint32_t size = (uint32_t) length * 4;
+    if (size != sizeof(struct js320_statistics_raw_s)) {
+        JSDRV_LOGW("statistics size mismatch: %u != %u",
+                   size, (uint32_t) sizeof(struct js320_statistics_raw_s));
+        return;
+    }
+    struct jsdrv_context_s * context = jsdrvp_mb_dev_context(dev);
+    const char * prefix = jsdrvp_mb_dev_prefix(dev);
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(context);
+
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, prefix);
+    jsdrv_topic_append(&topic, "s/stats/value");
+    jsdrv_cstr_copy(m->topic, topic.topic, sizeof(m->topic));
+
+    struct jsdrv_statistics_s * dst = (struct jsdrv_statistics_s *) m->payload.bin;
+    m->value = jsdrv_union_cbin_r((uint8_t *) dst, sizeof(*dst));
+    m->value.app = JSDRV_PAYLOAD_TYPE_STATISTICS;
+
+    struct js320_statistics_raw_s src;
+    memcpy(&src, data, sizeof(src));
+    if (0 == js320_stats_convert(&src, dst)) {
+        dst->i_avg *= self->i_scale;
+        dst->i_std *= self->i_scale;
+        dst->i_min *= self->i_scale;
+        dst->i_max *= self->i_scale;
+        dst->v_avg *= self->v_scale;
+        dst->v_std *= self->v_scale;
+        dst->v_min *= self->v_scale;
+        dst->v_max *= self->v_scale;
+        double p_scale = self->i_scale * self->v_scale;
+        dst->p_avg *= p_scale;
+        dst->p_std *= p_scale;
+        dst->p_min *= p_scale;
+        dst->p_max *= p_scale;
+        dst->charge_f64 *= self->i_scale;
+        dst->energy_f64 *= p_scale;
+        const struct jsdrv_time_map_s * tmap = jsdrvp_mb_dev_time_map(dev);
+        if (tmap) {
+            dst->time_map = *tmap;
+        }
+        jsdrvp_mb_dev_backend_send(dev, m);
+    } else {
+        jsdrvp_msg_free(context, m);
+    }
+}
+
 static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
                               uint16_t metadata, const uint32_t * data, uint8_t length) {
-    (void) drv;
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
     uint8_t channel = metadata & 0x000fU;
     uint8_t source = (metadata >> 4) & 0x000fU;
 
-    if (channel == 14) {  // statistics are different
-        return;  // todo
+    if (channel == 14) {
+        js320_handle_statistics(self, dev, data, length);
+        return;
     }
 
     if (length < 2) {
@@ -230,9 +284,19 @@ static bool handle_cmd(struct js320_drv_s * self,
     if (0 == strcmp(subtopic, "h/fs")) {
         return true;  // todo
     } else if (0 == strcmp(subtopic, "h/i_scale")) {
-        return true;  // todo
+        if (value->type == JSDRV_UNION_F64) {
+            self->i_scale = value->value.f64;
+        } else if (value->type == JSDRV_UNION_F32) {
+            self->i_scale = (double) value->value.f32;
+        }
+        return true;
     } else if (0 == strcmp(subtopic, "h/v_scale")) {
-        return true; // todo
+        if (value->type == JSDRV_UNION_F64) {
+            self->v_scale = value->value.f64;
+        } else if (value->type == JSDRV_UNION_F32) {
+            self->v_scale = (double) value->value.f32;
+        }
+        return true;
     } else {
         return false;
     }
@@ -282,6 +346,8 @@ static void js320_finalize(struct jsdrvp_mb_drv_s * drv) {
 
 static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     struct js320_drv_s * self = jsdrv_alloc_clr(sizeof(struct js320_drv_s));
+    self->i_scale = 1.0;
+    self->v_scale = 1.0;
     self->jtag = js320_jtag_alloc();
     self->fwup = js320_fwup_alloc();
     self->drv.on_open = js320_on_open;

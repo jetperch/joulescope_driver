@@ -80,6 +80,7 @@ set(SOURCES
         js320_drv.c
         js320_fwup.c
         js320_jtag.c
+        js320_stats.c
         mb_device.c
         jsdrv.c
         ${PLATFORM_SRC}

@@ -123,12 +123,14 @@ static int run(struct app_s * self, const char * device) {
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_i32_data, NULL, 0);
     } else if (1) {
         // manual current calibration
+        PUBLISH_U32("s/stats/ctrl", 1);         // stream statistics
         PUBLISH_U32("s/i/range/mode", 5);       // manual
         PUBLISH_U32("s/i/range/select", 0x84);
         PUBLISH_U32("s/i/i0_sel", 2);
         PUBLISH_U32("s/i/i1_sel", 2);
         PUBLISH_U32("s/i/i2_sel", 2);
         PUBLISH_U32("s/i/ctrl", 1);
+        PUBLISH_U32("s/v/ctrl", 1);
         jsdrv_topic_set(&topic, self->device.topic);
         jsdrv_topic_append(&topic, "s/i/!data");
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_f32_data, NULL, 0);

@@ -143,6 +143,7 @@ extensions = [
                                      'src/js320_drv.c',
                                      'src/js320_fwup.c',
                                      'src/js320_jtag.c',
+                                     'src/js320_stats.c',
                                      'src/jsdrv.c',
                                      'src/json.c',
                                      'src/log.c',
