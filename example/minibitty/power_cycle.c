@@ -19,10 +19,11 @@
 #include "jsdrv/os_thread.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static const char * power_device_ = NULL;
 static const char * target_device_ = NULL;
-static uint32_t count_ = 0;  // 0 = infinite
+static int32_t count_ = -1;  // negative = infinite, 0 = power toggle only
 static uint32_t delay_ms_ = 0;
 static uint32_t open_timeout_ms_ = 10000;
 
@@ -37,7 +38,7 @@ static int usage(void) {
         "Options:\n"
         "  --power <device>   Power supply device filter\n"
         "  --target <device>  Target device filter\n"
-        "  --count <N>        Number of iterations (0=infinite)\n"
+        "  --count <N>        Iterations: negative=infinite, 0=power toggle only\n"
         "  --delay <ms>       Post-detection delay in ms (default=2500)\n"
         "  --timeout <ms>     Target open timeout in ms (default=10000)\n"
     );
@@ -119,7 +120,7 @@ int on_power_cycle(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--count") && argc > 1) {
             ARG_CONSUME();
-            count_ = (uint32_t) atoi(argv[0]);
+            count_ = (int32_t) atoi(argv[0]);
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--delay") && argc > 1) {
             ARG_CONSUME();
@@ -167,7 +168,7 @@ int on_power_cycle(struct app_s * self, int argc, char * argv[]) {
     publish_str(self, power_topic.topic, "s/i/range/select", "10 A");
 
     for (uint32_t iteration = 1; !quit_; ++iteration) {
-        if (count_ && iteration > count_) {
+        if ((count_ >= 0) && (iteration > (uint32_t) (count_ + 1))) {
             break;
         }
         printf("\n--- Iteration %u (pass=%u, fail=%u) ---\n",
@@ -199,6 +200,11 @@ int on_power_cycle(struct app_s * self, int argc, char * argv[]) {
         }
         printf("  Target detected, waiting %u ms\n", delay_ms_);
         jsdrv_thread_sleep_ms(delay_ms_);
+
+        if (0 == count_) {
+            ++pass;
+            continue;
+        }
 
         // Match target device for its full topic
         rc = app_match(self, target_device_);
