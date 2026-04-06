@@ -48,6 +48,7 @@ volatile bool quit_ = false;
 // cross-platform handler for CTRL-C to exit program
 static void signal_handler(int signal){
     if ((signal == SIGABRT) || (signal == SIGINT)) {
+        printf("signal received: quitting...\n");
         quit_ = 1;
     }
 }
@@ -134,6 +135,7 @@ const struct command_s COMMANDS[] = {
         {"info", on_info, "List connected devices and display device details"},
         {"loopback", on_loopback, "Loopback data to test throughput and error rate"},
         {"mem", on_mem, "Memory read/write/erase/verify via stdmsg_mem protocol"},
+        {"power_cycle", on_power_cycle, "Power cycle target and test open reliability"},
         {"stream", on_stream, "Stream data"},
         {"pubsub_info", on_pubsub_info, "Display PubSub instance info"},
         {"state_get", on_state_get, "Full !state GET stress test"},

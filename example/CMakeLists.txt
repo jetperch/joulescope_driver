@@ -64,6 +64,7 @@ add_executable(minibitty_exe
         minibitty/pubsub_test.c
         minibitty/loopback.c
         minibitty/mem.c
+        minibitty/power_cycle.c
         minibitty/stream.c
         minibitty/throughput.c
         minibitty/version.c
