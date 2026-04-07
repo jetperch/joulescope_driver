@@ -293,7 +293,7 @@ static void test_zip_extract_all_update_files(void ** state) {
 
 static void test_add_header_size(void ** state) {
     (void) state;
-    JSDRV_STATIC_ASSERT(sizeof(struct jsdrv_fwup_add_header_s) == 40, test_hdr_40);
+    // Compile-time assert is in js320_fwup_mgr.c; runtime check here
     assert_int_equal(40, sizeof(struct jsdrv_fwup_add_header_s));
 }
 

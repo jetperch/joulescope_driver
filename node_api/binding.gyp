@@ -22,6 +22,7 @@
         '../src/js220_stats.c',
         '../src/js320_drv.c',
         '../src/js320_fwup.c',
+        '../src/js320_fwup_mgr.c',
         '../src/js320_jtag.c',
         '../src/js320_stats.c',
         '../src/jsdrv.c',
@@ -39,6 +40,7 @@
         '../src/topic.c',
         '../src/union.c',
         '../src/version.c',
+        '../third-party/miniz/miniz.c',
         '../third-party/tinyprintf/tinyprintf.c'
       ],
       'conditions': [
@@ -94,6 +96,7 @@
         "<!@(node -p \"require('node-addon-api').include\")",
         "../include",
         "../include_private",
+        "../third-party/miniz",
         "../third-party/tinyprintf"
       ],
       'dependencies': ["<!(node -p \"require('node-addon-api').gyp\")"],
