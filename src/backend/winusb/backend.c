@@ -732,6 +732,7 @@ static int32_t device_add(struct backend_s * s, const struct device_type_s * dev
     device->device_type = device_type;
     jsdrv_cstr_copy(device->device_path, device_path, sizeof(device->device_path));
     device_path_to_serial_number(device_path, serial_number);
+    jsdrv_cstr_toupper(serial_number);
     tfp_snprintf(device->device.prefix, sizeof(device->device.prefix), "%c/%s/%s",
                  s->backend.prefix, device_type->model, serial_number);
     JSDRV_LOGI("device_add_msg %s : %s", device->device.prefix, device_path);

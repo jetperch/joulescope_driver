@@ -214,11 +214,21 @@ static int32_t device_open(struct dev_s * d) {
         return (int32_t) rc;
     }
 
-    rc = libusb_set_configuration(d->handle, 1);
+    int config = 0;
+    rc = libusb_get_configuration(d->handle, &config);
     if (rc) {
-        JSDRV_LOGE("libusb_set_configuration failed: %d", rc);
+        JSDRV_LOGE("libusb_get_configuration failed: %d", rc);
         return (int32_t) rc;
     }
+    if (config != 1) {
+        JSDRV_LOGW("device_open(%s) config=%d, expected 1", d->ll_device.prefix, config);
+        rc = libusb_set_configuration(d->handle, 1);
+        if (rc) {
+            JSDRV_LOGE("libusb_set_configuration failed: %d", rc);
+            return (int32_t) rc;
+        }
+    }
+
     rc = libusb_claim_interface(d->handle, 0);
     if (rc) {
         JSDRV_LOGE("libusb_claim_interface failed: %d", rc);
