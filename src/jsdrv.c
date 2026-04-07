@@ -28,6 +28,7 @@
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/buffer.h"
+#include "jsdrv_prv/js320_fwup_mgr.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/devices.h"
 #include "jsdrv_prv/frontend.h"
@@ -771,9 +772,10 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
     if (msg->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
         msg->value.flags &= ~JSDRV_UNION_FLAG_HEAP_MEMORY;
         switch (msg->value.type) {
-            case JSDRV_UNION_STR:   /* intentional fall-through */
-            case JSDRV_UNION_JSON:  /* intentional fall-through */
-            case JSDRV_UNION_BIN:   /* intentional fall-through */
+            case JSDRV_UNION_STR:     /* intentional fall-through */
+            case JSDRV_UNION_JSON:    /* intentional fall-through */
+            case JSDRV_UNION_BIN:     /* intentional fall-through */
+            case JSDRV_UNION_STDMSG:  /* intentional fall-through */
                 if (NULL != msg->value.value.bin) {
                     jsdrv_free((void *) msg->value.value.bin);
                     msg->value.value.bin = NULL;
@@ -940,6 +942,7 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
     jsdrv_pubsub_publish(c->pubsub, msg);
     jsdrv_pubsub_process(c->pubsub);
     JSDRV_RETURN_ON_ERROR(jsdrv_buffer_initialize(c));
+    JSDRV_RETURN_ON_ERROR(jsdrv_fwup_mgr_initialize(c));
 
     int32_t rv = jsdrv_thread_create(&c->thread, frontend_thread, c, 1);
     if (rv) {
@@ -966,6 +969,7 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         jsdrv_cstr_copy(msg->topic, JSDRV_MSG_FINALIZE, sizeof(msg->topic));
         msg_queue_push(context->msg_cmd, msg);
         jsdrv_thread_join(&context->thread, timeout_ms);
+        jsdrv_fwup_mgr_finalize();
         jsdrv_buffer_finalize();
         jsdrv_pubsub_finalize(c->pubsub);
         c->pubsub = NULL;

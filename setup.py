@@ -40,6 +40,7 @@ C_INCS = [
     os.path.join(MYPATH, 'include'),
     os.path.join(MYPATH, 'include_private'),
     os.path.join(MYPATH, 'third-party', 'tinyprintf'),
+    os.path.join(MYPATH, 'third-party', 'miniz'),
     np.get_include(),
 ]
 
@@ -142,6 +143,7 @@ extensions = [
                                      'src/js220_stats.c',
                                      'src/js320_drv.c',
                                      'src/js320_fwup.c',
+                                     'src/js320_fwup_mgr.c',
                                      'src/js320_jtag.c',
                                      'src/js320_stats.c',
                                      'src/jsdrv.c',
@@ -160,6 +162,7 @@ extensions = [
                                      'src/union.c',
                                      'src/version.c',
                                      'third-party/tinyprintf/tinyprintf.c',
+                                     'third-party/miniz/miniz.c',
                                      ] + sources,
                          include_dirs=C_INCS,
                          libraries=libraries,

@@ -130,6 +130,7 @@ const struct command_s COMMANDS[] = {
         {"adapter", on_adapter, "MiniBitty adapter"},
         {"firmware", on_firmware, "Update device firmware"},
         {"fpga_mem", on_fpga_mem, "Program FPGA flash memory"},
+        {"fwup", on_fwup, "Full firmware update from manufacturing package"},
         {"hotplug", on_hotplug, "Monitor device insertion and removal"},
         {"sniff", on_pubsub_sniffer, "Subscribe to topic and print"},
         {"info", on_info, "List connected devices and display device details"},

@@ -621,8 +621,10 @@ static void test_ctrl_update_no_image(void ** state) {
 
 /// Helper: drive the FPGA state machine from MODE_SWITCH through OPEN.
 static void fpga_drive_to_open(void) {
-    // Should have published c/mode=2 and set timeout
-    assert_int_equal(1, dev_cmd_pending());
+    // Should have published sensor disconnect + c/mode=2 and set timeout
+    assert_int_equal(2, dev_cmd_pending());
+    struct captured_dev_cmd * disc_cmd = pop_dev_cmd();
+    assert_string_equal("c/comm/sensor/!req", disc_cmd->topic);
     struct captured_dev_cmd * mode_cmd = pop_dev_cmd();
     assert_string_equal("c/mode", mode_cmd->topic);
     assert_true(g_ctx.timeout_count > 0);
@@ -918,6 +920,9 @@ static void test_fpga_verify_mismatch(void ** state) {
     assert_int_equal(1, dev_cmd_pending());
     pop_dev_cmd();  // c/mode=0
     js320_fwup_on_timeout(g_ctx.fwup);
+    assert_int_equal(1, dev_cmd_pending());
+    struct captured_dev_cmd * reconn = pop_dev_cmd();
+    assert_string_equal("c/comm/sensor/!req", reconn->topic);
 
     assert_string_equal("h/fwup/fpga/!rsp", g_ctx.fe_subtopic);
     assert_int_equal(500, (int) g_ctx.fe_rsp.transaction_id);
@@ -1381,8 +1386,10 @@ static void test_fpga_pipeline_refill(void ** state) {
 
     // MODE_RESTORE
     assert_int_equal(1, dev_cmd_pending());
-    pop_dev_cmd();
+    pop_dev_cmd();  // c/mode=0
     js320_fwup_on_timeout(g_ctx.fwup);
+    assert_int_equal(1, dev_cmd_pending());
+    pop_dev_cmd();  // c/comm/sensor/!req=1
 
     assert_string_equal("h/fwup/fpga/!rsp", g_ctx.fe_subtopic);
     assert_int_equal(600, (int) g_ctx.fe_rsp.transaction_id);
@@ -1453,8 +1460,10 @@ static void test_fpga_pipeline_error_drain(void ** state) {
 
     // MODE_RESTORE
     assert_int_equal(1, dev_cmd_pending());
-    pop_dev_cmd();
+    pop_dev_cmd();  // c/mode=0
     js320_fwup_on_timeout(g_ctx.fwup);
+    assert_int_equal(1, dev_cmd_pending());
+    pop_dev_cmd();  // c/comm/sensor/!req=1
 
     assert_string_equal("h/fwup/fpga/!rsp", g_ctx.fe_subtopic);
     assert_int_equal(700, (int) g_ctx.fe_rsp.transaction_id);

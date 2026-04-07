@@ -26,6 +26,17 @@
 #include <string.h>
 #include <stdio.h>
 
+// mb_check32_xxhash: integrity check (mirrors mb/check32.h)
+static uint32_t check32_xxhash(const uint32_t * data, uint32_t length) {
+    uint32_t value = 0x9e3779b1U;  // MB_CHECK32_INITIAL_VALUE
+    for (uint32_t i = 0; i < length; ++i) {
+        value += data[i] * 0x85ebca6bU;
+        value = (value << 13) | (value >> 19);
+        value *= 0xc2b2ae35U;
+    }
+    return value;
+}
+
 // Mirror of mb/pubsub_meta.h and mb/value.h for host-side parsing.
 #define MB_PUBSUB_META_MAGIC            "MBtm_1.0"
 #define MB_PUBSUB_META_STR_NONE         (0xFFFFU)
@@ -214,6 +225,28 @@ int32_t meta_binary_parse(
                     hdr->total_size, blob_size);
         return JSDRV_ERROR_TOO_SMALL;
     }
+    // Validate check32 integrity (last u32 is the check value)
+    if (hdr->total_size >= 8 && (hdr->total_size & 3) == 0) {
+        uint32_t check_words = hdr->total_size / 4 - 1;
+        const uint32_t * blob_u32 = (const uint32_t *) blob;
+        uint32_t computed = check32_xxhash(blob_u32, check_words);
+        if (computed != blob_u32[check_words]) {
+            JSDRV_LOGW("meta_binary: check32 mismatch: computed=0x%08x stored=0x%08x",
+                        computed, blob_u32[check_words]);
+            return JSDRV_ERROR_MESSAGE_INTEGRITY;
+        }
+    }
+
+    if (hdr->string_table_offset > hdr->total_size) {
+        JSDRV_LOGW("meta_binary: string_table_offset %u out of range",
+                    hdr->string_table_offset);
+        return JSDRV_ERROR_MESSAGE_INTEGRITY;
+    }
+    if (hdr->topic_count > 1024) {  // sanity limit
+        JSDRV_LOGW("meta_binary: topic_count %u too large",
+                    hdr->topic_count);
+        return JSDRV_ERROR_MESSAGE_INTEGRITY;
+    }
 
     uint32_t offset = MB_PUBSUB_META_HEADER_SIZE;
     char json[2048];
@@ -225,6 +258,17 @@ int32_t meta_binary_parse(
         }
         const struct meta_entry_s * entry =
             (const struct meta_entry_s *)(blob + offset);
+
+        // Guard against corrupted entry_size (0 = infinite loop, too large = OOB)
+        if (entry->entry_size < MB_PUBSUB_META_ENTRY_HEADER_SIZE) {
+            JSDRV_LOGW("meta_binary: entry %u bad entry_size=%u, aborting",
+                       i, entry->entry_size);
+            return JSDRV_ERROR_MESSAGE_INTEGRITY;
+        }
+        if (offset + entry->entry_size > hdr->total_size) {
+            JSDRV_LOGW("meta_binary: entry %u overflows blob, aborting", i);
+            return JSDRV_ERROR_MESSAGE_INTEGRITY;
+        }
 
         const char * topic = str_get(blob, blob_size, hdr, entry->topic_str_offset);
         if (!topic) {
@@ -260,7 +304,8 @@ int32_t meta_binary_parse(
         }
 
         // Options
-        if (entry->options_offset && entry->options_offset < entry->entry_size) {
+        if (entry->options_offset
+                && entry->options_offset + sizeof(struct meta_options_header_s) <= entry->entry_size) {
             const struct meta_options_header_s * opts =
                 (const struct meta_options_header_s *)
                 ((const uint8_t *)entry + entry->options_offset);

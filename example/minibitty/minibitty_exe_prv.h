@@ -89,6 +89,7 @@ typedef int (*command_fn)(struct app_s * self, int argc, char * argv[]);
 
 int on_adapter(struct app_s * self, int argc, char * argv[]);
 int on_firmware(struct app_s * self, int argc, char * argv[]);
+int on_fwup(struct app_s * self, int argc, char * argv[]);
 int on_fpga_mem(struct app_s * self, int argc, char * argv[]);
 int on_help(struct app_s * self, int argc, char * argv[]);
 int on_hotplug(struct app_s * self, int argc, char * argv[]);

@@ -46,6 +46,7 @@ ADD_CMOCKA_TEST(js220_stats_test)
 ADD_CMOCKA_TEST(json_test)
 ADD_CMOCKA_TEST(log_test)
 ADD_CMOCKA_TEST(meta_test)
+ADD_CMOCKA_TEST(meta_binary_test)
 ADD_CMOCKA_TEST(sample_buffer_f32_test)
 ADD_CMOCKA_TEST(statistics_test)
 ADD_CMOCKA_TEST(time_test)
@@ -71,6 +72,11 @@ add_dependencies(js320_fwup_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(js320_fwup_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(js320_fwup_test ${CMAKE_CURRENT_BINARY_DIR}/js320_fwup_test)
 
+add_executable(js320_fwup_mgr_test js320_fwup_mgr_test.c)
+add_dependencies(js320_fwup_mgr_test jsdrv tinyprintf miniz cmocka)
+target_link_libraries(js320_fwup_mgr_test jsdrv tinyprintf miniz cmocka)
+add_test(js320_fwup_mgr_test ${CMAKE_CURRENT_BINARY_DIR}/js320_fwup_mgr_test)
+
 ADD_CMOCKA_TEST(js320_stats_test)
 
 add_executable(frontend_test frontend_test.c
@@ -81,11 +87,12 @@ add_executable(frontend_test frontend_test.c
         ../src/js220_params.c
         ../src/js320_drv.c
         ../src/js320_fwup.c
+        ../src/js320_fwup_mgr.c
         ../src/js320_jtag.c
         ../src/js320_stats.c
         ../src/mb_device.c
         ../src/jsdrv.c)
 set_target_properties(frontend_test PROPERTIES COMPILE_DEFINITIONS "UNITTEST=1;")
-add_dependencies(frontend_test jsdrv_support_objlib tinyprintf cmocka)
-target_link_libraries(frontend_test jsdrv_support_objlib tinyprintf cmocka)
+add_dependencies(frontend_test jsdrv_support_objlib tinyprintf miniz cmocka)
+target_link_libraries(frontend_test jsdrv_support_objlib tinyprintf miniz cmocka)
 add_test(frontend_test ${CMAKE_CURRENT_BINARY_DIR}/frontend_test)

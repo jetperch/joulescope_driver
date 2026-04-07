@@ -79,6 +79,7 @@ set(SOURCES
         js220_params.c
         js320_drv.c
         js320_fwup.c
+        js320_fwup_mgr.c
         js320_jtag.c
         js320_stats.c
         mb_device.c
@@ -100,7 +101,7 @@ target_link_libraries(jsdrv_support_objlib tinyprintf ${PLATFORM_LIBS})
 target_link_directories(jsdrv_support_objlib PUBLIC ${PLATFORM_TARGET_LINK_DIRS})
 
 add_library(jsdrv ${SOURCES})
-add_dependencies(jsdrv jsdrv_support_objlib tinyprintf ${PLATFORM_DEPENDENCIES})
-target_link_libraries(jsdrv PRIVATE jsdrv_support_objlib tinyprintf ${PLATFORM_LIBS})
+add_dependencies(jsdrv jsdrv_support_objlib tinyprintf miniz ${PLATFORM_DEPENDENCIES})
+target_link_libraries(jsdrv PRIVATE jsdrv_support_objlib tinyprintf miniz ${PLATFORM_LIBS})
 target_link_directories(jsdrv PUBLIC ${PLATFORM_TARGET_LINK_DIRS})
 target_include_directories(jsdrv PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)

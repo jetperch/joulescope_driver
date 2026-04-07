@@ -590,6 +590,10 @@ static void fpga_on_cmd(struct js320_fwup_s * self,
             memcpy(self->image, cmd->data, image_size);
             self->image_size = image_size;
             self->page_count = (image_size + FW_PAGE_SIZE - 1) / FW_PAGE_SIZE;
+            // Disconnect sensor comm before JTAG mode to ensure
+            // a clean reconnect after the bitstream is reprogrammed.
+            jsdrvp_mb_dev_publish_to_device(self->dev, "c/comm/sensor/!req",
+                &jsdrv_union_u8(0));
             // Start with mode switch to JTAG
             self->fpga_state = FPGA_MODE_SWITCH;
             jsdrvp_mb_dev_publish_to_device(self->dev, "c/mode",
@@ -719,6 +723,9 @@ static void fpga_on_timeout(struct js320_fwup_s * self) {
             break;
 
         case FPGA_MODE_RESTORE:
+            // Reconnect sensor comm after FPGA bitstream reload
+            jsdrvp_mb_dev_publish_to_device(self->dev, "c/comm/sensor/!req",
+                &jsdrv_union_u8(1));
             fpga_finish(self, self->error_code);
             break;
 

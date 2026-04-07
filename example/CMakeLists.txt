@@ -56,6 +56,7 @@ add_executable(minibitty_exe
         minibitty/adapter.c
         minibitty/firmware.c
         minibitty/fpga_mem.c
+        minibitty/fwup.c
         minibitty/hotplug.c
         minibitty/info.c
         minibitty/pubsub_info.c

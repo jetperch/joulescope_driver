@@ -447,7 +447,7 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
         // Parse state entries
         uint32_t offset = 8 + 8;  // stdmsg_hdr + state_header
         while (offset + 48 <= value->size) {  // 48 = min entry size (32 topic + 8 header + 8 value)
-            const char * topic = (const char *)(data + offset);
+            const uint8_t * raw_topic = data + offset;
             uint8_t vtype = data[offset + 32];
             uint16_t vsize;
             memcpy(&vsize, data + offset + 34, 2);
@@ -457,7 +457,29 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
             uint32_t entry_size = 40 + padded;
 
             if (offset + entry_size > value->size) break;
-            if (topic[0] == '\0') break;
+            if (raw_topic[0] == '\0') break;
+
+            // Copy topic with guaranteed null termination
+            char topic[MB_TOPIC_SIZE_MAX];
+            memcpy(topic, raw_topic, MB_TOPIC_SIZE_MAX);
+            topic[MB_TOPIC_SIZE_MAX - 1] = '\0';
+
+            // Validate topic is printable ASCII (reject garbage)
+            {
+                bool valid = true;
+                for (uint32_t ti = 0; topic[ti]; ++ti) {
+                    uint8_t ch = (uint8_t) topic[ti];
+                    if (ch < 0x20 || ch > 0x7E) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) {
+                    JSDRV_LOGW("state_fetch: skipping invalid topic at offset %u", offset);
+                    offset += entry_size;
+                    continue;
+                }
+            }
 
             // Publish the retained value to the host pubsub
             state_fetch_publish_state(self, topic, vtype, vdata, vsize);
