@@ -18,7 +18,9 @@
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/platform.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "jsdrv/os_thread.h"
 
@@ -26,6 +28,7 @@
 #define MB_TOPIC_LENGTH_MAX (32U)
 #define LINK_PING_SIZE_U32 ((512U - 12U) >> 2)
 #define PUBSUB_PING_SIZE_U32 ((512U - 12U - 8U - MB_TOPIC_LENGTH_MAX) >> 2)  // frame, stdmsg, publish
+#define STREAM_TIMEOUT_S (5)
 
 
 enum loopback_location_e {
@@ -33,11 +36,14 @@ enum loopback_location_e {
     LOCATION_PUBSUB = 1,
 };
 
+static volatile time_t last_data_time_ = 0;
+
 void on_u4_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     static uint32_t counter = 0;
     (void) user_data;
     (void) topic;
     (void) value;
+    last_data_time_ = time(NULL);
     if (counter == 1000) {
         const uint32_t * p32 = &value->value.u32;
         printf("%d\n", p32[32] & 0x0f);
@@ -52,6 +58,7 @@ void on_i32_data(void * user_data, const char * topic, const struct jsdrv_union_
     (void) user_data;
     (void) topic;
     (void) value;
+    last_data_time_ = time(NULL);
     if (counter == 1000) {
         const uint32_t * p32 = &value->value.u32;
         printf("0x%08x %d\n", p32[32], p32[32]);
@@ -68,6 +75,7 @@ void on_f32_data(void * user_data, const char * topic, const struct jsdrv_union_
     (void) user_data;
     (void) topic;
     (void) value;
+    last_data_time_ = time(NULL);
 
     const float * f32 = (const float *) &signal->data[0];
 
@@ -166,8 +174,22 @@ static int run(struct app_s * self, const char * device) {
     }
 
 
+    last_data_time_ = time(NULL);
+    time_t end_time = self->duration_ms
+        ? (time(NULL) + (self->duration_ms + 999) / 1000)
+        : 0;
+
     while (!quit_) {
-        jsdrv_thread_sleep_ms(10);
+        jsdrv_thread_sleep_ms(100);
+        time_t now = time(NULL);
+        if ((now - last_data_time_) >= STREAM_TIMEOUT_S) {
+            printf("ERROR: no data received for %d seconds\n", STREAM_TIMEOUT_S);
+            rc = 1;
+            break;
+        }
+        if (end_time && (now >= end_time)) {
+            break;  // duration elapsed, success
+        }
     }
 
     PUBLISH_U32("s/adc/0/ctrl", 0);
@@ -179,18 +201,22 @@ static int run(struct app_s * self, const char * device) {
     PUBLISH_U32("s/stats/ctrl", 0);
 
     jsdrv_close(self->context, device, JSDRV_TIMEOUT_MS_DEFAULT);
-    return 0;
+    return rc;
 }
 
 static int usage(void) {
     printf(
-        "usage: minibitty stream device_path\n"
+        "usage: minibitty stream [--duration <ms>] device_path\n"
+        "\n"
+        "  --duration <ms>  Run for duration then exit 0. If no data\n"
+        "                   received for 5 seconds, exit with error.\n"
         );
     return 1;
 }
 
 int on_stream(struct app_s * self, int argc, char * argv[]) {
     char *device_filter = NULL;
+    self->duration_ms = 0;
 
     while (argc) {
         if (argv[0][0] != '-') {
@@ -198,6 +224,11 @@ int on_stream(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
         } else if ((0 == strcmp(argv[0], "--verbose")) || (0 == strcmp(argv[0], "-v"))) {
             self->verbose++;
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--duration")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            self->duration_ms = (uint32_t) strtoul(argv[0], NULL, 10);
             ARG_CONSUME();
         } else {
             return usage();
