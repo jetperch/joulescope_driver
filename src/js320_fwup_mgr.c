@@ -620,40 +620,6 @@ static int32_t worker_write_resources_filtered(struct worker_s * w,
     return 0;
 }
 
-static int32_t worker_resources(struct worker_s * w) {
-    w->state = WST_RESOURCE;
-    int32_t rc;
-
-    // Ctrl resources always work immediately
-    rc = worker_write_resources_filtered(w, false);
-    if (rc) {
-        worker_fail(w, rc, "ctrl resource write failed");
-        return rc;
-    }
-
-    // Sensor resources need sensor comm — retry with reopen if needed
-    w->result = 0;  // clear any prior error before first attempt
-    rc = worker_write_resources_filtered(w, true);
-    if (rc) {
-        JSDRV_LOGI("fwup/%03u: sensor resources failed (%d), retrying",
-                   w->id, (int) rc);
-        w->state = WST_RESOURCE;
-        w->result = 0;
-        worker_publish_status(w, "reopening for sensor resources");
-        worker_close(w);
-        jsdrv_thread_sleep_ms(5000);
-        rc = worker_open(w);
-        if (rc) return rc;
-        w->state = WST_RESOURCE;
-        rc = worker_write_resources_filtered(w, true);
-    }
-    if (rc) {
-        worker_fail(w, rc, "sensor resource write failed");
-    }
-    return rc;
-}
-
-
 // =====================================================================
 // Worker thread
 // =====================================================================
