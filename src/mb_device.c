@@ -34,6 +34,7 @@
 #include "mb/comm/frame.h"
 #include "mb/comm/link.h"
 #include "mb/stdmsg.h"
+#include "mb/timesync.h"
 #include "jsdrv_prv/meta_binary.h"
 
 
@@ -1148,52 +1149,87 @@ static void handle_in_trace(struct jsdrvp_mb_dev_s * d, uint16_t metadata, uint3
 
 static void handle_in_timesync_sync(struct jsdrvp_mb_dev_s * d,
         struct mb_stdmsg_publish_s * publish, uint32_t value_size) {
+    // Only respond to sync REQUESTS from the device.  Ignore any
+    // SYNC stdmsg arriving on a different topic (e.g., echo of our
+    // own !rsp) so we don't reply twice or loop.
+    if (!jsdrv_cstr_ends_with(publish->topic, "/!req")) {
+        return;
+    }
     int64_t utc_recv = jsdrv_time_utc();
     uint32_t body_size = value_size - sizeof(struct mb_stdmsg_header_s);
-    if (body_size < 32) {
+    if (body_size < sizeof(struct mb_timesync_sync_v1_s)) {
         JSDRV_LOGW("timesync_sync too short: %" PRIu32, value_size);
         return;
     }
     struct mb_stdmsg_header_s * inner = (struct mb_stdmsg_header_s *) &publish->value;
-    uint64_t * src = (uint64_t *) (inner + 1);
+    const struct mb_timesync_sync_v1_s * src =
+        (const struct mb_timesync_sync_v1_s *) (inner + 1);
 
     // Build response: inner TIMESYNC_SYNC header + body
-    uint8_t resp_buf[sizeof(struct mb_stdmsg_header_s) + 32];
+    uint8_t resp_buf[sizeof(struct mb_stdmsg_header_s)
+                     + sizeof(struct mb_timesync_sync_v1_s)];
     struct mb_stdmsg_header_s * resp_hdr = (struct mb_stdmsg_header_s *) resp_buf;
     resp_hdr->version = 0;
     resp_hdr->type = MB_STDMSG_TIMESYNC_SYNC;
     resp_hdr->origin_prefix = 'h';
     resp_hdr->metadata = 0;
 
-    uint64_t * body = (uint64_t *) (resp_hdr + 1);
-    body[0] = src[0];                          // count_start: echo
-    body[1] = (uint64_t) utc_recv;             // utc_recv
-    body[2] = (uint64_t) jsdrv_time_utc();     // utc_send
-    body[3] = 0;                               // count_end: device fills
+    struct mb_timesync_sync_v1_s * body =
+        (struct mb_timesync_sync_v1_s *) (resp_hdr + 1);
+    body->count_start = src->count_start;       // echo
+    body->utc_recv = utc_recv;
+    body->utc_send = jsdrv_time_utc();
+    body->count_end = 0;                        // device fills
+
+    // Route the response back to the SAME pubsub instance that sent the
+    // request.  publish->topic is something like "c/ts/!req" or
+    // "s/ts/!req"; we send to "{prefix}/ts/!rsp" so that the response
+    // reaches the timesync task in the matching instance.  Without this,
+    // both ctrl and sensor responses would go to the ctrl's c/ts/!rsp,
+    // and the ctrl's task would process the sensor's count_start as if
+    // it were its own — corrupting the algorithm.
+    char rsp_topic[12];
+    rsp_topic[0] = publish->topic[0];   // 'c' or 's'
+    rsp_topic[1] = '/';
+    rsp_topic[2] = 't';
+    rsp_topic[3] = 's';
+    rsp_topic[4] = '/';
+    rsp_topic[5] = '!';
+    rsp_topic[6] = 'r';
+    rsp_topic[7] = 's';
+    rsp_topic[8] = 'p';
+    rsp_topic[9] = '\0';
 
     struct jsdrv_union_s value = jsdrv_union_bin(resp_buf, sizeof(resp_buf));
     value.type = JSDRV_UNION_STDMSG;
-    publish_to_device(d, "./ts/!rsp", &value);
+    publish_to_device(d, rsp_topic, &value);
     JSDRV_LOGD2("timesync sync rsp: count=%" PRIu64 " utc_recv=%" PRIi64,
-                src[0], utc_recv);
+                src->count_start, utc_recv);
 }
 
 static void handle_in_timesync_map(struct jsdrvp_mb_dev_s * d,
         struct mb_stdmsg_publish_s * publish, uint32_t value_size) {
     uint32_t body_size = value_size - sizeof(struct mb_stdmsg_header_s);
-    if (body_size < 32) {
+    if (body_size < sizeof(struct mb_timesync_map_v1_s)) {
         JSDRV_LOGW("timesync_map too short: %" PRIu32, value_size);
         return;
     }
     struct mb_stdmsg_header_s * inner = (struct mb_stdmsg_header_s *) &publish->value;
-    uint64_t * body = (uint64_t *) (inner + 1);
+    const struct mb_timesync_map_v1_s * body =
+        (const struct mb_timesync_map_v1_s *) (inner + 1);
 
-    d->time_map.offset_time = (int64_t) body[0];
-    d->time_map.offset_counter = body[1];
-    d->time_map.counter_rate = ((double) body[2]) / ((double) (1ULL << 32));
-    JSDRV_LOGD1("timesync map: utc=%" PRIi64 " counter=%" PRIu64 " rate=%f",
-                d->time_map.offset_time, d->time_map.offset_counter,
-                d->time_map.counter_rate);
+    // Only the sensor's timesync map is authoritative for sample
+    // timestamping in d->time_map.  Maps from other instances (e.g.,
+    // ctrl 'c/ts/!map') are forwarded to subscribers but not cached
+    // here.  TODO: enable sensor-side timesync task to populate this.
+    if (publish->topic[0] == 's') {
+        d->time_map.offset_time = body->utc;
+        d->time_map.offset_counter = body->counter;
+        d->time_map.counter_rate = ((double) body->counter_rate) / ((double) (1ULL << 32));
+    }
+    JSDRV_LOGD1("timesync map %s: utc=%" PRIi64 " counter=%" PRIu64 " rate=%f",
+                publish->topic, body->utc, body->counter,
+                ((double) body->counter_rate) / ((double) (1ULL << 32)));
 }
 
 static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, struct mb_stdmsg_publish_s * publish, uint8_t length) {
@@ -1229,18 +1265,16 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
         m->value.value.u64 = publish->value.u64;
     }
 
-    // Check for timesync STDMSG values
+    // Check for timesync STDMSG values.  These are consumed for their
+    // side effects (host-side response, device cache update) and ALSO
+    // forwarded to frontend subscribers below so tools can observe them.
     if ((value_type == JSDRV_UNION_STDMSG)
             && (value_size >= sizeof(struct mb_stdmsg_header_s))) {
         struct mb_stdmsg_header_s * inner_hdr = (struct mb_stdmsg_header_s *) &publish->value;
         if (inner_hdr->type == MB_STDMSG_TIMESYNC_SYNC) {
             handle_in_timesync_sync(d, publish, value_size);
-            jsdrvp_msg_free(d->context, m);
-            return;
         } else if (inner_hdr->type == MB_STDMSG_TIMESYNC_MAP) {
             handle_in_timesync_map(d, publish, value_size);
-            jsdrvp_msg_free(d->context, m);
-            return;
         }
     }
 

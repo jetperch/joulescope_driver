@@ -100,6 +100,14 @@ void on_f32_data(void * user_data, const char * topic, const struct jsdrv_union_
     }
 }
 
+void on_stats_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) user_data;
+    (void) topic;
+    (void) value;
+    last_data_time_ = time(NULL);
+    printf("stats\n");
+}
+
 #define PUBLISH_U32(topic_, value_) \
     jsdrv_topic_set(&topic, self->device.topic); \
     jsdrv_topic_append(&topic, topic_); \
@@ -144,7 +152,7 @@ static int run(struct app_s * self, const char * device) {
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_i32_data, NULL, 0);
     } else if (1) {
         // manual current calibration
-        PUBLISH_U32("s/stats/ctrl", 1);         // stream statistics
+        PUBLISH_U32("s/sys/tick/en", 1);        // disable sys/tick/!ev
         PUBLISH_U32("s/i/range/mode", 4);       // auto
         //PUBLISH_U32("s/i/range/mode", 5);       // manual
         //PUBLISH_U32("s/i/range/select", 0x84);
@@ -154,9 +162,18 @@ static int run(struct app_s * self, const char * device) {
         PUBLISH_U32("s/i/ctrl", 1);
         PUBLISH_U32("s/v/ctrl", 1);
         PUBLISH_U32("s/i/range/ctrl", 1);
+        PUBLISH_U32("s/stats/ctrl", 1);         // stream statistics
         jsdrv_topic_set(&topic, self->device.topic);
         jsdrv_topic_append(&topic, "s/i/!data");
         jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_f32_data, NULL, 0);
+
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, "s/i/range/!data");
+        jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_u4_data, NULL, 0);
+
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, "s/stats/value");
+        jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_stats_data, NULL, 0);
     } else if (0) {
         // manual voltage
         PUBLISH_U32("s/v/range/mode", 1);       // manual

@@ -142,6 +142,7 @@ const struct command_s COMMANDS[] = {
         {"state_get", on_state_get, "Full !state GET stress test"},
         {"pubsub_test", on_pubsub_test, "Regression test for MB pubsub API features"},
         {"throughput", on_throughput, "Perform comm throughput test"},
+        {"timesync", on_timesync, "Verify and characterize MiniBitty timesync"},
         {"version", on_version, "Display version and platform information"},
         {"help", on_help, "Display help"},
         {NULL, NULL, NULL}

@@ -68,6 +68,7 @@ add_executable(minibitty_exe
         minibitty/power_cycle.c
         minibitty/stream.c
         minibitty/throughput.c
+        minibitty/timesync.c
         minibitty/version.c
         minibitty/adapter_tracy.cpp
         minibitty/tracy/common/tracy_lz4.cpp

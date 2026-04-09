@@ -206,6 +206,32 @@ static void on_fwup_rsp(void * user_data, const char * topic,
     jsdrv_os_event_signal(w->event);
 }
 
+static void on_link_state(void * user_data, const char * topic,
+                          const struct jsdrv_union_s * value) {
+    struct worker_s * w = (struct worker_s *) user_data;
+    (void) topic;
+    if (value->type == JSDRV_UNION_U8 && value->value.u8 == 1) {
+        jsdrv_os_event_signal(w->event);
+    }
+}
+
+static int32_t worker_wait_sensor_link(struct worker_s * w,
+                                       uint32_t timeout_ms) {
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, w->device_prefix);
+    jsdrv_topic_append(&topic, "c/comm/sensor/_state");
+
+    jsdrv_os_event_reset(w->event);
+    jsdrv_subscribe(w->context, topic.topic, JSDRV_SFLAG_PUB,
+                    on_link_state, w, JSDRV_TIMEOUT_MS_DEFAULT);
+
+    int32_t rc = jsdrv_os_event_wait(w->event, timeout_ms);
+    jsdrv_unsubscribe(w->context, topic.topic,
+                      on_link_state, w, 0);
+    if (rc) return JSDRV_ERROR_TIMED_OUT;
+    return 0;
+}
+
 static void on_mem_rsp(void * user_data, const char * topic,
                        const struct jsdrv_union_s * value) {
     struct worker_s * w = (struct worker_s *) user_data;
@@ -673,18 +699,57 @@ static THREAD_RETURN_TYPE worker_thread(THREAD_ARG_TYPE lpParam) {
         device_opened = true;
     }
 
-    // Write resources BEFORE FPGA programming — the sensor comm
-    // won't be available after the bitstream is reprogrammed.
+    // Ctrl resources work without the FPGA
     if (!(w->flags & JSDRV_FWUP_FLAG_SKIP_RESOURCES)) {
         if (worker_cancelled(w)) goto close_done;
-        rc = worker_resources(w);
-        if (rc) goto close_done;
+        w->state = WST_RESOURCE;
+        rc = worker_write_resources_filtered(w, false);
+        if (rc) {
+            worker_fail(w, rc, "ctrl resource write failed");
+            goto close_done;
+        }
     }
 
+    // FPGA bitstream must be programmed before sensor resources,
+    // since sensor comm requires a running bitstream.
     if (!(w->flags & JSDRV_FWUP_FLAG_SKIP_FPGA)) {
         if (worker_cancelled(w)) goto close_done;
         rc = worker_fpga_bitstream(w);
         if (rc) goto close_done;
+        // Wait for sensor comm link to establish after FPGA reload
+        worker_publish_status(w, "waiting for sensor link");
+        rc = worker_wait_sensor_link(w, 10000);
+        if (rc) {
+            worker_fail(w, rc, "sensor link did not connect");
+            goto close_done;
+        }
+    }
+
+    // Sensor resources require sensor comm (FPGA must be running)
+    if (!(w->flags & JSDRV_FWUP_FLAG_SKIP_RESOURCES)) {
+        if (worker_cancelled(w)) goto close_done;
+        w->state = WST_RESOURCE;
+        w->result = 0;
+        rc = worker_write_resources_filtered(w, true);
+        if (rc) {
+            JSDRV_LOGI("fwup/%03u: sensor resources failed (%d), retrying",
+                       w->id, (int) rc);
+            w->state = WST_RESOURCE;
+            w->result = 0;
+            worker_publish_status(w, "reopening for sensor resources");
+            worker_close(w);
+            device_opened = false;
+            jsdrv_thread_sleep_ms(5000);
+            rc = worker_open(w);
+            if (rc) goto done;
+            device_opened = true;
+            w->state = WST_RESOURCE;
+            rc = worker_write_resources_filtered(w, true);
+        }
+        if (rc) {
+            worker_fail(w, rc, "sensor resource write failed");
+            goto close_done;
+        }
     }
 
     w->state = WST_DONE;
