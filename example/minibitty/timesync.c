@@ -77,10 +77,7 @@ static void format_iso_utc(int64_t utc_q30, char * out, size_t out_size) {
     // from a misformed map publishes as "INVALID" instead of crashing).
     int64_t time_s = (int64_t) (utc_q30 >> JSDRV_TIME_Q);
     // time_us is the fractional-seconds microseconds, always in [0, 999999].
-    // Declare as unsigned int (narrower than int64_t) so GCC's format-truncation
-    // analysis sees a max of ~10 digits instead of 19, allowing the "%s.%06uZ"
-    // output to fit the caller's buffer.
-    unsigned int time_us = (unsigned int) JSDRV_TIME_TO_MICROSECONDS(utc_q30 & JSDRV_FRACT_MASK);
+    uint32_t time_us = (uint32_t) JSDRV_TIME_TO_MICROSECONDS(utc_q30 & JSDRV_FRACT_MASK);
     int64_t time_unix = time_s + JSDRV_TIME_EPOCH_UNIX_OFFSET_SECONDS;
     if (time_unix < 0 || time_unix > 4102444800LL /* 2100-01-01 */) {
         snprintf(out, out_size, "INVALID(0x%016" PRIx64 ")", (uint64_t) utc_q30);
@@ -99,9 +96,9 @@ static void format_iso_utc(int64_t utc_q30, char * out, size_t out_size) {
         return;
     }
 #endif
-    char buf[32];
+    char buf[64];
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tm_utc);
-    snprintf(out, out_size, "%s.%06uZ", buf, time_us);
+    snprintf(out, out_size, "%s.%06" PRIu32 "Z", buf, time_us);
 }
 
 static void history_push(struct ts_state_s * s, double rate_hz, double skew_us) {
@@ -184,7 +181,7 @@ static void on_map(void * user_data, const char * topic, const struct jsdrv_unio
     s->last_skew_us = host_skew_us;
 
     // Print line.
-    char iso[40];
+    char iso[48];
     format_iso_utc(body->utc, iso, sizeof(iso));
     printf("[%7.2fs] %c #%-5u utc=%s rate=%.6f Hz ppb=%.0f rtt=%6.1f us skew=%+8.1f us\n",
            t_since_start_s, source, (unsigned) body->update_counter, iso,
