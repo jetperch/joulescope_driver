@@ -96,7 +96,7 @@ static void format_iso_utc(int64_t utc_q30, char * out, size_t out_size) {
         return;
     }
 #endif
-    char buf[64];
+    char buf[48];
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tm_utc);
     snprintf(out, out_size, "%s.%06" PRIu32 "Z", buf, time_us);
 }
@@ -181,7 +181,7 @@ static void on_map(void * user_data, const char * topic, const struct jsdrv_unio
     s->last_skew_us = host_skew_us;
 
     // Print line.
-    char iso[48];
+    char iso[64];
     format_iso_utc(body->utc, iso, sizeof(iso));
     printf("[%7.2fs] %c #%-5u utc=%s rate=%.6f Hz ppb=%.0f rtt=%6.1f us skew=%+8.1f us\n",
            t_since_start_s, source, (unsigned) body->update_counter, iso,
