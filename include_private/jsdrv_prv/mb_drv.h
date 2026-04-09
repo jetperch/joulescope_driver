@@ -261,6 +261,15 @@ int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev);
  */
 const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(struct jsdrvp_mb_dev_s * dev);
 
+/**
+ * @brief Mutable accessor to the device's time_map for drivers that need
+ *        to lazy-initialize it before the on-device timesync converges.
+ *
+ * @param dev The mb_device handle.
+ * @return Pointer to the device's time_map (writable).
+ */
+struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map_mut(struct jsdrvp_mb_dev_s * dev);
+
 JSDRV_CPP_GUARD_END
 
 #endif  /* JSDRV_PRV_MB_DRV_H_ */

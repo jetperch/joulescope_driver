@@ -131,10 +131,17 @@ static void js320_handle_statistics(struct js320_drv_s * self,
         dst->p_max *= p_scale;
         dst->charge_f64 *= self->i_scale;
         dst->energy_f64 *= p_scale;
-        const struct jsdrv_time_map_s * tmap = jsdrvp_mb_dev_time_map(dev);
-        if (tmap) {
-            dst->time_map = *tmap;
+        // Lazy-init: until the sensor's timesync converges, seed the
+        // device time_map with host UTC + the current statistics sample
+        // id and the native counter rate.  Mirrors JS220 behavior in
+        // js220_usb.c::time_map_update().
+        struct jsdrv_time_map_s * mtmap = jsdrvp_mb_dev_time_map_mut(dev);
+        if (mtmap->offset_time == 0) {
+            mtmap->offset_time = jsdrv_time_utc();
+            mtmap->offset_counter = dst->block_sample_id;
+            mtmap->counter_rate = (double) dst->sample_freq;
         }
+        dst->time_map = *mtmap;
         jsdrvp_mb_dev_backend_send(dev, m);
     } else {
         jsdrvp_msg_free(context, m);
@@ -263,10 +270,18 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
             break;  // unreachable (validated above)
     }
 
-    const struct jsdrv_time_map_s * tmap = jsdrvp_mb_dev_time_map(dev);
-    if (tmap) {
-        signal->time_map = *tmap;
+    // Lazy-init: until the sensor's timesync converges, seed the device
+    // time_map with host UTC + the current sample_id and the signal's
+    // native sample rate.  Mirrors JS220 behavior in
+    // js220_usb.c::time_map_update().  After the first s/ts/!map arrives,
+    // mb_device.c::handle_in_timesync_map() refines the values.
+    struct jsdrv_time_map_s * mtmap = jsdrvp_mb_dev_time_map_mut(dev);
+    if (mtmap->offset_time == 0) {
+        mtmap->offset_time = jsdrv_time_utc();
+        mtmap->offset_counter = signal->sample_id;
+        mtmap->counter_rate = (double) signal->sample_rate;
     }
+    signal->time_map = *mtmap;
 
     // process topic
     struct jsdrv_topic_s topic;

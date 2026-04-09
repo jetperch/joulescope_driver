@@ -1690,3 +1690,7 @@ int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev) {
 const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(struct jsdrvp_mb_dev_s * dev) {
     return &dev->time_map;
 }
+
+struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map_mut(struct jsdrvp_mb_dev_s * dev) {
+    return &dev->time_map;
+}
