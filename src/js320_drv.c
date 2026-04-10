@@ -490,6 +490,18 @@ static void js320_compute_power(struct js320_drv_s * self,
     if (!self->power_compute_on_host) {
         return;
     }
+    // Wait until both i and v buffers have actual sample data before
+    // multiplying.  Without this guard, an early mult (e.g., after the
+    // first i frame arrives but before the first v frame) calls
+    // sbuf_f32_advance on the empty v_buf, setting its head_sample_id
+    // to i's sample_id.  When v's first frame later arrives at a
+    // slightly different sample_id, sbuf_f32_add interprets the delta
+    // as missing samples and NaN-fills them — propagating ~123 NaN
+    // values through the synthesized power stream.
+    if ((sbuf_f32_length(&self->i_buf) == 0U)
+            || (sbuf_f32_length(&self->v_buf) == 0U)) {
+        return;
+    }
     sbuf_f32_mult(&self->p_buf, &self->i_buf, &self->v_buf);
     uint32_t n = sbuf_f32_length(&self->p_buf);
     if (n == 0U) {
@@ -697,6 +709,16 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
     // sbuf when host compute is disabled to avoid unnecessary copies.
     if (self->power_compute_on_host && ((channel == 5U) || (channel == 6U))) {
         struct sbuf_f32_s * sbuf = (channel == 5U) ? &self->i_buf : &self->v_buf;
+        // The shared sbuf was zero-initialized by js320_sbufs_clear, so
+        // head_sample_id is 0.  The first incoming frame has a sample_id
+        // anchored at the device's free-running 16 MHz counter (typically
+        // some large number).  Without rebasing, sbuf_f32_add() interprets
+        // the gap from 0 to sample_id as "missing samples" and NaN-fills
+        // up to SAMPLE_BUFFER_LENGTH-1 entries.  Those NaNs then propagate
+        // through sbuf_f32_mult into the synthesized power stream.
+        if (sbuf->head_sample_id == 0) {
+            sbuf->head_sample_id = sample_id;
+        }
         sbuf_f32_add(sbuf, sample_id, (float *) payload_u32, sample_count);
     }
 

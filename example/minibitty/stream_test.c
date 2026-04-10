@@ -32,6 +32,7 @@
 #include "jsdrv/os_thread.h"
 #include "jsdrv_prv/platform.h"
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +60,28 @@ struct sig_stats_s {
     volatile uint32_t decimate_factor;
     volatile uint32_t sample_rate_native;
     volatile uint8_t  field_id;
+
+    // Sample-id continuity tracking.  Each new message's sample_id MUST
+    // equal the previous message's (sample_id + element_count *
+    // decimate_factor); otherwise the buffer/UI inserts NaN-fill gaps.
+    volatile uint64_t expected_next_sample_id;
+    volatile uint32_t sample_id_gaps;
+    volatile int64_t  worst_gap_delta;  // (received - expected) of worst gap
+
+    // Time map values, captured from the first received message.  The
+    // buffer divides counter_rate by decimate_factor to get the output-
+    // rate ticks/sec.  For JS320, counter_rate must be 16e6 (the native
+    // sample_id rate); otherwise the UI's x-axis will be wrong.
+    volatile double tmap_counter_rate;
+    volatile int64_t tmap_offset_time;
+
+    // Sample-data sanity: if the host's port_append builds a 50000+
+    // sample message but only the first ~123 samples (= one device
+    // frame worth) are valid floats and the rest are NaN/zero/garbage,
+    // the UI would render exactly the symptom of "burst then gap".
+    // Count NaN samples in incoming float32 messages to catch this.
+    volatile uint64_t f32_nan_count;
+    volatile uint64_t f32_total_count;
 };
 
 struct testcase_s {
@@ -264,13 +287,42 @@ static void on_data(void * user_data, const char * topic,
         s->field_id = sig->field_id;
         s->sample_rate_native = sig->sample_rate;
         s->decimate_factor = sig->decimate_factor;
+        s->tmap_counter_rate = sig->time_map.counter_rate;
+        s->tmap_offset_time = sig->time_map.offset_time;
+    } else if (sig->sample_id != s->expected_next_sample_id) {
+        // Sample-id discontinuity between adjacent messages.  This is
+        // exactly what causes the Joulescope UI to render NaN-fill gaps.
+        int64_t delta = (int64_t) sig->sample_id
+                        - (int64_t) s->expected_next_sample_id;
+        s->sample_id_gaps++;
+        if ((s->sample_id_gaps == 1)
+                || (delta < 0 ? -delta : delta)
+                   > (s->worst_gap_delta < 0 ? -s->worst_gap_delta : s->worst_gap_delta)) {
+            s->worst_gap_delta = delta;
+        }
     }
     uint64_t end = sig->sample_id +
         (uint64_t) sig->element_count *
         (uint64_t) (sig->decimate_factor ? sig->decimate_factor : 1U);
     s->last_sample_id_end = end;
+    s->expected_next_sample_id = end;
     s->total_elements += sig->element_count;
     s->message_count++;
+
+    // Scan float32 sample data for NaN to catch the case where the host
+    // declares element_count = 50000 but only the first ~123 samples
+    // are valid (e.g. a memcpy bug, or accumulator pointer aliasing).
+    if ((sig->element_type == JSDRV_DATA_TYPE_FLOAT)
+            && (sig->element_size_bits == 32)
+            && (sig->element_count > 0U)) {
+        const float * fdata = (const float *) sig->data;
+        for (uint32_t i = 0; i < sig->element_count; ++i) {
+            if (isnan(fdata[i])) {
+                s->f32_nan_count++;
+            }
+        }
+        s->f32_total_count += sig->element_count;
+    }
     if (sig->element_count < s->min_element_count) {
         s->min_element_count = sig->element_count;
     }
@@ -342,13 +394,55 @@ static int verify_testcase(const struct testcase_s * tc, uint32_t actual_duratio
                      && (avg_elem <= target_elem * (1.0 + COUNT_TOL_PCT / 100.0));
         bool rate_ok  = (observed_sps >= (double) s->expected_rate * (1.0 - RATE_TOL_PCT / 100.0))
                      && (observed_sps <= (double) s->expected_rate * (1.0 + RATE_TOL_PCT / 100.0));
-        bool ok = count_ok && rate_ok;
+
+        // Verify the stream metadata fields the Joulescope UI / buffer
+        // depends on.  JS320 always uses 16 MHz native sample_id rate;
+        // decimate_factor = sample_rate_native / expected_rate.  These
+        // must propagate correctly all the way through the host driver
+        // so the buffer can normalize sample_ids and the time map.
+        uint32_t expected_decimate =
+            (s->expected_rate > 0U) ? (16000000U / s->expected_rate) : 1U;
+        bool sr_ok       = (s->sample_rate_native == 16000000U);
+        bool decimate_ok = (s->decimate_factor == expected_decimate);
+        // Sample-id continuity: every gap between adjacent messages is
+        // a NaN-fill region in the buffer / UI.  There must be ZERO.
+        bool sample_id_ok = (s->sample_id_gaps == 0);
+        bool ok = count_ok && rate_ok && sr_ok && decimate_ok && sample_id_ok;
 
         printf("    %s %-18s n=%u avg_elem=%.0f (target %.0f, %+.1f%%) sps=%.0f (%+.1f%%)"
                " min=%u max=%u\n",
                ok ? "PASS" : "FAIL",
                s->subtopic, s->message_count, avg_elem, target_elem, elem_dev,
                observed_sps, sps_dev, s->min_element_count, s->max_element_count);
+        if (!sr_ok) {
+            printf("         sample_rate=%u (expected 16000000)\n",
+                   s->sample_rate_native);
+        }
+        if (!decimate_ok) {
+            printf("         decimate_factor=%u (expected %u for output rate %u Hz)\n",
+                   s->decimate_factor, expected_decimate, s->expected_rate);
+        }
+        if (!sample_id_ok) {
+            printf("         sample_id gaps=%u  worst delta=%" PRId64
+                   " native ticks (= %" PRId64 " output samples)\n",
+                   s->sample_id_gaps, s->worst_gap_delta,
+                   s->worst_gap_delta / (int64_t) (s->decimate_factor ? s->decimate_factor : 1));
+        }
+        // Always print the time_map counter_rate so we can spot a
+        // mismatch between firmware-reported and JS320-expected (16 MHz).
+        // This is what the buffer divides by decimate_factor to get the
+        // output sample rate the UI uses for the x-axis.
+        printf("         time_map.counter_rate=%.1f Hz (expected 16000000.0)\n",
+               s->tmap_counter_rate);
+        if (s->f32_total_count > 0U) {
+            printf("         f32 NaN count=%" PRIu64 " of %" PRIu64
+                   " samples (%.2f%%)\n",
+                   s->f32_nan_count, s->f32_total_count,
+                   100.0 * (double) s->f32_nan_count / (double) s->f32_total_count);
+            if (s->f32_nan_count != 0U) {
+                ok = false;
+            }
+        }
         if (!ok) {
             failures++;
         }

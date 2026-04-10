@@ -475,6 +475,10 @@ static void test_frame_combining_rate_budget(void ** state) {
     assert_int_equal(50, sig->element_count);
     assert_int_equal(0, sig->sample_id);
     assert_int_equal(JSDRV_FIELD_CURRENT, sig->field_id);
+    // JS320 sample_id increments at 16 MHz native; full-rate i/v/p
+    // is decimated 16:1 to 1 MHz, so decimate_factor must be 16.
+    assert_int_equal(16000000, sig->sample_rate);
+    assert_int_equal(16, sig->decimate_factor);
 }
 
 static void test_group_alignment_ivp(void ** state) {
