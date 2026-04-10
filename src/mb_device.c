@@ -1051,7 +1051,15 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
     if (!msg) {
         return false;
     }
-    JSDRV_LOGI("topic %s", msg->topic);
+    if ((msg->value.type >= JSDRV_UNION_U8) && (msg->value.type <= JSDRV_UNION_U64)) {
+        JSDRV_LOGI("topic %s = %" PRIu64, msg->topic, msg->value.value.u64);
+    } else if ((msg->value.type >= JSDRV_UNION_I8) && (msg->value.type <= JSDRV_UNION_I64)) {
+        JSDRV_LOGI("topic %s = %" PRIi64, msg->topic, msg->value.value.i64);
+    } else if ((msg->value.type == JSDRV_UNION_STR) || (msg->value.type == JSDRV_UNION_JSON)) {
+        JSDRV_LOGI("topic %s = %s", msg->topic, msg->value.value.str);
+    } else {
+        JSDRV_LOGI("topic %s = <bin>", msg->topic);
+    }
 
     const char * topic = prefix_match_and_strip(d->ll.prefix, msg->topic);
     if (msg->topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
