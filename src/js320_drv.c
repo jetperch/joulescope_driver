@@ -19,6 +19,7 @@
 #include "jsdrv/topic.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/cdef.h"
+#include "jsdrv_prv/dbc.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/js320_fwup.h"
 #include "jsdrv_prv/js320_jtag.h"
@@ -26,9 +27,106 @@
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/mb_drv.h"
 #include "jsdrv_prv/platform.h"
+#include "jsdrv_prv/sample_buffer_f32.h"
 #include "mb/comm/link.h"
+#include <inttypes.h>
 #include <string.h>
 
+
+#define JS320_PUB_RATE_DEFAULT (20U)         // Hz
+#define JS320_FS_DEFAULT       (1000000U)    // host-tracked rate, Hz
+#define JS320_CH_COUNT         (16U)
+#define JS320_NATIVE_RATE      (16000000U)   // device pre-decimation rate, Hz
+#define JS320_DECIMATE         (16U)         // device decimation factor
+// Headroom keeps room for one more incoming MB frame's worth of bytes.
+#define JS320_STREAM_PAYLOAD_FULL (JSDRV_STREAM_DATA_SIZE - JSDRV_STREAM_HEADER_SIZE - 1024U)
+
+// Default values for the device-side decimation knobs.  Must match the
+// firmware/gateware defaults in js320/firmware/fpga_mcu/src/app.c and
+// js320/gateware/source/regfile.v so that the host's runtime decimation
+// estimate matches the actual device output rate immediately after
+// open, before any user reconfiguration arrives.
+#define JS320_DEFAULT_SIGNAL_DWN_N (0U)      // 0 = passthrough (no extra i/v/p decimation)
+#define JS320_DEFAULT_GPI_DWN_MODE (2U)      // 0=off, 1=toggle, 2=first, 3=majority
+#define JS320_DEFAULT_GPI_DWN_N    (16U)     // gateware default factor
+
+enum js320_group_e {
+    JS320_GROUP_NONE = 0,
+    JS320_GROUP_IVP  = 1,   // channels 5, 6, 7  (current, voltage, power)
+    JS320_GROUP_GPIT = 2,   // channels 8..12    (gpi 0..3, trigger T)
+};
+
+// Per-channel static descriptor.  Used both for the buffered append path
+// (channels 5..12) and the one-shot send path (channels 0, 1, 2, 13).
+// data_topic == NULL means the channel is not handled by the table-driven
+// dispatch (statistics is special-cased; ch 2 range supplies its topic at
+// the call site because it depends on `source`; unused channels also use NULL).
+struct js320_port_def_s {
+    const char * data_topic;
+    const char * ctrl_topic;
+    uint8_t  field_id;        // JSDRV_FIELD_*
+    uint8_t  index;           // base index; ADC composes runtime index = base | source
+    uint8_t  element_type;    // JSDRV_DATA_TYPE_*
+    uint8_t  element_size_bits;
+    uint8_t  group;           // js320_group_e
+    uint8_t  samples_per_u32; // payload samples per device u32 word
+    uint32_t sample_rate;     // Hz, 0 for UART
+    uint32_t decimate_factor;
+};
+
+struct js320_port_s {
+    struct jsdrvp_msg_s * msg_in;     // in-progress accumulator (NULL if empty)
+    uint64_t sample_id_next;          // next expected sample_id
+    uint8_t  current_index;           // index assigned to msg_in (ADC/range may vary)
+    bool     enabled;                 // last-seen s/X/ctrl from frontend (used in step 4)
+};
+
+static const struct js320_port_def_s PORT_DEFS[JS320_CH_COUNT] = {
+    [0]  = { "s/adc/0/!data", "s/adc/0/ctrl", JSDRV_FIELD_RAW,     0x00, JSDRV_DATA_TYPE_INT,   32, JS320_GROUP_NONE, 1, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [1]  = { "s/adc/1/!data", "s/adc/1/ctrl", JSDRV_FIELD_RAW,     0x10, JSDRV_DATA_TYPE_INT,   32, JS320_GROUP_NONE, 1, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [2]  = { "s/i/range/!data", "s/i/range/ctrl", JSDRV_FIELD_RANGE,   0,    JSDRV_DATA_TYPE_UINT,   4, JS320_GROUP_NONE, 8, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [5]  = { "s/i/!data",     "s/i/ctrl",     JSDRV_FIELD_CURRENT, 0,    JSDRV_DATA_TYPE_FLOAT, 32, JS320_GROUP_IVP,  1, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [6]  = { "s/v/!data",     "s/v/ctrl",     JSDRV_FIELD_VOLTAGE, 0,    JSDRV_DATA_TYPE_FLOAT, 32, JS320_GROUP_IVP,  1, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [7]  = { "s/p/!data",     "s/p/ctrl",     JSDRV_FIELD_POWER,   0,    JSDRV_DATA_TYPE_FLOAT, 32, JS320_GROUP_IVP,  1, JS320_NATIVE_RATE, JS320_DECIMATE },
+    // GPI / trigger pass through the configurable gpi_decimate module
+    // (decimateN_digital).  The PORT_DEFS decimate_factor is the firmware
+    // default (mode=2 "first", N=16, output 1 MHz).  The runtime
+    // decimation is recomputed from s/gpi/+/dwnN/{mode,N} via
+    // js320_runtime_decimate() and applied at flush time and in the
+    // emitted jsdrv_stream_signal_s.decimate_factor field.
+    [8]  = { "s/gpi/0/!data", "s/gpi/0/ctrl", JSDRV_FIELD_GPI,     0,    JSDRV_DATA_TYPE_UINT,   1, JS320_GROUP_GPIT, 32, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [9]  = { "s/gpi/1/!data", "s/gpi/1/ctrl", JSDRV_FIELD_GPI,     1,    JSDRV_DATA_TYPE_UINT,   1, JS320_GROUP_GPIT, 32, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [10] = { "s/gpi/2/!data", "s/gpi/2/ctrl", JSDRV_FIELD_GPI,     2,    JSDRV_DATA_TYPE_UINT,   1, JS320_GROUP_GPIT, 32, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [11] = { "s/gpi/3/!data", "s/gpi/3/ctrl", JSDRV_FIELD_GPI,     3,    JSDRV_DATA_TYPE_UINT,   1, JS320_GROUP_GPIT, 32, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [12] = { "s/gpi/7/!data", "s/gpi/7/ctrl", JSDRV_FIELD_GPI,     7,    JSDRV_DATA_TYPE_UINT,   1, JS320_GROUP_GPIT, 32, JS320_NATIVE_RATE, JS320_DECIMATE },
+    [13] = { "s/uart/!data",  NULL,           JSDRV_FIELD_UART,    0,    JSDRV_DATA_TYPE_UINT,   8, JS320_GROUP_NONE, 4, 0,                 1 },
+    // ch 3, 4, 14, 15 unused (data_topic NULL); 14 (statistics) is dispatched separately.
+};
+
+static const char * js320_publish_rate_meta = "{"
+    "\"dtype\": \"u32\","
+    "\"brief\": \"The approximate sample publish frequency.\","
+    "\"default\": 20,"
+    "\"options\": ["
+        "[10000, \"10 kHz\"],"
+        "[5000, \"5 kHz\"],"
+        "[2000, \"2 kHz\"],"
+        "[1000, \"1 kHz\"],"
+        "[500, \"500 Hz\"],"
+        "[200, \"200 Hz\"],"
+        "[100, \"100 Hz\"],"
+        "[50, \"50 Hz\"],"
+        "[20, \"20 Hz\"],"
+        "[10, \"10 Hz\"],"
+        "[5, \"5 Hz\"],"
+        "[2, \"2 Hz\"],"
+        "[1, \"1 Hz\"]"
+    "]"
+"}";
+
+// Sentinel for last_sent_ctrl entries that have never been forwarded.
+// Picked outside the [0, 1] range so the first reconcile always sends.
+#define JS320_CTRL_UNKNOWN (0xFFU)
 
 struct js320_drv_s {
     struct jsdrvp_mb_drv_s drv;  // MUST BE FIRST
@@ -38,35 +136,411 @@ struct js320_drv_s {
     struct js320_fwup_s * fwup;
     double i_scale;
     double v_scale;
+    uint32_t fs;            // host-tracked sample rate, Hz
+    uint32_t publish_rate;  // h/fp, Hz
+    struct js320_port_s ports[JS320_CH_COUNT];
+
+    // Tracked device-side decimation knobs.  These are intercepted from
+    // the frontend in handle_cmd, stored, then forwarded to the device
+    // (mb_device.c default forwarding) so the gateware sees the new
+    // values.  The host uses them to compute the runtime effective
+    // decimation factor for each port.
+    uint32_t signal_dwn_n;  // s/dwnN/N: extra i/v/p decimation atop the static 1 MHz output (0 or 1 = passthrough)
+    uint32_t gpi_dwn_mode;  // s/gpi/+/dwnN/mode: 0=off, 1=toggle, 2=first, 3=majority
+    uint32_t gpi_dwn_n;     // s/gpi/+/dwnN/N: GPI decimation factor (mode!=0)
+
+    // Smart-power compute state.  When all three of i/v/p are enabled
+    // at fs >= 1 MSPS, the device is told to stop streaming p (`s/p/ctrl=0`)
+    // and the host multiplies i*v on each i/v frame arrival.  At lower
+    // rates or when fewer than three are enabled, the device streams
+    // power directly.
+    struct sbuf_f32_s i_buf;
+    struct sbuf_f32_s v_buf;
+    struct sbuf_f32_s p_buf;
+    bool     power_compute_on_host;
+    uint8_t  last_sent_ctrl[JS320_CH_COUNT];  // last enable forwarded to device
 };
 
 // --- Streaming signal helpers ---
 
-static void signal_adc(struct jsdrv_stream_signal_s * signal) {
-    signal->field_id = JSDRV_FIELD_RAW;
-    signal->index = 0;
-    signal->element_type = JSDRV_DATA_TYPE_INT;
-    signal->element_size_bits = 32;
-    signal->sample_rate = 16000000;  // 16 MHz
-    signal->decimate_factor = 16;    // to 1 MHz
+// Map the s/dwnN/N register value to the actual extra decimation factor
+// applied by gateware/source/decimate.v on top of the 1 MHz signal rate.
+//   N=0 or 1: passthrough (factor 1)
+//   N=2 or 3: factor 2 (gateware clamps 3 to 2)
+//   N=4..1000: factor N
+static inline uint32_t js320_signal_extra_factor(uint32_t n) {
+    if (n <= 1U) {
+        return 1U;
+    }
+    if (n == 3U) {
+        return 2U;
+    }
+    return n;
 }
 
-static void signal_float(struct jsdrv_stream_signal_s * signal, uint8_t field_id) {
-    signal->field_id = field_id;
-    signal->index = 0;
-    signal->element_type = JSDRV_DATA_TYPE_FLOAT;
-    signal->element_size_bits = 32;
-    signal->sample_rate = 16000000;  // 16 MHz
-    signal->decimate_factor = 16;    // to 1 MHz
+// Map (mode, N) for the gateware/source/decimateN_digital.v gpi_decimate
+// instance to the actual decimation factor applied to the 16 MHz native
+// GPI sample stream.
+//   mode=0 OR N<=1: passthrough (factor 1, output @ 16 MHz)
+//   else: factor N
+static inline uint32_t js320_gpi_factor(uint32_t mode, uint32_t n) {
+    if ((mode == 0U) || (n <= 1U)) {
+        return 1U;
+    }
+    return n;
 }
 
-static void signal_gpi(struct jsdrv_stream_signal_s * signal, uint8_t channel) {
-    signal->field_id = JSDRV_FIELD_GPI;
-    signal->index = channel;
-    signal->element_type = JSDRV_DATA_TYPE_UINT;
-    signal->element_size_bits = 1;
-    signal->sample_rate = 16000000;  // 16 MHz
-    signal->decimate_factor = 16;    // to 1 MHz
+// Compute the runtime decimation factor for a given channel: the number
+// of native 16 MHz sample_id ticks per output sample, accounting for any
+// dynamic dwnN/N or gpi/+/dwnN/{mode,N} the user has set.
+static uint32_t js320_runtime_decimate(struct js320_drv_s * self, uint8_t ch) {
+    const struct js320_port_def_s * def = &PORT_DEFS[ch];
+    if ((def->field_id == JSDRV_FIELD_CURRENT)
+            || (def->field_id == JSDRV_FIELD_VOLTAGE)
+            || (def->field_id == JSDRV_FIELD_POWER)) {
+        // i/v/p: 16 (static, 16 MHz -> 1 MHz) * extra dwnN factor
+        return JS320_DECIMATE * js320_signal_extra_factor(self->signal_dwn_n);
+    }
+    if (def->field_id == JSDRV_FIELD_GPI) {
+        // GPI: gpi_decimate runs at 16 MHz native; effective factor = N (or 1 if mode=0)
+        return js320_gpi_factor(self->gpi_dwn_mode, self->gpi_dwn_n);
+    }
+    return def->decimate_factor ? def->decimate_factor : 1U;
+}
+
+// Initialize the in-memory header of a fresh stream signal message.
+// `decimate_runtime` is the actual sample_id ticks per output sample at
+// the moment of allocation (may differ from def->decimate_factor when
+// the user has reconfigured s/dwnN/N or s/gpi/+/dwnN/{mode,N}).
+static void js320_signal_init(struct jsdrv_stream_signal_s * signal,
+                              const struct js320_port_def_s * def,
+                              uint8_t index,
+                              uint64_t sample_id,
+                              uint32_t decimate_runtime) {
+    signal->sample_id = sample_id;
+    signal->field_id = def->field_id;
+    signal->index = index;
+    signal->element_type = def->element_type;
+    signal->element_size_bits = def->element_size_bits;
+    signal->element_count = 0;
+    signal->sample_rate = def->sample_rate;
+    signal->decimate_factor = decimate_runtime;
+}
+
+// Allocate a fresh stream-data message and initialize header + topic + time map.
+// Caller appends sample bytes after `m->value.value.bin[m->value.size]` and
+// bumps `m->value.size` and `signal->element_count`.
+static struct jsdrvp_msg_s * js320_stream_msg_alloc(struct jsdrvp_mb_dev_s * dev,
+                                                    const struct js320_port_def_s * def,
+                                                    const char * data_topic_override,
+                                                    uint8_t index,
+                                                    uint64_t sample_id,
+                                                    uint32_t decimate_runtime) {
+    struct jsdrv_context_s * context = jsdrvp_mb_dev_context(dev);
+    const char * prefix = jsdrvp_mb_dev_prefix(dev);
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_data(context, "");
+
+    m->value.type = JSDRV_UNION_BIN;
+    m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
+    m->value.value.bin = m->payload.bin;
+    m->value.size = JSDRV_STREAM_HEADER_SIZE;
+
+    struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) m->payload.bin;
+    js320_signal_init(signal, def, index, sample_id, decimate_runtime);
+
+    // Lazy-init: until the sensor's timesync converges, seed the device
+    // time_map with host UTC + the current sample_id and the signal's
+    // native sample rate.  Mirrors JS220 behavior in
+    // js220_usb.c::time_map_update().  After the first s/ts/!map arrives,
+    // mb_device.c::handle_in_timesync_map() refines the values.
+    struct jsdrv_time_map_s * mtmap = jsdrvp_mb_dev_time_map_mut(dev);
+    if (mtmap->offset_time == 0) {
+        mtmap->offset_time = jsdrv_time_utc();
+        mtmap->offset_counter = sample_id;
+        mtmap->counter_rate = (def->sample_rate > 0) ? (double) def->sample_rate : 1.0;
+    }
+    signal->time_map = *mtmap;
+
+    const char * dt = data_topic_override ? data_topic_override : def->data_topic;
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, prefix);
+    jsdrv_topic_append(&topic, dt);
+    jsdrv_cstr_copy(m->topic, topic.topic, sizeof(m->topic));
+
+    return m;
+}
+
+// Send the accumulated message and clear the slot.
+static void js320_port_flush(struct js320_drv_s * self,
+                             struct jsdrvp_mb_dev_s * dev,
+                             uint8_t ch) {
+    struct js320_port_s * port = &self->ports[ch];
+    if (port->msg_in == NULL) {
+        return;
+    }
+    struct jsdrvp_msg_s * m = port->msg_in;
+    port->msg_in = NULL;
+    jsdrvp_mb_dev_backend_send(dev, m);
+}
+
+// Flush every port that belongs to the given group and has pending samples.
+// Used to align like-typed signals (i/v/p; gpi 0..3 + trigger T) so the
+// frontend receives coherent multi-signal updates.
+static void js320_group_flush(struct js320_drv_s * self,
+                              struct jsdrvp_mb_dev_s * dev,
+                              uint8_t group) {
+    if (group == JS320_GROUP_NONE) {
+        return;
+    }
+    for (uint8_t ch = 0; ch < JS320_CH_COUNT; ++ch) {
+        if ((PORT_DEFS[ch].group == group) && (self->ports[ch].msg_in != NULL)) {
+            js320_port_flush(self, dev, ch);
+        }
+    }
+}
+
+// Append `sample_count` samples to the per-port accumulator.  Allocates
+// the accumulator on first use.  If a sample_id discontinuity is detected
+// versus the previous accumulation, the partial message is flushed first
+// and a fresh accumulator starts at the new sample_id.  Does NOT evaluate
+// flush conditions — that is `js320_port_evaluate_flush`'s job.
+static void js320_port_append(struct js320_drv_s * self,
+                              struct jsdrvp_mb_dev_s * dev,
+                              uint8_t ch,
+                              uint8_t index,
+                              const char * data_topic_override,
+                              uint64_t sample_id,
+                              const void * data,
+                              uint32_t sample_count) {
+    const struct js320_port_def_s * def = &PORT_DEFS[ch];
+    struct js320_port_s * port = &self->ports[ch];
+
+    // Discontinuity check: if the existing accumulator does not line up
+    // with the new frame's sample_id (or the index changed for ADC/range),
+    // send what we have and start fresh.
+    if (port->msg_in != NULL) {
+        if (sample_id != port->sample_id_next) {
+            JSDRV_LOGI("ch %u sample_id skip: expected=%" PRIu64 " received=%" PRIu64,
+                       (unsigned) ch, port->sample_id_next, sample_id);
+            js320_port_flush(self, dev, ch);
+        } else if (index != port->current_index) {
+            js320_port_flush(self, dev, ch);
+        }
+    }
+
+    uint32_t decimate_runtime = js320_runtime_decimate(self, ch);
+    if (decimate_runtime == 0U) {
+        decimate_runtime = 1U;
+    }
+
+    if (port->msg_in == NULL) {
+        port->msg_in = js320_stream_msg_alloc(dev, def, data_topic_override,
+                                              index, sample_id, decimate_runtime);
+        port->sample_id_next = sample_id;
+        port->current_index = index;
+    }
+
+    struct jsdrvp_msg_s * m = port->msg_in;
+    struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) m->payload.bin;
+
+    uint32_t bit_count = sample_count * (uint32_t) def->element_size_bits;
+    uint32_t byte_count = (bit_count + 7U) / 8U;
+    JSDRV_ASSERT((m->value.size + byte_count) <= sizeof(struct jsdrv_stream_signal_s));
+
+    uint8_t * dst = (uint8_t *) &m->value.value.bin[m->value.size];
+    memcpy(dst, data, byte_count);
+    m->value.size += byte_count;
+    signal->element_count += sample_count;
+    // sample_id is at the device native rate; each output sample
+    // represents `decimate_runtime` sample_id ticks.
+    port->sample_id_next = sample_id + (uint64_t) sample_count * (uint64_t) decimate_runtime;
+}
+
+// Decide whether to flush the named port (and possibly its whole group)
+// based on payload-full safety valve and rate-budget thresholds.  Async
+// channels (sample_rate=0, i.e. UART) flush per frame.  Grouped channels
+// trigger a whole-group flush on rate-budget; non-grouped channels flush
+// individually.
+static void js320_port_evaluate_flush(struct js320_drv_s * self,
+                                      struct jsdrvp_mb_dev_s * dev,
+                                      uint8_t ch) {
+    const struct js320_port_def_s * def = &PORT_DEFS[ch];
+    struct js320_port_s * port = &self->ports[ch];
+    if (port->msg_in == NULL) {
+        return;
+    }
+
+    // Async channel: no rate budget, flush every frame.
+    if (def->sample_rate == 0U) {
+        js320_port_flush(self, dev, ch);
+        return;
+    }
+
+    struct jsdrv_stream_signal_s * signal =
+        (struct jsdrv_stream_signal_s *) port->msg_in->payload.bin;
+
+    // Payload-full safety valve (single port).
+    uint32_t byte_count = ((uint32_t) signal->element_count
+                           * (uint32_t) def->element_size_bits + 7U) / 8U;
+    if (byte_count >= JS320_STREAM_PAYLOAD_FULL) {
+        js320_port_flush(self, dev, ch);
+        return;
+    }
+
+    // Rate-budget flush.  Use the runtime decimation so that user-driven
+    // dwnN/N or gpi/+/dwnN/{mode,N} changes immediately retarget the
+    // element_count_max threshold.  Whole-group flush for grouped
+    // signals so current/voltage/power and gpi 0..3+T are delivered
+    // coherently.
+    uint32_t decimate_runtime = js320_runtime_decimate(self, ch);
+    if (decimate_runtime == 0U) {
+        decimate_runtime = 1U;
+    }
+    uint32_t effective_rate = def->sample_rate / decimate_runtime;
+    uint32_t pub_rate = self->publish_rate ? self->publish_rate : 1U;
+    uint32_t element_count_max = effective_rate / pub_rate;
+    if (element_count_max < 1U) {
+        element_count_max = 1U;
+    }
+    if (signal->element_count >= element_count_max) {
+        if (def->group != JS320_GROUP_NONE) {
+            js320_group_flush(self, dev, def->group);
+        } else {
+            js320_port_flush(self, dev, ch);
+        }
+    }
+}
+
+// --- Smart power computation ---
+
+// Reset a single port's accumulator state.  Used when a stream ctrl
+// flips, fs changes, or any other event invalidates in-flight samples.
+static void js320_port_reset(struct js320_drv_s * self,
+                             struct jsdrvp_mb_dev_s * dev,
+                             uint8_t ch) {
+    struct js320_port_s * port = &self->ports[ch];
+    if (port->msg_in != NULL) {
+        struct jsdrv_context_s * context = jsdrvp_mb_dev_context(dev);
+        jsdrvp_msg_free(context, port->msg_in);
+        port->msg_in = NULL;
+    }
+    port->sample_id_next = 0;
+    port->current_index = 0;
+}
+
+// Initialize the host-side i/v/p compute buffers.  sbuf_f32_clear sets
+// sample_id_decimate to 2 (a JS220 default); JS320 must override to its
+// own native-rate / output-rate ratio so sbuf_f32_add and sbuf_f32_mult
+// step the sample_id by the right amount per buffered sample.
+static void js320_sbufs_clear(struct js320_drv_s * self) {
+    sbuf_f32_clear(&self->i_buf);
+    sbuf_f32_clear(&self->v_buf);
+    sbuf_f32_clear(&self->p_buf);
+    self->i_buf.sample_id_decimate = (uint8_t) JS320_DECIMATE;
+    self->v_buf.sample_id_decimate = (uint8_t) JS320_DECIMATE;
+    self->p_buf.sample_id_decimate = (uint8_t) JS320_DECIMATE;
+}
+
+// Pure decision: given (fs, ports[5/6/7].enabled), compute the desired
+// device-side enables for s/i, s/v, s/p and whether the host should
+// multiply i*v locally.  Diff against the last-sent cache and forward
+// only the differences.  Called from the s/X/ctrl handlers and the
+// h/fs handler.
+static void js320_reconcile_power(struct js320_drv_s * self,
+                                  struct jsdrvp_mb_dev_s * dev) {
+    bool i_en = self->ports[5].enabled;
+    bool v_en = self->ports[6].enabled;
+    bool p_en = self->ports[7].enabled;
+
+    bool want_i_dev = i_en;
+    bool want_v_dev = v_en;
+    bool want_p_dev = p_en;
+    bool host_compute = false;
+    if ((self->fs >= JS320_FS_DEFAULT) && i_en && v_en && p_en) {
+        // All three at full rate: stream i and v from device, multiply on host.
+        want_p_dev = false;
+        host_compute = true;
+    }
+
+    // If the host-compute flag is changing, drop any stale i/v/p buffers
+    // so the next mult starts at the new sample_id watermark.
+    if (host_compute != self->power_compute_on_host) {
+        js320_sbufs_clear(self);
+        self->power_compute_on_host = host_compute;
+    }
+
+    static const uint8_t IVP_CHANS[3] = {5U, 6U, 7U};
+    const bool wants[3] = {want_i_dev, want_v_dev, want_p_dev};
+    for (uint32_t k = 0U; k < 3U; ++k) {
+        uint8_t ch = IVP_CHANS[k];
+        uint8_t want_u8 = wants[k] ? 1U : 0U;
+        if (self->last_sent_ctrl[ch] != want_u8) {
+            self->last_sent_ctrl[ch] = want_u8;
+            jsdrvp_mb_dev_publish_to_device(dev, PORT_DEFS[ch].ctrl_topic,
+                &jsdrv_union_u32_r((uint32_t) want_u8));
+        }
+    }
+}
+
+// Multiply the overlapping i and v sample buffers and inject the result
+// into the ch 7 (power) accumulator pipeline.  No-op when the host is
+// not in compute mode or when there is no overlap to consume.
+static void js320_compute_power(struct js320_drv_s * self,
+                                struct jsdrvp_mb_dev_s * dev) {
+    if (!self->power_compute_on_host) {
+        return;
+    }
+    sbuf_f32_mult(&self->p_buf, &self->i_buf, &self->v_buf);
+    uint32_t n = sbuf_f32_length(&self->p_buf);
+    if (n == 0U) {
+        return;
+    }
+    // sbuf_f32_mult fills p_buf starting at index 0 (head=n, tail=0 after
+    // its internal clear); the buffer is contiguous and the new product
+    // samples occupy [0..n).  Compute the u64 starting sample_id from
+    // the post-mult head_sample_id minus the count.
+    uint64_t end = self->p_buf.head_sample_id;
+    uint64_t start = end - (uint64_t) n * (uint64_t) self->p_buf.sample_id_decimate;
+
+    js320_port_append(self, dev, /*ch=*/7U, /*index=*/0U, /*topic_override=*/NULL,
+                      start, &self->p_buf.buffer[0], n);
+    js320_port_evaluate_flush(self, dev, /*ch=*/7U);
+}
+
+// Update the cached enable for one of s/i, s/v, s/p in response to a
+// frontend command and re-reconcile.  Returns the rc to send back.
+// The s/X/ctrl topic is NOT forwarded directly — reconcile_power decides
+// what to forward to the device, which may differ from the user's request
+// (e.g. user said "enable power" but at fs=1 MHz with i and v already on,
+// we forward s/p/ctrl=0 instead and synthesize p on host).
+static int32_t js320_handle_stream_ctrl(struct js320_drv_s * self,
+                                        struct jsdrvp_mb_dev_s * dev,
+                                        uint8_t ch,
+                                        const struct jsdrv_union_s * value) {
+    struct jsdrv_union_s v = *value;
+    int32_t rc = jsdrv_union_as_type(&v, JSDRV_UNION_U32);
+    if (0 != rc) {
+        return rc;
+    }
+    bool enable = (v.value.u32 != 0U);
+    self->ports[ch].enabled = enable;
+
+    // Reset the accumulator either way: enabling clears any stale state,
+    // disabling drops in-flight samples that would no longer be wanted.
+    js320_port_reset(self, dev, ch);
+    if (ch == 5U) {
+        sbuf_f32_clear(&self->i_buf);
+        self->i_buf.sample_id_decimate = (uint8_t) JS320_DECIMATE;
+    } else if (ch == 6U) {
+        sbuf_f32_clear(&self->v_buf);
+        self->v_buf.sample_id_decimate = (uint8_t) JS320_DECIMATE;
+    } else if (ch == 7U) {
+        sbuf_f32_clear(&self->p_buf);
+        self->p_buf.sample_id_decimate = (uint8_t) JS320_DECIMATE;
+    }
+
+    js320_reconcile_power(self, dev);
+    return 0;
 }
 
 // --- Driver callbacks ---
@@ -78,13 +552,27 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
     self->identity = identity;
     js320_jtag_on_open(self->jtag, dev);
     js320_fwup_on_open(self->fwup, dev);
+    jsdrvp_mb_dev_send_to_frontend(dev, "h/fp$",
+        &jsdrv_union_cjson_r(js320_publish_rate_meta));
     JSDRV_LOGI("JS320 driver opened: vendor=0x%04x product=0x%04x",
                identity->vendor_id, identity->product_id);
 }
 
 static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
-    (void) dev;
+    // Drop any in-flight per-port accumulators so we don't leak the
+    // underlying messages back to the free list with stale state.
+    for (uint8_t ch = 0U; ch < JS320_CH_COUNT; ++ch) {
+        js320_port_reset(self, dev, ch);
+    }
+    js320_sbufs_clear(self);
+    self->power_compute_on_host = false;
+    self->signal_dwn_n = JS320_DEFAULT_SIGNAL_DWN_N;
+    self->gpi_dwn_mode = JS320_DEFAULT_GPI_DWN_MODE;
+    self->gpi_dwn_n = JS320_DEFAULT_GPI_DWN_N;
+    for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
+        self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
+    }
     js320_fwup_on_close(self->fwup);
     js320_jtag_on_close(self->jtag);
     self->dev = NULL;
@@ -151,8 +639,8 @@ static void js320_handle_statistics(struct js320_drv_s * self,
 static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
                               uint16_t metadata, const uint32_t * data, uint8_t length) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
-    uint8_t channel = metadata & 0x000fU;
-    uint8_t source = (metadata >> 4) & 0x000fU;
+    uint8_t channel = (uint8_t) (metadata & 0x000fU);
+    uint8_t source = (uint8_t) ((metadata >> 4) & 0x000fU);
 
     if (channel == 14) {
         js320_handle_statistics(self, dev, data, length);
@@ -164,140 +652,106 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
         return;
     }
 
-    // Determine subtopic before allocating message
-    const char * subtopic = NULL;
-    switch (channel) {
-        case 0:  subtopic = "s/adc/0/!data"; break;
-        case 1:  subtopic = "s/adc/1/!data"; break;
-        case 2:
-            if (source > 1) {
-                JSDRV_LOGW("unsupported source for range channel: %d", source);
-            } else {
-                subtopic = source ? "s/v/range/!data" : "s/i/range/!data";
-            }
-            break;
-        case 5:  subtopic = "s/i/!data"; break;
-        case 6:  subtopic = "s/v/!data"; break;
-        case 7:  subtopic = "s/p/!data"; break;
-        case 8:  subtopic = "s/gpi/0/!data"; break;
-        case 9:  subtopic = "s/gpi/1/!data"; break;
-        case 10: subtopic = "s/gpi/2/!data"; break;
-        case 11: subtopic = "s/gpi/3/!data"; break;
-        case 12: subtopic = "s/gpi/7/!data"; break;
-        case 13: subtopic = "s/uart/!data"; break;
-        default: break;
+    if (channel >= JS320_CH_COUNT) {
+        JSDRV_LOGW("unsupported app channel: %d", channel);
+        return;
     }
-    if (NULL == subtopic) {
+    const struct js320_port_def_s * def = &PORT_DEFS[channel];
+    if (def->data_topic == NULL) {
         JSDRV_LOGW("unsupported app channel: %d", channel);
         return;
     }
 
-    struct jsdrv_context_s * context = jsdrvp_mb_dev_context(dev);
-    const char * prefix = jsdrvp_mb_dev_prefix(dev);
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(context);
-
-    // process value
-    m->value.type = JSDRV_UNION_BIN;
-    m->value.app = JSDRV_PAYLOAD_TYPE_STREAM;
-    m->value.value.bin = m->payload.bin;
-    struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) m->payload.bin;
-    signal->sample_id = *((const uint64_t *) data);
-    data += 2;
-    uint32_t length_u32 = (length - 2);  // sample_id is 8 bytes
-    m->value.size = length_u32 << 2;
-    signal->element_count = length_u32;
-
-    // Configure signal fields based on channel
-    switch (channel) {
-        case 0:
-            signal_adc(signal);
-            signal->index = 0x00 | source;
-            signal->element_count = length_u32;
-            break;
-        case 1:
-            signal_adc(signal);
-            signal->index = 0x10 | source;
-            signal->element_count = length_u32;
-            break;
-        case 2:
-            signal->field_id = JSDRV_FIELD_RANGE;
-            signal->index = source;
-            signal->element_type = JSDRV_DATA_TYPE_UINT;
-            signal->element_size_bits = 4;
-            signal->element_count *= 8;  // nibbles (32 / 4)
-            signal->sample_rate = 16000000;  // 16 MHz
-            signal->decimate_factor = 16;    // to 1 MHz
-            break;
-        case 5:
-            signal_float(signal, JSDRV_FIELD_CURRENT);
-            break;
-        case 6:
-            signal_float(signal, JSDRV_FIELD_VOLTAGE);
-            break;
-        case 7:
-            signal_float(signal, JSDRV_FIELD_POWER);
-            break;
-        case 8:
-            signal_gpi(signal, 0);
-            signal->element_count *= 32;
-            break;
-        case 9:
-            signal_gpi(signal, 1);
-            signal->element_count *= 32;
-            break;
-        case 10:
-            signal_gpi(signal, 2);
-            signal->element_count *= 32;
-            break;
-        case 11:
-            signal_gpi(signal, 3);
-            signal->element_count *= 32;
-            break;
-        case 12:
-            signal_gpi(signal, 7);
-            signal->element_count *= 32;
-            break;
-        case 13:
-            signal->field_id = JSDRV_FIELD_UART;
-            signal->index = 0;
-            signal->element_type = JSDRV_DATA_TYPE_UINT;
-            signal->element_size_bits = 8;
-            signal->element_count *= 4;
-            signal->sample_rate = 0;
-            signal->decimate_factor = 1;
-            break;
-        default:
-            break;  // unreachable (validated above)
+    // Determine effective topic + index.  Most channels read the table
+    // directly; ADC composes index = base | source, range maps source to
+    // i/v sub-topic.
+    const char * topic_override = NULL;
+    uint8_t index = def->index;
+    if (channel == 0 || channel == 1) {
+        index = (uint8_t) (def->index | source);
+    } else if (channel == 2) {
+        if (source > 1) {
+            JSDRV_LOGW("unsupported source for range channel: %d", source);
+            return;
+        }
+        topic_override = source ? "s/v/range/!data" : "s/i/range/!data";
+        index = source;
     }
 
-    // Lazy-init: until the sensor's timesync converges, seed the device
-    // time_map with host UTC + the current sample_id and the signal's
-    // native sample rate.  Mirrors JS220 behavior in
-    // js220_usb.c::time_map_update().  After the first s/ts/!map arrives,
-    // mb_device.c::handle_in_timesync_map() refines the values.
-    struct jsdrv_time_map_s * mtmap = jsdrvp_mb_dev_time_map_mut(dev);
-    if (mtmap->offset_time == 0) {
-        mtmap->offset_time = jsdrv_time_utc();
-        mtmap->offset_counter = signal->sample_id;
-        mtmap->counter_rate = (double) signal->sample_rate;
+    // Parse 64-bit sample_id from the first two u32 words.
+    uint64_t sample_id = *((const uint64_t *) data);
+    const uint32_t * payload_u32 = data + 2;
+    uint32_t length_u32 = (uint32_t) (length - 2);
+    uint32_t sample_count = length_u32 * (uint32_t) def->samples_per_u32;
+
+    // Smart-power: drop device-originated power frames while host is
+    // computing power locally.  We forwarded s/p/ctrl=0 to the device
+    // already, but be defensive against in-flight frames.
+    if ((channel == 7U) && self->power_compute_on_host) {
+        return;
     }
-    signal->time_map = *mtmap;
 
-    // process topic
-    struct jsdrv_topic_s topic;
-    jsdrv_topic_set(&topic, prefix);
-    jsdrv_topic_append(&topic, subtopic);
-    jsdrv_cstr_copy(m->topic, topic.topic, sizeof(m->topic));
+    // Smart-power: feed i and v samples into the host-side compute buffers
+    // before appending to the per-port accumulator, so the synthesized
+    // power samples can join the same group flush boundary.  Skip the
+    // sbuf when host compute is disabled to avoid unnecessary copies.
+    if (self->power_compute_on_host && ((channel == 5U) || (channel == 6U))) {
+        struct sbuf_f32_s * sbuf = (channel == 5U) ? &self->i_buf : &self->v_buf;
+        sbuf_f32_add(sbuf, sample_id, (float *) payload_u32, sample_count);
+    }
 
-    memcpy(signal->data, data, m->value.size);
-    jsdrvp_mb_dev_backend_send(dev, m);
+    js320_port_append(self, dev, channel, index, topic_override,
+                      sample_id, payload_u32, sample_count);
+    js320_port_evaluate_flush(self, dev, channel);
+
+    if (self->power_compute_on_host && ((channel == 5U) || (channel == 6U))) {
+        js320_compute_power(self, dev);
+    }
 }
 
 static bool handle_cmd(struct js320_drv_s * self,
+                            struct jsdrvp_mb_dev_s * dev,
                             const char * subtopic,
                             const struct jsdrv_union_s * value) {
-    if (0 == strcmp(subtopic, "h/fs")) {
-        return true;  // todo
+    if (0 == strcmp(subtopic, "s/i/ctrl")) {
+        int32_t rc = js320_handle_stream_ctrl(self, dev, /*ch=*/5U, value);
+        jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
+        return true;
+    } else if (0 == strcmp(subtopic, "s/v/ctrl")) {
+        int32_t rc = js320_handle_stream_ctrl(self, dev, /*ch=*/6U, value);
+        jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
+        return true;
+    } else if (0 == strcmp(subtopic, "s/p/ctrl")) {
+        int32_t rc = js320_handle_stream_ctrl(self, dev, /*ch=*/7U, value);
+        jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
+        return true;
+    } else if (0 == strcmp(subtopic, "h/fs")) {
+        struct jsdrv_union_s v = *value;
+        int32_t rc = jsdrv_union_as_type(&v, JSDRV_UNION_U32);
+        if (0 == rc) {
+            self->fs = v.value.u32;
+            // Rate change invalidates in-flight i/v/p compute state and
+            // changes the smart-power decision.  Reset and reconcile.
+            for (uint8_t ch = 5U; ch <= 7U; ++ch) {
+                js320_port_reset(self, dev, ch);
+            }
+            js320_sbufs_clear(self);
+            js320_reconcile_power(self, dev);
+        }
+        jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
+        return true;
+    } else if (0 == strcmp(subtopic, "h/fp")) {
+        struct jsdrv_union_s v = *value;
+        int32_t rc = jsdrv_union_as_type(&v, JSDRV_UNION_U32);
+        if (0 == rc) {
+            uint32_t fp = v.value.u32;
+            if (fp < 1) {
+                fp = 1;  // avoid div-by-zero in element_count_max
+            }
+            self->publish_rate = fp;
+        }
+        jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
+        return true;
     } else if (0 == strcmp(subtopic, "h/i_scale")) {
         if (value->type == JSDRV_UNION_F64) {
             self->i_scale = value->value.f64;
@@ -312,6 +766,41 @@ static bool handle_cmd(struct js320_drv_s * self,
             self->v_scale = (double) value->value.f32;
         }
         return true;
+    } else if (0 == strcmp(subtopic, "s/dwnN/N")) {
+        // Track the device-side i/v/p decimation factor.  Reset only the
+        // i/v/p ports + sbufs (the device's accumulator restarts at this
+        // point).  Return false so mb_device's default forwarding sends
+        // the new value to the device.
+        struct jsdrv_union_s v = *value;
+        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+            self->signal_dwn_n = v.value.u32;
+            for (uint8_t ch = 5U; ch <= 7U; ++ch) {
+                js320_port_reset(self, dev, ch);
+            }
+            js320_sbufs_clear(self);
+        }
+        return false;
+    } else if (0 == strcmp(subtopic, "s/gpi/+/dwnN/mode")) {
+        // Track the GPI decimation mode (0=off, 1=toggle, 2=first,
+        // 3=majority).  Reset all GPI ports since the rate just changed.
+        struct jsdrv_union_s v = *value;
+        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+            self->gpi_dwn_mode = v.value.u32;
+            for (uint8_t ch = 8U; ch <= 12U; ++ch) {
+                js320_port_reset(self, dev, ch);
+            }
+        }
+        return false;
+    } else if (0 == strcmp(subtopic, "s/gpi/+/dwnN/N")) {
+        // Track the GPI decimation factor.  Reset all GPI ports.
+        struct jsdrv_union_s v = *value;
+        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+            self->gpi_dwn_n = v.value.u32;
+            for (uint8_t ch = 8U; ch <= 12U; ++ch) {
+                js320_port_reset(self, dev, ch);
+            }
+        }
+        return false;
     } else {
         return false;
     }
@@ -321,9 +810,8 @@ static bool handle_cmd(struct js320_drv_s * self,
 static bool js320_handle_cmd(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
                               const char * subtopic, const struct jsdrv_union_s * value) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
-    (void) dev;
     return (false
-        || handle_cmd(self, subtopic, value)
+        || handle_cmd(self, dev, subtopic, value)
         || js320_fwup_handle_cmd(self->fwup, subtopic, value)
         || js320_jtag_handle_cmd(self->jtag, subtopic, value)
     );
@@ -363,6 +851,15 @@ static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     struct js320_drv_s * self = jsdrv_alloc_clr(sizeof(struct js320_drv_s));
     self->i_scale = 1.0;
     self->v_scale = 1.0;
+    self->fs = JS320_FS_DEFAULT;
+    self->publish_rate = JS320_PUB_RATE_DEFAULT;
+    self->signal_dwn_n = JS320_DEFAULT_SIGNAL_DWN_N;
+    self->gpi_dwn_mode = JS320_DEFAULT_GPI_DWN_MODE;
+    self->gpi_dwn_n = JS320_DEFAULT_GPI_DWN_N;
+    js320_sbufs_clear(self);
+    for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
+        self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
+    }
     self->jtag = js320_jtag_alloc();
     self->fwup = js320_fwup_alloc();
     self->drv.on_open = js320_on_open;

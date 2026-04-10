@@ -79,6 +79,14 @@ add_test(js320_fwup_mgr_test ${CMAKE_CURRENT_BINARY_DIR}/js320_fwup_mgr_test)
 
 ADD_CMOCKA_TEST(js320_stats_test)
 
+# js320_drv_test includes the driver source directly and stubs every
+# mb_device, jtag, fwup, and msg-alloc dependency, so it only needs the
+# support object library (cstr, topic, union, sample_buffer_f32, log, etc).
+add_executable(js320_drv_test js320_drv_test.c)
+add_dependencies(js320_drv_test jsdrv_support_objlib tinyprintf cmocka)
+target_link_libraries(js320_drv_test jsdrv_support_objlib tinyprintf cmocka)
+add_test(js320_drv_test ${CMAKE_CURRENT_BINARY_DIR}/js320_drv_test)
+
 add_executable(frontend_test frontend_test.c
         ../src/buffer.c
         ../src/devices.c

@@ -67,6 +67,7 @@ add_executable(minibitty_exe
         minibitty/mem.c
         minibitty/power_cycle.c
         minibitty/stream.c
+        minibitty/stream_test.c
         minibitty/throughput.c
         minibitty/timesync.c
         minibitty/version.c

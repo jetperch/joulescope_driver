@@ -97,6 +97,7 @@ int on_info(struct app_s * self, int argc, char * argv[]);
 int on_loopback(struct app_s * self, int argc, char * argv[]);
 int on_mem(struct app_s * self, int argc, char * argv[]);
 int on_stream(struct app_s * self, int argc, char * argv[]);
+int on_stream_test(struct app_s * self, int argc, char * argv[]);
 int on_throughput(struct app_s * self, int argc, char * argv[]);
 int on_timesync(struct app_s * self, int argc, char * argv[]);
 int on_pubsub_info(struct app_s * self, int argc, char * argv[]);
