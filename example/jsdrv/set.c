@@ -189,7 +189,7 @@ static int set_arg(struct app_s * self, char * device_path, char * arg) {
         v = jsdrv_union_null();
     } else if (value[0] == '"') {
         value[slen - 1] = 0;
-        v = jsdrv_union_str(value);
+        v = jsdrv_union_str(value + 1);
     } else if (jsdrv_cstr_starts_with(value, "u32(")) {
         uint8_t * bin = NULL;
         size_t bin_size = 0;
