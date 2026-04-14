@@ -16,6 +16,7 @@
 
 #define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
 #include "jsdrv.h"
+#include "jsdrv/error_code.h"
 #include "jsdrv/topic.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/cdef.h"
@@ -49,6 +50,16 @@
 #define JS320_DEFAULT_SIGNAL_DWN_N (0U)      // 0 = passthrough (no extra i/v/p decimation)
 #define JS320_DEFAULT_GPI_DWN_MODE (2U)      // 0=off, 1=toggle, 2=first, 3=majority
 #define JS320_DEFAULT_GPI_DWN_N    (16U)     // gateware default factor
+
+// Post-JS320_DECIMATE signal rate (16 MHz / 16 = 1 MHz).  The s/dwnN/N
+// register divides this further; h/fs unification computes N = this / fs.
+#define JS320_SIGNAL_RATE_AFTER_DECIMATE (1000000U)
+
+// Drop-until-ack timeout.  Host drops sample frames after a s/dwnN/N
+// change until the firmware's s/dwnN/!ack arrives.  If the ack never
+// arrives, after this timeout the host resumes passing samples and logs
+// a warning.
+#define JS320_DWNN_ACK_TIMEOUT (2 * JSDRV_TIME_SECOND)
 
 enum js320_group_e {
     JS320_GROUP_NONE = 0,
@@ -131,6 +142,24 @@ static const char * js320_publish_rate_meta = "{"
 // Picked outside the [0, 1] range so the first reconcile always sends.
 #define JS320_CTRL_UNKNOWN (0xFFU)
 
+// Closed-loop drop-until-ack bookkeeping for a single dwnN family
+// (signal or gpi).  Each s/.../dwnN/... change increments
+// `acks_outstanding` and sets `dropping`; the firmware brackets the
+// register update with streaming disable/enable and publishes
+// s/.../dwnN/!ack carrying the sample_id of the first sample at the new
+// rate.  That ack decrements the counter and sets
+// `drop_until_sample_id`.  While `dropping` is true, the data path
+// drops incoming app frames for the affected channels whose sample_id
+// is below the target (or drops unconditionally while acks remain
+// outstanding).  `drop_timeout_utc` is the deadline after which the
+// host resumes with a warning if the ack never arrives.
+struct js320_ack_state_s {
+    uint32_t acks_outstanding;
+    bool     dropping;
+    uint64_t drop_until_sample_id;
+    int64_t  drop_timeout_utc;
+};
+
 struct js320_drv_s {
     struct jsdrvp_mb_drv_s drv;  // MUST BE FIRST
     const struct mb_link_identity_s * identity;
@@ -162,6 +191,11 @@ struct js320_drv_s {
     struct sbuf_f32_s p_buf;
     bool     power_compute_on_host;
     uint8_t  last_sent_ctrl[JS320_CH_COUNT];  // last enable forwarded to device
+
+    // Closed-loop drop-until-ack state, one per dwnN family.  `signal`
+    // scopes i/v/p (ch 5-7), `gpi` scopes GPI + trigger (ch 8-12).
+    struct js320_ack_state_s signal_ack;
+    struct js320_ack_state_s gpi_ack;
 };
 
 // --- Streaming signal helpers ---
@@ -585,6 +619,8 @@ static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s 
     self->signal_dwn_n = JS320_DEFAULT_SIGNAL_DWN_N;
     self->gpi_dwn_mode = JS320_DEFAULT_GPI_DWN_MODE;
     self->gpi_dwn_n = JS320_DEFAULT_GPI_DWN_N;
+    memset(&self->signal_ack, 0, sizeof(self->signal_ack));
+    memset(&self->gpi_ack,    0, sizeof(self->gpi_ack));
     for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
         self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
     }
@@ -651,6 +687,10 @@ static void js320_handle_statistics(struct js320_drv_s * self,
     }
 }
 
+// Forward declaration; definition lives with the other ack helpers
+// below, grouped with the other dwnN/!ack plumbing.
+static bool js320_ack_should_drop(struct js320_ack_state_s * s, uint64_t sample_id);
+
 static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
                               uint16_t metadata, const uint32_t * data, uint8_t length) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
@@ -699,6 +739,23 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
     uint32_t length_u32 = (uint32_t) (length - 2);
     uint32_t sample_count = length_u32 * (uint32_t) def->samples_per_u32;
 
+    // Drop-until-ack: after a dwnN change, drop affected frames until
+    // the firmware's !ack confirms the new decimation has taken effect.
+    // While any ack is outstanding, drop unconditionally; once all acks
+    // have arrived, drop frames whose sample_id is below the latest
+    // ack's target (which is a frame boundary per the firmware
+    // contract).  signal_ack scopes i/v/p (ch 5-7); gpi_ack scopes
+    // GPI + trigger (ch 8-12).
+    if ((channel >= 5U) && (channel <= 7U)) {
+        if (js320_ack_should_drop(&self->signal_ack, sample_id)) {
+            return;
+        }
+    } else if ((channel >= 8U) && (channel <= 12U)) {
+        if (js320_ack_should_drop(&self->gpi_ack, sample_id)) {
+            return;
+        }
+    }
+
     // Smart-power: drop device-originated power frames while host is
     // computing power locally.  We forwarded s/p/ctrl=0 to the device
     // already, but be defensive against in-flight frames.
@@ -734,6 +791,157 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
     }
 }
 
+// Start a drop window for one ack family: bump the outstanding counter,
+// flag dropping, and arm the device thread timer so on_timeout fires if
+// the ack is lost.
+static void js320_ack_begin(struct js320_ack_state_s * s,
+                            struct jsdrvp_mb_dev_s * dev) {
+    s->acks_outstanding += 1U;
+    s->dropping = true;
+    s->drop_timeout_utc = jsdrv_time_utc() + JS320_DWNN_ACK_TIMEOUT;
+    // If fwup/jtag has a sooner timeout armed, on_timeout will wake early
+    // for that; we re-arm from on_timeout when still within our deadline.
+    jsdrvp_mb_dev_set_timeout(dev, s->drop_timeout_utc);
+}
+
+// An !ack arrived: latest sample_id wins as the drop high-water mark.
+static void js320_ack_received(struct js320_ack_state_s * s,
+                               uint64_t sample_id,
+                               const char * label) {
+    s->drop_until_sample_id = sample_id;
+    if (s->acks_outstanding > 0U) {
+        s->acks_outstanding -= 1U;
+    } else {
+        JSDRV_LOGW("%s !ack received with no outstanding request", label);
+    }
+}
+
+// Returns true if the caller should drop this frame.  Also flips
+// `dropping` to false once a frame at or after the target arrives.
+static bool js320_ack_should_drop(struct js320_ack_state_s * s,
+                                   uint64_t sample_id) {
+    if (!s->dropping) {
+        return false;
+    }
+    if (s->acks_outstanding > 0U) {
+        return true;
+    }
+    if (sample_id < s->drop_until_sample_id) {
+        return true;
+    }
+    s->dropping = false;
+    return false;
+}
+
+// Called from on_timeout: if we've actually passed our deadline, resume
+// passing samples and log a warning.  Otherwise the wake was someone
+// else's (fwup/jtag) and we re-arm so we still fire at our deadline.
+static void js320_ack_timeout_check(struct js320_ack_state_s * s,
+                                    struct jsdrvp_mb_dev_s * dev,
+                                    const char * label) {
+    if (!s->dropping) {
+        return;
+    }
+    if (jsdrv_time_utc() >= s->drop_timeout_utc) {
+        JSDRV_LOGW("%s !ack timeout; resuming with %u ack(s) outstanding",
+                   label, (unsigned) s->acks_outstanding);
+        s->dropping = false;
+        s->acks_outstanding = 0U;
+        s->drop_until_sample_id = 0;
+    } else {
+        jsdrvp_mb_dev_set_timeout(dev, s->drop_timeout_utc);
+    }
+}
+
+// Apply a new s/dwnN/N value.  This is the single code path both the
+// `s/dwnN/N` and `h/fs` handlers funnel into: on JS320 decimation is
+// always on-instrument, so `h/fs` is just a rate-to-register translator
+// that ultimately produces the same side effects.  Responsibilities:
+//   - record the new register value in self->signal_dwn_n
+//   - derive the resulting host-visible fs (1 MHz / extra_factor) so
+//     smart-power and any other fs-dependent logic stays coherent
+//     whether the caller used h/fs or s/dwnN/N
+//   - flush the i/v/p accumulators + sbufs
+//   - start the drop-until-ack window
+//   - forward to the device as `s/dwnN/N`
+//   - reconcile smart-power with the (possibly) new fs
+// The device handler brackets the decimate register update with a
+// streaming disable/enable and publishes s/dwnN/!ack carrying the
+// sample_id of the first new-rate sample; that ack releases the drop
+// window (handled in js320_handle_publish).
+static void js320_apply_signal_dwn_n(struct js320_drv_s * self,
+                                     struct jsdrvp_mb_dev_s * dev,
+                                     uint32_t n) {
+    self->signal_dwn_n = n;
+    self->fs = JS320_SIGNAL_RATE_AFTER_DECIMATE / js320_signal_extra_factor(n);
+    for (uint8_t ch = 5U; ch <= 7U; ++ch) {
+        js320_port_reset(self, dev, ch);
+    }
+    js320_sbufs_clear(self);
+    js320_ack_begin(&self->signal_ack, dev);
+    jsdrvp_mb_dev_publish_to_device(dev, "s/dwnN/N", &jsdrv_union_u32_r(n));
+    js320_reconcile_power(self, dev);
+}
+
+// Apply a new s/gpi/+/dwnN/mode value.  Resets GPI ports (ch 8-12),
+// starts the drop-until-ack window, and forwards to the device.  The
+// device handler brackets the gpi_decimate register update with a
+// streaming disable/enable and publishes s/gpi/+/dwnN/!ack.
+static void js320_apply_gpi_dwn_mode(struct js320_drv_s * self,
+                                     struct jsdrvp_mb_dev_s * dev,
+                                     uint32_t mode) {
+    self->gpi_dwn_mode = mode;
+    for (uint8_t ch = 8U; ch <= 12U; ++ch) {
+        js320_port_reset(self, dev, ch);
+    }
+    js320_ack_begin(&self->gpi_ack, dev);
+    jsdrvp_mb_dev_publish_to_device(dev, "s/gpi/+/dwnN/mode",
+        &jsdrv_union_u32_r(mode));
+}
+
+// Apply a new s/gpi/+/dwnN/N value.  Same behavior as apply_gpi_dwn_mode
+// but for the factor topic.
+static void js320_apply_gpi_dwn_n(struct js320_drv_s * self,
+                                  struct jsdrvp_mb_dev_s * dev,
+                                  uint32_t n) {
+    self->gpi_dwn_n = n;
+    for (uint8_t ch = 8U; ch <= 12U; ++ch) {
+        js320_port_reset(self, dev, ch);
+    }
+    js320_ack_begin(&self->gpi_ack, dev);
+    jsdrvp_mb_dev_publish_to_device(dev, "s/gpi/+/dwnN/N",
+        &jsdrv_union_u32_r(n));
+}
+
+// Map a requested host sample rate `fs` to the s/dwnN/N register value.
+// The JS320 always runs decimation on-instrument: native 16 MHz is first
+// divided by JS320_DECIMATE (16) to 1 MHz, then divided further by
+// js320_signal_extra_factor(n).  Returns 0 on success (*n_out written)
+// or a jsdrv error code if `fs` does not correspond to a supported value.
+static int32_t js320_fs_to_dwn_n(uint32_t fs, uint32_t * n_out) {
+    if ((fs == 0U) || (fs > JS320_SIGNAL_RATE_AFTER_DECIMATE)) {
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    if ((JS320_SIGNAL_RATE_AFTER_DECIMATE % fs) != 0U) {
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    uint32_t extra = JS320_SIGNAL_RATE_AFTER_DECIMATE / fs;
+    if (extra == 1U) {
+        *n_out = 0U;
+    } else if (extra == 2U) {
+        *n_out = 2U;
+    } else if (extra == 3U) {
+        // gateware clamps 3 to factor 2, which would produce a rate that
+        // disagrees with the user's request.  Reject to avoid a silent mismatch.
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    } else if (extra <= 1000U) {
+        *n_out = extra;
+    } else {
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    return 0;
+}
+
 static bool handle_cmd(struct js320_drv_s * self,
                             struct jsdrvp_mb_dev_s * dev,
                             const char * subtopic,
@@ -751,17 +959,19 @@ static bool handle_cmd(struct js320_drv_s * self,
         jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
         return true;
     } else if (0 == strcmp(subtopic, "h/fs")) {
+        // h/fs is a thin front-end for s/dwnN/N: translate the requested
+        // sample rate to the register value and hand off to the same
+        // code path.  Every side effect (device publish of s/dwnN/N,
+        // ack bookkeeping, port flush, smart-power reconcile) lives in
+        // js320_apply_signal_dwn_n so h/fs and s/dwnN/N stay in lockstep.
         struct jsdrv_union_s v = *value;
         int32_t rc = jsdrv_union_as_type(&v, JSDRV_UNION_U32);
+        uint32_t n = 0U;
         if (0 == rc) {
-            self->fs = v.value.u32;
-            // Rate change invalidates in-flight i/v/p compute state and
-            // changes the smart-power decision.  Reset and reconcile.
-            for (uint8_t ch = 5U; ch <= 7U; ++ch) {
-                js320_port_reset(self, dev, ch);
-            }
-            js320_sbufs_clear(self);
-            js320_reconcile_power(self, dev);
+            rc = js320_fs_to_dwn_n(v.value.u32, &n);
+        }
+        if (0 == rc) {
+            js320_apply_signal_dwn_n(self, dev, n);
         }
         jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
         return true;
@@ -792,40 +1002,38 @@ static bool handle_cmd(struct js320_drv_s * self,
         }
         return true;
     } else if (0 == strcmp(subtopic, "s/dwnN/N")) {
-        // Track the device-side i/v/p decimation factor.  Reset only the
-        // i/v/p ports + sbufs (the device's accumulator restarts at this
-        // point).  Return false so mb_device's default forwarding sends
-        // the new value to the device.
+        // Track the device-side i/v/p decimation factor and forward
+        // through the shared apply helper.  The apply helper resets
+        // the i/v/p ports + sbufs, starts the drop-until-ack window,
+        // and sends s/dwnN/N to the device.  Return true (we have
+        // forwarded explicitly via the helper) with an explicit rc.
         struct jsdrv_union_s v = *value;
-        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
-            self->signal_dwn_n = v.value.u32;
-            for (uint8_t ch = 5U; ch <= 7U; ++ch) {
-                js320_port_reset(self, dev, ch);
-            }
-            js320_sbufs_clear(self);
+        int32_t rc = jsdrv_union_as_type(&v, JSDRV_UNION_U32);
+        if (0 == rc) {
+            js320_apply_signal_dwn_n(self, dev, v.value.u32);
         }
-        return false;
+        jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
+        return true;
     } else if (0 == strcmp(subtopic, "s/gpi/+/dwnN/mode")) {
         // Track the GPI decimation mode (0=off, 1=toggle, 2=first,
-        // 3=majority).  Reset all GPI ports since the rate just changed.
+        // 3=majority) and forward through the shared apply helper.
         struct jsdrv_union_s v = *value;
-        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
-            self->gpi_dwn_mode = v.value.u32;
-            for (uint8_t ch = 8U; ch <= 12U; ++ch) {
-                js320_port_reset(self, dev, ch);
-            }
+        int32_t rc = jsdrv_union_as_type(&v, JSDRV_UNION_U32);
+        if (0 == rc) {
+            js320_apply_gpi_dwn_mode(self, dev, v.value.u32);
         }
-        return false;
+        jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
+        return true;
     } else if (0 == strcmp(subtopic, "s/gpi/+/dwnN/N")) {
-        // Track the GPI decimation factor.  Reset all GPI ports.
+        // Track the GPI decimation factor and forward through the
+        // shared apply helper.
         struct jsdrv_union_s v = *value;
-        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
-            self->gpi_dwn_n = v.value.u32;
-            for (uint8_t ch = 8U; ch <= 12U; ++ch) {
-                js320_port_reset(self, dev, ch);
-            }
+        int32_t rc = jsdrv_union_as_type(&v, JSDRV_UNION_U32);
+        if (0 == rc) {
+            js320_apply_gpi_dwn_n(self, dev, v.value.u32);
         }
-        return false;
+        jsdrvp_mb_dev_send_return_code(dev, subtopic, rc);
+        return true;
     } else {
         return false;
     }
@@ -848,6 +1056,30 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
                                   const struct jsdrv_union_s * value) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     (void) dev;
+    // Firmware acknowledgment that a dwnN change has taken effect.
+    // Value is the 16 MHz sample_id at which the new decimation becomes
+    // valid.  Latest ack wins; the drop window closes once all
+    // outstanding acks have been received AND the data path has seen a
+    // frame at or after `drop_until_sample_id`.  Consume; not forwarded
+    // to the frontend (internal protocol detail).
+    if (0 == strcmp(subtopic, "s/dwnN/!ack")) {
+        struct jsdrv_union_s v = *value;
+        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U64)) {
+            js320_ack_received(&self->signal_ack, v.value.u64, "s/dwnN");
+        } else {
+            JSDRV_LOGW("s/dwnN/!ack bad value type=%u", (unsigned) value->type);
+        }
+        return true;
+    }
+    if (0 == strcmp(subtopic, "s/gpi/+/dwnN/!ack")) {
+        struct jsdrv_union_s v = *value;
+        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U64)) {
+            js320_ack_received(&self->gpi_ack, v.value.u64, "s/gpi/+/dwnN");
+        } else {
+            JSDRV_LOGW("s/gpi/+/dwnN/!ack bad value type=%u", (unsigned) value->type);
+        }
+        return true;
+    }
     if (js320_fwup_handle_publish(self->fwup, subtopic, value)) {
         return true;
     }
@@ -857,7 +1089,8 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
 static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
                               struct jsdrvp_mb_dev_s * dev) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
-    (void) dev;
+    js320_ack_timeout_check(&self->signal_ack, dev, "s/dwnN");
+    js320_ack_timeout_check(&self->gpi_ack,    dev, "s/gpi/+/dwnN");
     js320_fwup_on_timeout(self->fwup);
     js320_jtag_on_timeout(self->jtag);
 }

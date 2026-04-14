@@ -36,9 +36,12 @@
 - **`jsdrv_unsubscribe` matching** — Requires both `cbk_fn` AND `cbk_user_data`
   to match. A mismatch produces no error — the subscription silently remains active.
 
-- **Timeout semantics inconsistency** — `jsdrv_publish(timeout_ms=0)` means async,
-  but `jsdrv_initialize(timeout_ms=0)` means "use default timeout" (blocking).
-  Consider named constants like `JSDRV_TIMEOUT_ASYNC` vs `JSDRV_TIMEOUT_DEFAULT`.
+- **Timeout semantics inconsistency** — `jsdrv_publish(timeout_ms=0)` means
+  async, but `jsdrv_initialize(timeout_ms=0)` means "use default timeout"
+  (blocking). `JSDRV_TIMEOUT_MS_DEFAULT` (1000ms) and
+  `JSDRV_TIMEOUT_MS_INIT` (5000ms) now exist at `jsdrv.h:194-195`, but
+  there is still no `JSDRV_TIMEOUT_ASYNC` constant to clarify the 0=async
+  convention.
 
 - **No `error_code.h` include from `jsdrv.h`** — The main header returns `int32_t`
   error codes but doesn't include `error_code.h`. Callers must separately include
