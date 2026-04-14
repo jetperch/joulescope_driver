@@ -19,10 +19,10 @@ This is an audit and design review of the Joulescope user-space driver, focusing
 
 The driver uses a multi-threaded architecture with message-passing between threads:
 - **API thread(s)**: Any thread calling the public API
-- **Frontend thread**: Single thread running pubsub dispatch (`src/jsdrv.c:712`)
+- **Frontend thread**: Single thread running pubsub dispatch (`src/jsdrv.c:709`)
 - **UL device threads**: One per device, JS220/JS110 protocol handling (`src/js220_usb.c`)
 - **LL device threads**: One per device, USB I/O (`src/backend/winusb/backend.c:595`)
-- **Backend discovery thread**: Device hotplug monitoring (`src/backend/winusb/backend.c:895`)
+- **Backend discovery thread**: Device hotplug monitoring (`src/backend/winusb/backend.c:896`)
 
 ---
 
@@ -30,7 +30,7 @@ The driver uses a multi-threaded architecture with message-passing between threa
 
 ### ISSUE 1 (HIGH): Use-after-free in `device_subscriber` during device removal
 
-**Files:** `src/jsdrv.c:422-428`, `src/jsdrv.c:534-544`
+**Files:** `src/jsdrv.c:426-432`, `src/jsdrv.c:531-542`
 
 **Root cause:** When a device is removed, `device_remove()` frees the `frontend_dev_s` immediately, but the pubsub unsubscribe is deferred (enqueued to `msg_pend`). Any messages already in `msg_pend` for this device's topics will invoke `device_subscriber` with a dangling `user_data` pointer.
 
@@ -48,7 +48,7 @@ The driver uses a multi-threaded architecture with message-passing between threa
 
 ### ISSUE 2 (MEDIUM): LL device thread may write to freed `rsp_q`
 
-**Files:** `src/backend/winusb/backend.c:637-639`, `src/backend/winusb/backend.c:789-801`
+**Files:** `src/backend/winusb/backend.c:637-639`, `src/backend/winusb/backend.c:790-801`
 
 **Root cause:** When the LL device thread exits, its last action is `jsdrvp_send_finalize_msg(d->context, d->device.rsp_q, ...)`. If `device_thread_stop()` times out after 1000ms, `device_free()` proceeds to `msg_queue_finalize(d->device.rsp_q)`, destroying the queue. Meanwhile, the LL thread may still be running `device_close()` or pushing to the now-freed `rsp_q`.
 
@@ -81,19 +81,89 @@ The driver uses a multi-threaded architecture with message-passing between threa
 
 ### ISSUE 5 (LOW): `volatile bool` insufficient for non-x86 architectures
 
-**Files:** `src/jsdrv.c:88`, `src/backend/winusb/backend.c:106`
+**Files:** `src/jsdrv.c:90`, `src/js220_usb.c:286`, `src/js110_usb.c:473`,
+`src/backend/libusb/backend.c:113`, `src/js320_fwup_mgr.c:141-143`,
+`src/mb_device.c:158`
 
-**Root cause:** `volatile bool do_exit` provides sufficient ordering on x86 (strong memory model) but is technically insufficient on ARM/other architectures. Without a memory barrier, a thread may not see the updated value promptly.
+**Root cause:** `volatile bool do_exit` provides sufficient ordering
+on x86 (strong memory model) but is technically insufficient on
+ARM/other architectures. Without a memory barrier, a thread may not
+see the updated value promptly.
 
-**Note:** Currently the driver targets Windows (x86/x64) and Linux/macOS. ARM support (e.g., Raspberry Pi, Apple Silicon) would need proper atomics.
+**Note:** The WinUSB backend (`src/backend/winusb/backend.c:106`)
+already migrated to plain `bool` (not `volatile`), but the remaining
+files listed above still use `volatile bool`. ARM targets
+(Raspberry Pi, Apple Silicon) would need proper atomics.
 
-**Recommendation:** Use `_Atomic bool` (C11 atomics) or platform-specific atomic operations. Low priority if only targeting x86.
+**Recommendation:** Use `_Atomic bool` (C11 atomics) or
+platform-specific atomic operations. Low priority if only targeting
+x86.
 
 ### ISSUE 6 (LOW): `device_scan` removal during iteration
 
-**File:** `src/backend/winusb/backend.c:860-870`
+**File:** `src/backend/winusb/backend.c:860-870` (removal at ~868)
 
 **Analysis:** Initially appears unsafe, but `jsdrv_list_foreach` caches `next__` before the loop body (`list.h:336-339`), so removing the current item is safe. **This is NOT a bug** — the safe iterator handles it correctly.
+
+### ISSUE 7 (HIGH): Mutable tmap shared with consumers
+
+**Files:** `src/buffer_signal.c:133-157`, `src/buffer_signal.c:193-194`,
+`include/jsdrv/tmap.h`, `src/tmap.c`
+
+**Root cause:** The API shares a **mutable** tmap pointer with
+consumers via `jsdrv_buffer_info_s.tmap`. The device/buffer thread
+continues to mutate this tmap (adding entries, expiring old ones)
+while consumers hold a reference to the same object. This creates
+three concrete problems:
+
+**Problem A — Missing reader protection in buffer_signal.c:**
+`samples_to_utc()` and `utc_to_samples()` (`buffer_signal.c:133-157`)
+call tmap query functions **without** `jsdrv_tmap_reader_enter/exit`.
+These are called from `jsdrv_bufsig_info()` (line 184) and
+`jsdrv_bufsig_process_request()` (line 842). The writer thread can
+modify tmap concurrently, causing undefined behavior.
+
+**Problem B — Consumer holds mutable pointer across threads:**
+When a `JSDRV_PAYLOAD_TYPE_BUFFER_RSP` message is delivered to an
+API consumer's callback, the embedded `info.tmap` pointer references
+the live, mutable tmap. The consumer must follow the reader_enter/exit
+protocol, but:
+- This discipline is easy to forget (no compile-time enforcement)
+- Forgetting `reader_exit` silently blocks all writer updates
+  indefinitely
+- No `jsdrv_union_copy()`-style helper exists for safe snapshotting
+- The C API documentation doesn't prominently warn about this
+
+**Problem C — Stale tmap after buffer clear/restart:**
+If the buffer is cleared (`jsdrv_bufsig_clear` at line 257) or
+the device restarts, the old tmap is freed via `jsdrv_tmap_ref_decr`.
+Any consumer that hasn't yet decremented its reference still holds
+a valid (ref-counted) pointer, but the data is stale and no longer
+corresponds to the active stream. There is no notification mechanism
+for this.
+
+**Mitigation options (from least to most invasive):**
+
+1. **Fix immediate bugs** — Add `reader_enter/exit` calls in
+   `buffer_signal.c` around `samples_to_utc()` and `utc_to_samples()`.
+   Small fix, addresses Problem A only.
+
+2. **Snapshot on publish** — When building a buffer response, create
+   an immutable snapshot of the tmap (`jsdrv_tmap_snapshot()` — new
+   function). Consumers receive a frozen copy they can read without
+   locking. Writer continues mutating the original. Addresses A and B.
+   Cost: one allocation + memcpy of the entry array per response.
+
+3. **Copy-on-write tmap** — tmap internally uses a COW entry array.
+   Writer creates a new array on mutation; readers hold a reference
+   to the old one. No reader_enter/exit needed. Addresses A, B, and C
+   but significantly increases implementation complexity.
+
+**Recommendation:** Option 2 (snapshot on publish) is the best
+tradeoff. It eliminates the shared-mutable-state problem at the API
+boundary while keeping the internal writer path simple. The snapshot
+cost is small relative to the 256KB data buffers already being
+copied. Fix Problem A immediately as a prerequisite.
 
 ---
 
@@ -162,6 +232,8 @@ The existing `jsdrvp_msg_free` becomes `jsdrvp_msg_decref`. For the common singl
 | Priority | Issue | Files to Modify | Effort |
 |----------|-------|-----------------|--------|
 | **P0** | Fix use-after-free in device_subscriber (ISSUE 1) | `src/jsdrv.c` | Small |
+| **P0** | Fix missing tmap reader protection (ISSUE 7A) | `src/buffer_signal.c` | Small |
+| **P1** | Tmap snapshot on publish (ISSUE 7B) | `src/tmap.c`, `src/buffer_signal.c` | Medium |
 | **P1** | Fix msg_queue_finalize payload leak (ISSUE 3) | `msg_queue.h`, both `msg_queue.c`, `jsdrv.c` | Small |
 | **P1** | Fix LL thread timeout → freed rsp_q (ISSUE 2) | `src/backend/winusb/backend.c` | Medium |
 | **P2** | Add free-pool high-water marks | `src/jsdrv.c` | Small |
