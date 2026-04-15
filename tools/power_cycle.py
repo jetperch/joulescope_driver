@@ -45,7 +45,7 @@ import time
 
 
 POWER_DEVICE_PATH = 'u/js220/002557'
-TARGET_DEVICE_PATH = 'u/js320/8w2a'
+TARGET_DEVICE_PATH = 'u/js320/8W2A'
 
 
 def run():

@@ -805,14 +805,17 @@ static void js320_ack_begin(struct js320_ack_state_s * s,
 }
 
 // An !ack arrived: latest sample_id wins as the drop high-water mark.
+// Expected to arrive with no outstanding request when the corresponding
+// dwnN change was applied while no channel in the family was streaming
+// (see js320_apply_signal_dwn_n and the gpi counterparts).  Silently
+// ignore in that case: there is no drop window to close.
 static void js320_ack_received(struct js320_ack_state_s * s,
                                uint64_t sample_id,
                                const char * label) {
-    s->drop_until_sample_id = sample_id;
+    (void) label;
     if (s->acks_outstanding > 0U) {
+        s->drop_until_sample_id = sample_id;
         s->acks_outstanding -= 1U;
-    } else {
-        JSDRV_LOGW("%s !ack received with no outstanding request", label);
     }
 }
 
@@ -853,6 +856,23 @@ static void js320_ack_timeout_check(struct js320_ack_state_s * s,
     }
 }
 
+// True iff any channel in the signal (i/v/p) family is currently enabled.
+static inline bool js320_signal_family_streaming(const struct js320_drv_s * self) {
+    return self->ports[5].enabled
+        || self->ports[6].enabled
+        || self->ports[7].enabled;
+}
+
+// True iff any channel in the gpi (GPI + trigger) family is currently enabled.
+static inline bool js320_gpi_family_streaming(const struct js320_drv_s * self) {
+    for (uint8_t ch = 8U; ch <= 12U; ++ch) {
+        if (self->ports[ch].enabled) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Apply a new s/dwnN/N value.  This is the single code path both the
 // `s/dwnN/N` and `h/fs` handlers funnel into: on JS320 decimation is
 // always on-instrument, so `h/fs` is just a rate-to-register translator
@@ -878,7 +898,12 @@ static void js320_apply_signal_dwn_n(struct js320_drv_s * self,
         js320_port_reset(self, dev, ch);
     }
     js320_sbufs_clear(self);
-    js320_ack_begin(&self->signal_ack, dev);
+    // Skip the drop-until-ack window when no channel in the signal family is
+    // streaming: there are no in-flight old-rate samples to hide, and the
+    // firmware may not emit an !ack without an active stream.
+    if (js320_signal_family_streaming(self)) {
+        js320_ack_begin(&self->signal_ack, dev);
+    }
     jsdrvp_mb_dev_publish_to_device(dev, "s/dwnN/N", &jsdrv_union_u32_r(n));
     js320_reconcile_power(self, dev);
 }
@@ -894,7 +919,9 @@ static void js320_apply_gpi_dwn_mode(struct js320_drv_s * self,
     for (uint8_t ch = 8U; ch <= 12U; ++ch) {
         js320_port_reset(self, dev, ch);
     }
-    js320_ack_begin(&self->gpi_ack, dev);
+    if (js320_gpi_family_streaming(self)) {
+        js320_ack_begin(&self->gpi_ack, dev);
+    }
     jsdrvp_mb_dev_publish_to_device(dev, "s/gpi/+/dwnN/mode",
         &jsdrv_union_u32_r(mode));
 }
@@ -908,7 +935,9 @@ static void js320_apply_gpi_dwn_n(struct js320_drv_s * self,
     for (uint8_t ch = 8U; ch <= 12U; ++ch) {
         js320_port_reset(self, dev, ch);
     }
-    js320_ack_begin(&self->gpi_ack, dev);
+    if (js320_gpi_family_streaming(self)) {
+        js320_ack_begin(&self->gpi_ack, dev);
+    }
     jsdrvp_mb_dev_publish_to_device(dev, "s/gpi/+/dwnN/N",
         &jsdrv_union_u32_r(n));
 }

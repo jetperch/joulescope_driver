@@ -317,6 +317,19 @@ static uint8_t build_frame(uint32_t * out, uint64_t sample_id, const uint32_t * 
     return (uint8_t) (n + 2U);
 }
 
+// Enable a signal-family channel (5=i, 6=v, 7=p) so that subsequent dwnN
+// changes arm the drop-until-ack window.  Without this, dwnN changes are
+// a no-op on the ack state (see js320_apply_signal_dwn_n).
+static void enable_signal_stream(struct js320_drv_s * self) {
+    self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(1));
+}
+
+// Enable a gpi-family channel so that subsequent gpi dwnN changes arm the
+// drop-until-ack window.
+static void enable_gpi_stream(struct js320_drv_s * self) {
+    self->ports[8].enabled = true;
+}
+
 
 // --- Tests: h/fp handler ---
 
@@ -571,6 +584,7 @@ static void test_compute_power_correctness(void ** state) {
 
 static void test_dwnN_signal_tracked_and_forwarded(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
     // Default signal_dwn_n is 0 (passthrough); set to 4 -> i/v/p decimate by 64.
     bool handled = self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(4));
     // Handler now returns true because it explicitly forwards via
@@ -612,6 +626,7 @@ static void test_dwnN_signal_passthrough_codes(void ** state) {
 
 static void test_dwnN_gpi_mode_off(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
     // Default GPI: mode=2, N=16 -> decimate=16.  mode=0 -> passthrough -> 1.
     bool handled = self->drv.handle_cmd(&self->drv, NULL,
         "s/gpi/+/dwnN/mode", &jsdrv_union_u32_r(0));
@@ -636,6 +651,7 @@ static void test_dwnN_gpi_mode_off(void ** state) {
 
 static void test_dwnN_gpi_n_change(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
     // mode stays at default 2 (first); change N to 8.
     bool handled = self->drv.handle_cmd(&self->drv, NULL,
         "s/gpi/+/dwnN/N", &jsdrv_union_u32_r(8));
@@ -682,6 +698,7 @@ static void test_fs_to_dwn_n_mapping(void ** state) {
 
 static void test_hfs_unified_forwards_dwnN(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
     bool handled = self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(250000));
     assert_true(handled);
     assert_int_equal(250000, self->fs);
@@ -712,6 +729,7 @@ static void test_hfs_unified_rejects_invalid_rate(void ** state) {
 
 static void test_dwnN_drop_until_ack_single(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
     // Keep the default publish_rate (20 Hz) so 25-sample frames stay well
     // under the flush threshold and msg_in survives the append.
     g_cap.return_code_count = 0;
@@ -748,6 +766,7 @@ static void test_dwnN_drop_until_ack_single(void ** state) {
 
 static void test_dwnN_drop_until_ack_multiple(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
     g_cap.return_code_count = 0;
     g_cap.backend_send_count = 0;
 
@@ -786,6 +805,7 @@ static void test_dwnN_drop_until_ack_multiple(void ** state) {
 
 static void test_dwnN_drop_does_not_affect_gpi(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
     self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(4));
     assert_true(self->signal_ack.dropping);
 
@@ -799,6 +819,7 @@ static void test_dwnN_drop_does_not_affect_gpi(void ** state) {
 
 static void test_dwnN_ack_timeout_resumes(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
     self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(4));
     assert_true(self->signal_ack.dropping);
 
@@ -844,6 +865,7 @@ static void push_gpi_frame(struct js320_drv_s * self,
 
 static void test_gpi_dwnN_mode_drop_until_ack(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
     self->drv.handle_cmd(&self->drv, NULL, "s/gpi/+/dwnN/mode",
         &jsdrv_union_u32_r(1));
     assert_true(self->gpi_ack.dropping);
@@ -869,6 +891,7 @@ static void test_gpi_dwnN_mode_drop_until_ack(void ** state) {
 
 static void test_gpi_dwnN_n_drop_until_ack(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
     self->drv.handle_cmd(&self->drv, NULL, "s/gpi/+/dwnN/N",
         &jsdrv_union_u32_r(32));
     assert_true(self->gpi_ack.dropping);
@@ -883,6 +906,7 @@ static void test_gpi_dwnN_n_drop_until_ack(void ** state) {
 
 static void test_gpi_dwnN_multiple_acks(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
     // mode + N back-to-back: two outstanding GPI acks.
     self->drv.handle_cmd(&self->drv, NULL, "s/gpi/+/dwnN/mode",
         &jsdrv_union_u32_r(3));
@@ -909,6 +933,7 @@ static void test_gpi_dwnN_multiple_acks(void ** state) {
 
 static void test_gpi_dwnN_does_not_affect_signal(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
     // Start a GPI drop window.
     self->drv.handle_cmd(&self->drv, NULL, "s/gpi/+/dwnN/mode",
         &jsdrv_union_u32_r(1));
@@ -923,6 +948,7 @@ static void test_gpi_dwnN_does_not_affect_signal(void ** state) {
 
 static void test_gpi_dwnN_ack_timeout_resumes(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
     self->drv.handle_cmd(&self->drv, NULL, "s/gpi/+/dwnN/N",
         &jsdrv_union_u32_r(32));
     assert_true(self->gpi_ack.dropping);
@@ -936,10 +962,45 @@ static void test_gpi_dwnN_ack_timeout_resumes(void ** state) {
     assert_non_null(self->ports[8].msg_in);
 }
 
+// With no signal channel streaming, a dwnN change must forward to the
+// device but must NOT arm the drop-until-ack window.  This is the
+// settings-replay-before-stream-enable path seen on UI hot-plug.
+static void test_dwnN_signal_skips_ack_when_idle(void ** state) {
+    struct js320_drv_s * self = *state;
+    // No enable_signal_stream() call -> ports[5..7].enabled == false.
+    bool handled = self->drv.handle_cmd(&self->drv, NULL,
+        "s/dwnN/N", &jsdrv_union_u32_r(4));
+    assert_true(handled);
+    assert_int_equal(4, self->signal_dwn_n);
+    // Device still receives the new decimation value.
+    const struct device_publish_s * p = find_publish("s/dwnN/N");
+    assert_non_null(p);
+    assert_int_equal(4, p->value_u32);
+    // But the ack window stays idle: no outstanding ack, not dropping.
+    assert_int_equal(0, self->signal_ack.acks_outstanding);
+    assert_false(self->signal_ack.dropping);
+}
+
+// Same as above for the GPI family.
+static void test_dwnN_gpi_skips_ack_when_idle(void ** state) {
+    struct js320_drv_s * self = *state;
+    // No enable_gpi_stream() call -> ports[8..12].enabled == false.
+    bool handled = self->drv.handle_cmd(&self->drv, NULL,
+        "s/gpi/+/dwnN/mode", &jsdrv_union_u32_r(1));
+    assert_true(handled);
+    assert_int_equal(1, self->gpi_dwn_mode);
+    const struct device_publish_s * p = find_publish("s/gpi/+/dwnN/mode");
+    assert_non_null(p);
+    assert_int_equal(1, p->value_u32);
+    assert_int_equal(0, self->gpi_ack.acks_outstanding);
+    assert_false(self->gpi_ack.dropping);
+}
+
 // A stale signal !ack (no signal_ack window open) must NOT leak into or
 // disturb the GPI window.
 static void test_dwnN_signal_ack_independent_of_gpi(void ** state) {
     struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
     self->drv.handle_cmd(&self->drv, NULL, "s/gpi/+/dwnN/N",
         &jsdrv_union_u32_r(32));
     assert_int_equal(1, self->gpi_ack.acks_outstanding);
@@ -984,6 +1045,8 @@ int main(void) {
         cmocka_unit_test_setup_teardown(test_gpi_dwnN_does_not_affect_signal, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_gpi_dwnN_ack_timeout_resumes,   test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_signal_ack_independent_of_gpi, test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_dwnN_signal_skips_ack_when_idle, test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_dwnN_gpi_skips_ack_when_idle,    test_setup, test_teardown),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

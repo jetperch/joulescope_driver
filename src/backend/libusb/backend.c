@@ -442,7 +442,7 @@ static void bulk_in_open(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     d->endpoint_mode[pipe_id] = EP_MODE_BULK_IN;
     int rv = libusb_clear_halt(d->handle, pipe_id);
     if (rv) {
-        JSDRV_LOGW("bulk_in_open clear_halt failed with %d", rv);
+        JSDRV_LOGI("bulk_in_open clear_halt failed with %d", rv);
     }
     for (uint32_t i = 0; i < BULK_IN_TRANSFER_OUTSTANDING; ++i) {
         bulk_in_start(d, pipe_id);
