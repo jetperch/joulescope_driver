@@ -1,5 +1,18 @@
 # Design Review: Race Conditions & Memory Management
 
+## Status (2026-04-15)
+
+ISSUES 1, 2, and 3 were fixed in commit `a5b111c` ("Fix use-after-free
+during forced device removal via barrier shutdown") using a closed-loop
+sentinel protocol (LL_TERMINATED → DEVICE_REMOVE barriers) that replaces
+timeout-based teardown.  `msg_queue_finalize` now takes a context and
+properly frees heap payloads / decrements tmap refs.
+
+**Still open:** ISSUE 4 (POSIX list remove without lock), ISSUE 5
+(atomics for `do_exit`), ISSUE 7 (tmap reader protection and snapshot
+on publish), and the Part 2 items (pool high-water marks, reference
+counting).  ISSUE 6 was determined to be a false positive.
+
 ## Prompt
 
 This folder contains a user-space driver for Joulescope products.  doc/architecture.svg contains a block diagram.  I have a few
@@ -28,7 +41,7 @@ The driver uses a multi-threaded architecture with message-passing between threa
 
 ## Part 1: Race Condition Audit
 
-### ISSUE 1 (HIGH): Use-after-free in `device_subscriber` during device removal
+### ISSUE 1 (HIGH) — FIXED in a5b111c: Use-after-free in `device_subscriber` during device removal
 
 **Files:** `src/jsdrv.c:426-432`, `src/jsdrv.c:531-542`
 
@@ -46,7 +59,7 @@ The driver uses a multi-threaded architecture with message-passing between threa
 
 **Recommendation:** Unsubscribe the device **synchronously** before freeing, or defer the free until after pubsub processing. Simplest fix: in `device_remove()`, call `jsdrv_pubsub_process(c->pubsub)` between `device_sub(d, UNSUBSCRIBE)` and `jsdrv_free(d)` to flush the unsubscribe. Alternatively, process the unsubscribe directly rather than via `msg_pend`.
 
-### ISSUE 2 (MEDIUM): LL device thread may write to freed `rsp_q`
+### ISSUE 2 (MEDIUM) — FIXED in a5b111c: LL device thread may write to freed `rsp_q`
 
 **Files:** `src/backend/winusb/backend.c:637-639`, `src/backend/winusb/backend.c:790-801`
 
@@ -59,7 +72,7 @@ The driver uses a multi-threaded architecture with message-passing between threa
 - Or: NULL-check `rsp_q` before pushing and use an atomic for the pointer
 - Or: use a separate "thread exited" event that the join waits on, and only free resources after confirmed exit
 
-### ISSUE 3 (MEDIUM): `msg_queue_finalize` leaks message payloads
+### ISSUE 3 (MEDIUM) — FIXED in a5b111c: `msg_queue_finalize` leaks message payloads
 
 **Files:** `src/backend/winusb/msg_queue.c:61-82`, `src/backend/libusb/msg_queue.c:65-84`
 
@@ -231,11 +244,11 @@ The existing `jsdrvp_msg_free` becomes `jsdrvp_msg_decref`. For the common singl
 
 | Priority | Issue | Files to Modify | Effort |
 |----------|-------|-----------------|--------|
-| **P0** | Fix use-after-free in device_subscriber (ISSUE 1) | `src/jsdrv.c` | Small |
+| ~~P0~~ DONE | ~~Fix use-after-free in device_subscriber (ISSUE 1)~~ | `src/jsdrv.c` | a5b111c |
 | **P0** | Fix missing tmap reader protection (ISSUE 7A) | `src/buffer_signal.c` | Small |
 | **P1** | Tmap snapshot on publish (ISSUE 7B) | `src/tmap.c`, `src/buffer_signal.c` | Medium |
-| **P1** | Fix msg_queue_finalize payload leak (ISSUE 3) | `msg_queue.h`, both `msg_queue.c`, `jsdrv.c` | Small |
-| **P1** | Fix LL thread timeout → freed rsp_q (ISSUE 2) | `src/backend/winusb/backend.c` | Medium |
+| ~~P1~~ DONE | ~~Fix msg_queue_finalize payload leak (ISSUE 3)~~ | `msg_queue.h`, both `msg_queue.c`, `jsdrv.c` | a5b111c |
+| ~~P1~~ DONE | ~~Fix LL thread timeout → freed rsp_q (ISSUE 2)~~ | `src/backend/winusb/backend.c` | a5b111c |
 | **P2** | Add free-pool high-water marks | `src/jsdrv.c` | Small |
 | **P3** | Fix POSIX list remove without lock (ISSUE 4) | `src/backend/libusb/msg_queue.c` | Trivial |
 | **P3** | C11 atomics for do_exit flags (ISSUE 5) | Multiple | Small |
