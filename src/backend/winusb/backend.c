@@ -726,13 +726,17 @@ static void device_path_to_serial_number(const char * device_path, char * sn) {
 
 static void device_thread_stop(struct dev_s * d) {
     if (d->thread) {
+        JSDRV_LOGI("ll device_thread_stop(%s): send FINALIZE", d->device.prefix);
         jsdrvp_send_finalize_msg(d->context, d->device.cmd_q, d->device.prefix);
-        // The previous 1000 ms cap raced with blocking USB I/O and
-        // produced ISSUE 2 (LL thread writes to freed rsp_q after
-        // join timeout).  Wait long enough that a stuck thread is a
-        // real bug to investigate, not a routine timeout.
-        if (WAIT_OBJECT_0 != WaitForSingleObject(d->thread, 30000)) {
+        // 10 s is a diagnostic cap, not an expected wait.  The previous
+        // 1000 ms cap raced with blocking USB I/O and produced ISSUE 2
+        // (LL thread writes to freed rsp_q after join timeout).  Any USB
+        // operation taking >10 s is a real bug — investigate rather than
+        // extend the cap.
+        if (WAIT_OBJECT_0 != WaitForSingleObject(d->thread, 10000)) {
             JSDRV_LOGE("device thread %s not closed cleanly.", d->device.prefix);
+        } else {
+            JSDRV_LOGI("ll device_thread_stop(%s): joined", d->device.prefix);
         }
         CloseHandle(d->thread);
         d->thread = NULL;
@@ -970,13 +974,17 @@ static void finalize(struct jsdrvbk_s * backend) {
     if (backend) {
         topic[0] = backend->prefix;
         struct backend_s * s = (struct backend_s *) backend;
-        JSDRV_LOGI("finalize usb backend");
+        JSDRV_LOGI("finalize usb backend: device_change_notifier_finalize start");
         device_change_notifier_finalize();
+        JSDRV_LOGI("finalize usb backend: device_change_notifier_finalize done");
         if (s->thread) {
             jsdrvp_send_finalize_msg(s->context, s->backend.cmd_q, topic);
             // and wait for thread to exit.
+            JSDRV_LOGI("finalize usb backend: join backend_thread");
             if (WAIT_OBJECT_0 != WaitForSingleObject(s->thread, 1000)) {
                 JSDRV_LOGE("winusb thread not closed cleanly.");
+            } else {
+                JSDRV_LOGI("finalize usb backend: backend_thread joined");
             }
             CloseHandle(s->thread);
             s->thread = NULL;
@@ -990,10 +998,12 @@ static void finalize(struct jsdrvbk_s * backend) {
             s->discovery = NULL;
         }
 
+        JSDRV_LOGI("finalize usb backend: device_free loop start");
         for (uint16_t i = 0; i < DEVICES_MAX; ++i) {
             struct dev_s * d = &s->devices[i];
             device_free(s, d);
         }
+        JSDRV_LOGI("finalize usb backend: device_free loop done");
 
         jsdrv_free(s);
     }

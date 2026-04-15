@@ -1641,14 +1641,15 @@ static void join(struct jsdrvp_ul_device_s * device) {
     // If the thread is still running (requested-close path), send
     // FINALIZE; on forced-remove the thread has already exited via
     // the LL_TERMINATED barrier and this message is a harmless no-op.
+    JSDRV_LOGI("ul join(%s): send FINALIZE", d->ll.prefix);
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, JSDRV_MSG_FINALIZE);
-    // Effectively unbounded: the LL_TERMINATED barrier (forced
-    // removal) or the FINALIZE command (requested close) guarantees
-    // the thread exits.  The previous 1000 ms timeout raced with
-    // in-flight messages and produced use-after-free when resources
-    // were freed while the thread was still running.  A 30 s cap
-    // serves only as a diagnostic for a lost barrier.
-    jsdrv_thread_join(&d->thread, 30000);
+    // 10 s is a diagnostic cap, not an expected wait: the LL_TERMINATED
+    // barrier (forced removal) or the FINALIZE command (requested
+    // close) guarantees the thread exits in a bounded time.  Anything
+    // approaching this cap indicates a lost barrier or a USB stall and
+    // is a real bug to investigate.
+    int32_t jrc = jsdrv_thread_join(&d->thread, 10000);
+    JSDRV_LOGI("ul join(%s): joined rc=%d", d->ll.prefix, (int) jrc);
     if (d->drv && d->drv->finalize) {
         d->drv->finalize(d->drv);
     }

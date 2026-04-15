@@ -45,6 +45,12 @@
 #define BACKEND_COUNT_MAX   (127U)  // Allow prefixes 0-9, a-z, A-Z
 #define DEVICE_LOOKUP_MAX   (BACKEND_COUNT_MAX * DEVICE_COUNT_MAX)
 #define API_TIMEOUT_MS      (3000)
+// jsdrv_finalize default cap for joining the frontend thread.  The
+// frontend thread's exit path joins each device's UL thread (10 s cap)
+// and each backend's LL device threads (10 s cap).  20 s covers a
+// typical 1-2 device station even if one stage runs slow.  If this
+// fires, dig into the stage instrumentation in the log before bumping.
+#define FINALIZE_TIMEOUT_MS (20000)
 #define FRONTEND_THREAD_POLL_MS  (1000)
 
 #ifndef UNITTEST
@@ -771,9 +777,13 @@ static THREAD_RETURN_TYPE frontend_thread(THREAD_ARG_TYPE lpParam) {
         timeout_process(c);
     }
 
+    JSDRV_LOGI("frontend_thread exit: device_remove_all start");
     device_remove_all(c);
+    JSDRV_LOGI("frontend_thread exit: backends_finalize start");
     backends_finalize(c);
+    JSDRV_LOGI("frontend_thread exit: timeouts_finalize start");
     timeouts_finalize(c);
+    JSDRV_LOGI("frontend_thread exit: done");
     THREAD_RETURN();
 }
 
@@ -978,7 +988,7 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
 }
 
 void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
-    timeout_ms = timeout_ms ? timeout_ms : API_TIMEOUT_MS;
+    timeout_ms = timeout_ms ? timeout_ms : FINALIZE_TIMEOUT_MS;
     JSDRV_LOGI("jsdrv_finalize %p", context);
     struct jsdrv_context_s * c = context;
     if (c && (NULL != context->msg_cmd)) {
@@ -987,7 +997,9 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(context);
         jsdrv_cstr_copy(msg->topic, JSDRV_MSG_FINALIZE, sizeof(msg->topic));
         msg_queue_push(context->msg_cmd, msg);
-        jsdrv_thread_join(&context->thread, timeout_ms);
+        JSDRV_LOGI("jsdrv_finalize: join frontend_thread timeout=%u", (unsigned) timeout_ms);
+        int32_t jrc = jsdrv_thread_join(&context->thread, timeout_ms);
+        JSDRV_LOGI("jsdrv_finalize: frontend_thread joined rc=%d", (int) jrc);
         jsdrv_fwup_mgr_finalize();
         jsdrv_buffer_finalize();
         jsdrv_pubsub_finalize(c->pubsub);

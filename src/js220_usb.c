@@ -1918,10 +1918,12 @@ static void join(struct jsdrvp_ul_device_s * device) {
     struct dev_s * d = (struct dev_s *) device;
     // Harmless on forced-remove (thread already exited via barrier);
     // required on requested close to drive the UL loop to exit.
+    JSDRV_LOGI("ul join(%s): send FINALIZE", d->ll.prefix);
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, "");
-    // 30 s cap is a diagnostic for a lost barrier; the protocol
-    // guarantees exit.
-    jsdrv_thread_join(&d->thread, 30000);
+    // 10 s cap is a diagnostic for a lost barrier; the protocol
+    // guarantees exit.  Anything approaching this is a real bug.
+    int32_t jrc = jsdrv_thread_join(&d->thread, 10000);
+    JSDRV_LOGI("ul join(%s): joined rc=%d", d->ll.prefix, (int) jrc);
 
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
         struct port_s *p = &d->ports[idx];

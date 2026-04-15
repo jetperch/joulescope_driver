@@ -890,12 +890,15 @@ static void finalize(struct jsdrvbk_s * backend) {
     struct backend_s * s = (struct backend_s *) backend;
     char topic[2] = {backend->prefix, 0};
     s->do_exit = true;
-    JSDRV_LOGI("backend finalize");
+    JSDRV_LOGI("backend finalize: start");
     if (s->thread_id) {
         jsdrvp_send_finalize_msg(s->context, s->backend.cmd_q, topic);
+        JSDRV_LOGI("backend finalize: join backend_thread (unbounded)");
         int rv = pthread_join(s->thread_id, NULL);
         if (rv) {
             JSDRV_LOGW("pthread_join returned %d", rv);
+        } else {
+            JSDRV_LOGI("backend finalize: backend_thread joined");
         }
         s->thread_id = 0;
     }

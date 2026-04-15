@@ -1578,9 +1578,12 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
 
 static void join(struct jsdrvp_ul_device_s * device) {
     struct js110_dev_s * d = (struct js110_dev_s *) device;
+    JSDRV_LOGI("ul join(%s): send FINALIZE", d->ll.prefix);
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, "");
-    // 30 s diagnostic cap; barrier guarantees exit.
-    jsdrv_thread_join(&d->thread, 30000);
+    // 10 s diagnostic cap; barrier guarantees exit.  Anything
+    // approaching this is a real bug.
+    int32_t jrc = jsdrv_thread_join(&d->thread, 10000);
+    JSDRV_LOGI("ul join(%s): joined rc=%d", d->ll.prefix, (int) jrc);
 
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
         struct port_s *p = &d->ports[idx];
