@@ -219,8 +219,10 @@ int main(int argc, char * argv[]) {
     memset(self, 0, sizeof(*self));
     int32_t rc;
 
-    // Line-buffer stdout so logs survive an abrupt crash (e.g. force_remove).
-    setvbuf(stdout, NULL, _IOLBF, 0);
+    // Unbuffer stdout so logs survive an abrupt crash (e.g. force_remove).
+    // Note: Windows CRT requires size >= 2 for _IOLBF/_IOFBF and doesn't
+    // implement line-buffering anyway; _IONBF is the portable choice.
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     if (argc < 2) {
         return usage();

@@ -555,8 +555,15 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             msg->value = jsdrv_union_i32(0);
             msg_queue_push(d->device.rsp_q, msg);
         } else if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
-            msg->value = jsdrv_union_i32(0);
-            msg_queue_push(d->device.rsp_q, msg);
+            // Do NOT echo a FINALIZE response into rsp_q.  The UL
+            // thread would read it ahead of the LL_TERMINATED barrier
+            // and misinterpret it as a requested close: mb_device
+            // sets finalize_pending (which suppresses DEVICE_REMOVE at
+            // B2), and js220_usb sets do_exit (which skips consuming
+            // LL_TERMINATED entirely).  Both break forced-remove.
+            // The LL_TERMINATED sentinel pushed after device_close()
+            // is the only signal UL needs.
+            jsdrvp_msg_free(d->context, msg);
             d->do_exit = true;
             return false;
         } else {
