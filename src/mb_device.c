@@ -156,6 +156,10 @@ struct jsdrvp_mb_dev_s {
     jsdrv_thread_t thread;
     volatile uint8_t state;  // state_e
     volatile bool finalize_pending;
+    // Set when the LL side has emitted JSDRV_MSG_TYPE_LL_TERMINATED into
+    // ll.rsp_q, meaning the backend has stopped producing for this device
+    // and the UL thread is free to exit and publish DEVICE_REMOVE.
+    volatile bool ll_terminated;
 
     FILE * file_in;
 
@@ -1487,6 +1491,19 @@ static bool handle_rsp(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
     if (!msg) {
         return false;
     }
+    if (msg->inner_msg_type == JSDRV_MSG_TYPE_LL_TERMINATED) {
+        // Barrier B1: LL has stopped producing.  Any downstream cmds
+        // we issue would be dropped, so force the state machine to
+        // CLOSED and mark for graceful UL exit.
+        JSDRV_LOGI("handle_rsp LL_TERMINATED %s", d->ll.prefix);
+        d->ll_terminated = true;
+        d->state = ST_CLOSED;
+        // Restore NORMAL type so the message returns to the free pool
+        // cleanly via jsdrvp_msg_free.
+        msg->inner_msg_type = JSDRV_MSG_TYPE_NORMAL;
+        jsdrvp_msg_free(d->context, msg);
+        return true;
+    }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
         JSDRV_LOGD3("stream_in_data sz=%d", (int) msg->value.size);
         handle_stream_in(d, msg);
@@ -1562,7 +1579,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
 #endif
 
     while (true) {
-        if ((d->finalize_pending) && (d->state == ST_CLOSED)) {
+        if (((d->finalize_pending) || (d->ll_terminated)) && (d->state == ST_CLOSED)) {
             break;
         }
 #if _WIN32
@@ -1600,15 +1617,38 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         fclose(d->file_in);
     }
 
+    // Barrier B2: if we are exiting because the LL side terminated
+    // (forced removal), emit DEVICE_REMOVE into msg_backend as our
+    // very last act.  Because this thread is the sole producer of
+    // device-scoped messages for this device in msg_backend, the
+    // frontend sees every prior message before this one and can
+    // safely free the frontend_dev_s when it processes DEVICE_REMOVE.
+    if (d->ll_terminated && !d->finalize_pending) {
+        struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(d->context);
+        jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_REMOVE, sizeof(msg->topic));
+        msg->value.type = JSDRV_UNION_STR;
+        msg->value.value.str = msg->payload.str;
+        jsdrv_cstr_copy(msg->payload.str, d->ll.prefix, sizeof(msg->payload.str));
+        jsdrvp_backend_send(d->context, msg);
+    }
+
     JSDRV_LOGI("MB USB upper-level thread done %s", d->ll.prefix);
     THREAD_RETURN();
 }
 
 static void join(struct jsdrvp_ul_device_s * device) {
     struct jsdrvp_mb_dev_s * d = (struct jsdrvp_mb_dev_s *) device;
+    // If the thread is still running (requested-close path), send
+    // FINALIZE; on forced-remove the thread has already exited via
+    // the LL_TERMINATED barrier and this message is a harmless no-op.
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, JSDRV_MSG_FINALIZE);
-    // and wait for thread to exit.
-    jsdrv_thread_join(&d->thread, 1000);
+    // Effectively unbounded: the LL_TERMINATED barrier (forced
+    // removal) or the FINALIZE command (requested close) guarantees
+    // the thread exits.  The previous 1000 ms timeout raced with
+    // in-flight messages and produced use-after-free when resources
+    // were freed while the thread was still running.  A 30 s cap
+    // serves only as a diagnostic for a lost barrier.
+    jsdrv_thread_join(&d->thread, 30000);
     if (d->drv && d->drv->finalize) {
         d->drv->finalize(d->drv);
     }

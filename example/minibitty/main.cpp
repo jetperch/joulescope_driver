@@ -129,6 +129,7 @@ int32_t app_match(struct app_s * self, const char * filter) {
 const struct command_s COMMANDS[] = {
         {"adapter", on_adapter, "MiniBitty adapter"},
         {"firmware", on_firmware, "Update device firmware"},
+        {"force_remove", on_force_remove, "Stress test: force-remove DUT during streaming"},
         {"fpga_mem", on_fpga_mem, "Program FPGA flash memory"},
         {"fwup", on_fwup, "Full firmware update from manufacturing package"},
         {"hotplug", on_hotplug, "Monitor device insertion and removal"},
@@ -217,6 +218,9 @@ int main(int argc, char * argv[]) {
     struct app_s * self = &app_;
     memset(self, 0, sizeof(*self));
     int32_t rc;
+
+    // Line-buffer stdout so logs survive an abrupt crash (e.g. force_remove).
+    setvbuf(stdout, NULL, _IOLBF, 0);
 
     if (argc < 2) {
         return usage();

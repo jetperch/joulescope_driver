@@ -42,6 +42,10 @@ enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
 // enum jsdrvp_msg_type_e
 #define JSDRV_MSG_TYPE_NORMAL   0x55aa1234U
 #define JSDRV_MSG_TYPE_DATA     0xaa55F00FU
+// Sentinel: final message pushed by the LL thread into rsp_q as it exits.
+// The UL thread treats receipt as a causal barrier — no more LL pushes will
+// ever arrive after this message — and safely exits rsp_q consumption.
+#define JSDRV_MSG_TYPE_LL_TERMINATED 0x3c5aa53cU
 
 struct jsdrvp_payload_subscribe_s {  // also for unsubscribe
     char topic[JSDRV_TOPIC_LENGTH_MAX];

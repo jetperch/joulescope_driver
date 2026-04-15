@@ -529,14 +529,33 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
 }
 
 static void device_remove(struct jsdrv_context_s * c, struct frontend_dev_s * d) {
-    (void) c;
     if (!d) {
         return;
     }
+    // Join the UL thread.  On forced removal, the UL thread has
+    // already emitted DEVICE_REMOVE into msg_backend and exited via
+    // the LL_TERMINATED barrier, so join returns promptly.  On
+    // requested close, join sends FINALIZE and waits.  Either way,
+    // after join returns no thread is producing device-scoped
+    // messages for d into msg_backend or ll_device.rsp_q.
     d->device->join(d->device);
+
+    // Drain msg_pend of any device_subscriber invocations still
+    // queued for d.  This runs on the frontend thread (we got here
+    // from device_remove_msg), so it executes synchronously and
+    // guarantees no callback with user_data==d remains in flight
+    // after this call returns.  Fixes the use-after-free that
+    // occurred when forced-remove yanked a streaming device.
+    jsdrv_pubsub_process(c->pubsub);
+
+    // Swap the subscriber for a "device removed" responder so any
+    // late API calls to this prefix produce a clean error rather
+    // than a silent drop.  Both publishes go through msg_pend and
+    // must be flushed before we free d.
     device_removed_responder(c, d->prefix, JSDRV_PUBSUB_SUBSCRIBE);
     device_sub(d, JSDRV_PUBSUB_UNSUBSCRIBE);
-    // todo update state
+    jsdrv_pubsub_process(c->pubsub);
+
     jsdrv_list_remove(&d->item);
     jsdrv_free(d);
 }
@@ -915,9 +934,9 @@ int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
         return JSDRV_ERROR_NOT_ENOUGH_MEMORY;     \
     }
 
-#define MSG_QUEUE_FREE(ptr_)                    \
+#define MSG_QUEUE_FREE(ptr_, ctx_)              \
     if (ptr_) {                                 \
-        msg_queue_finalize(ptr_);               \
+        msg_queue_finalize(ptr_, ctx_);         \
         ptr_ = NULL;                            \
     }
 
@@ -974,10 +993,15 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         jsdrv_pubsub_finalize(c->pubsub);
         c->pubsub = NULL;
 
-        MSG_QUEUE_FREE(c->msg_cmd);
-        MSG_QUEUE_FREE(c->msg_backend);
-        MSG_QUEUE_FREE(c->msg_free);
-        MSG_QUEUE_FREE(c->msg_free_data);
+        // msg_cmd and msg_backend may hold live (un-dispatched) messages;
+        // pass context so their payloads are properly released.
+        MSG_QUEUE_FREE(c->msg_cmd, c);
+        MSG_QUEUE_FREE(c->msg_backend, c);
+        // msg_free / msg_free_data are free pools: their messages have
+        // already been through jsdrvp_msg_free once and have no live
+        // payloads.  Pass NULL to avoid double-release of stale fields.
+        MSG_QUEUE_FREE(c->msg_free, NULL);
+        MSG_QUEUE_FREE(c->msg_free_data, NULL);
 
         jsdrv_free(c);
         jsdrv_platform_finalize();

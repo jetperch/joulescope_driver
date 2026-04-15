@@ -471,6 +471,9 @@ struct js110_dev_s {
     struct port_s ports[JSDRV_ARRAY_SIZE(FIELDS)];
 
     volatile bool do_exit;
+    // Set when LL emits JSDRV_MSG_TYPE_LL_TERMINATED into ll.rsp_q
+    // (forced removal).  See shutdown plan barriers B1/B2.
+    volatile bool ll_terminated;
     jsdrv_thread_t thread;
 };
 
@@ -1482,6 +1485,15 @@ static bool handle_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
     if (!msg) {
         return false;
     }
+    if (msg->inner_msg_type == JSDRV_MSG_TYPE_LL_TERMINATED) {
+        // Barrier B1: LL has stopped producing.
+        JSDRV_LOGI("handle_rsp LL_TERMINATED %s", d->ll.prefix);
+        d->ll_terminated = true;
+        d->do_exit = true;
+        msg->inner_msg_type = JSDRV_MSG_TYPE_NORMAL;
+        jsdrvp_msg_free(d->context, msg);
+        return false;
+    }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
         handle_stream_in(d, msg);
         msg_queue_push(d->ll.cmd_q, msg);  // return
@@ -1548,6 +1560,18 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
             ;
         }
     }
+    // Barrier B2: emit DEVICE_REMOVE last for forced-remove path.
+    if (d->ll_terminated) {
+        struct jsdrvp_msg_s * remove_msg = jsdrvp_msg_alloc(d->context);
+        jsdrv_cstr_copy(remove_msg->topic, JSDRV_MSG_DEVICE_REMOVE,
+                        sizeof(remove_msg->topic));
+        remove_msg->value.type = JSDRV_UNION_STR;
+        remove_msg->value.value.str = remove_msg->payload.str;
+        jsdrv_cstr_copy(remove_msg->payload.str, d->ll.prefix,
+                        sizeof(remove_msg->payload.str));
+        jsdrvp_backend_send(d->context, remove_msg);
+    }
+
     JSDRV_LOGI("JS110 USB upper-level thread done %s", d->ll.prefix);
     THREAD_RETURN();
 }
@@ -1555,8 +1579,8 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
 static void join(struct jsdrvp_ul_device_s * device) {
     struct js110_dev_s * d = (struct js110_dev_s *) device;
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, "");
-    // and wait for thread to exit.
-    jsdrv_thread_join(&d->thread, 1000);
+    // 30 s diagnostic cap; barrier guarantees exit.
+    jsdrv_thread_join(&d->thread, 30000);
 
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
         struct port_s *p = &d->ports[idx];

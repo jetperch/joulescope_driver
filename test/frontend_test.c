@@ -62,9 +62,9 @@ struct test_s self_;
 #define TEARDOWN() \
     assert_int_equal(0, jsdrv_unsubscribe(self->context, "@", subscribe_cmd_fn, self, 1000)); \
     jsdrv_finalize(self->context, 1000);        \
-    msg_queue_finalize(self->sub_msgs);         \
-    msg_queue_finalize(self->ll_dev1.cmd_q);    \
-    msg_queue_finalize(self->ll_dev1.rsp_q);    \
+    msg_queue_finalize(self->sub_msgs, NULL);   \
+    msg_queue_finalize(self->ll_dev1.cmd_q, NULL); \
+    msg_queue_finalize(self->ll_dev1.rsp_q, NULL); \
     memset(&self_, 0, sizeof(self_))
 
 #if 0
@@ -158,7 +158,7 @@ static void expect_subscribe_cmd_bin(struct test_s * t, const char * parameter_,
 #endif
 
 static void bk_finalize(struct jsdrvbk_s * backend) {
-    msg_queue_finalize(backend->cmd_q);
+    msg_queue_finalize(backend->cmd_q, NULL);
     // function_called();
 }
 

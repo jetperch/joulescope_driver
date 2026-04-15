@@ -90,6 +90,11 @@ struct dev_s {
     char serial_number[JSDRV_TOPIC_LENGTH_MAX];
     uint8_t mode;  // device_mode_e
     uint8_t mark;
+    // Set when a removal has been initiated (hotplug LEFT or forced).
+    // The device stays in devices_active until its transfers drain and
+    // it reaches DEVICE_MODE_CLOSED; only then is the LL_TERMINATED
+    // barrier emitted and the device retired.
+    bool removing;
     uint8_t endpoint_mode[ENDPOINT_COUNT];
 
     struct jsdrv_list_s transfers_pending;
@@ -581,30 +586,79 @@ static int32_t device_add(struct backend_s * s, libusb_device * usb_device, stru
     return 1;
 }
 
-static void device_remove_announce(struct backend_s * s, struct dev_s * d) {
-    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(s->context);
-    jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_REMOVE, sizeof(msg->topic));
-    msg->value.type = JSDRV_UNION_STR;
-    msg->value.value.str = msg->payload.str;
-    jsdrv_cstr_copy(msg->payload.str, d->ll_device.prefix, sizeof(msg->payload.str));
-    jsdrvp_backend_send(s->context, msg);
-}
-
-static void device_remove(struct backend_s * s, struct dev_s * d) {
-    JSDRV_LOGI("device_remove(%s)", d->ll_device.prefix);
-    jsdrv_list_remove(&d->item);
+// Initiate removal: cancel all pending transfers and mark the device.
+// The device stays in devices_active until `process_removing(s)`
+// confirms transfers have drained and emits the LL_TERMINATED barrier.
+// DEVICE_REMOVE is emitted later by the UL thread, not here — that is
+// what makes the UL's DEVICE_REMOVE the causal barrier on msg_backend.
+static void device_remove_begin(struct backend_s * s, struct dev_s * d) {
+    (void) s;
+    if (d->removing) {
+        return;
+    }
+    JSDRV_LOGI("device_remove_begin(%s)", d->ll_device.prefix);
+    d->removing = true;
     if (d->handle) {
         JSDRV_LOGI("release interface device %s", d->serial_number);
         libusb_release_interface(d->handle, 0);
     }
-    device_close(d);
-    if (d->usb_device) {
-        libusb_unref_device(d->usb_device);
-        d->usb_device = NULL;
+    // Cancel in-flight transfers for ALL endpoints (not just BULK_IN),
+    // so that forced-remove does not leave control/bulk_out transfers
+    // blocked on a vanished device.
+    struct jsdrv_list_s * item;
+    struct transfer_s * t;
+    jsdrv_list_foreach_reverse(&d->transfers_pending, item) {
+        t = JSDRV_CONTAINER_OF(item, struct transfer_s, item);
+        libusb_cancel_transfer(t->transfer);
     }
-    d->mode = DEVICE_MODE_UNASSIGNED;
-    device_remove_announce(s, d);
-    jsdrv_list_add_tail(&s->devices_free, &d->item);
+    for (uint32_t endpoint = 0; endpoint < ENDPOINT_COUNT; ++endpoint) {
+        d->endpoint_mode[endpoint] = EP_MODE_OFF;
+    }
+    if (d->mode == DEVICE_MODE_OPEN) {
+        d->mode = DEVICE_MODE_CLOSING;
+    }
+}
+
+// Complete removal for devices whose transfers have drained.  This is
+// the point at which LL has definitively stopped producing to rsp_q
+// for this device, so we push the LL_TERMINATED sentinel and retire
+// the device.  Transfers drain via LIBUSB_TRANSFER_CANCELLED (for
+// cancels we issued) and LIBUSB_TRANSFER_NO_DEVICE (for transfers
+// libusb aborted when it saw the device vanish); both paths call
+// transfer_free which empties transfers_pending.
+static void process_removing(struct backend_s * s) {
+    struct jsdrv_list_s * item;
+    struct dev_s * d;
+    jsdrv_list_foreach(&s->devices_active, item) {
+        d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
+        if (!d->removing) {
+            continue;
+        }
+        if (!jsdrv_list_is_empty(&d->transfers_pending)) {
+            continue;
+        }
+        // Close the libusb handle if still open (handle_device_close
+        // only runs on CLOSING -> CLOSED; NO_DEVICE skips straight to
+        // UNASSIGNED, so close may still be needed here).
+        if (d->handle) {
+            libusb_close(d->handle);
+            d->handle = NULL;
+        }
+
+        JSDRV_LOGI("process_removing(%s): LL_TERMINATED", d->ll_device.prefix);
+        struct jsdrvp_msg_s * sentinel = jsdrvp_msg_alloc(s->context);
+        sentinel->inner_msg_type = JSDRV_MSG_TYPE_LL_TERMINATED;
+        msg_queue_push(d->ll_device.rsp_q, sentinel);
+
+        jsdrv_list_remove(&d->item);
+        if (d->usb_device) {
+            libusb_unref_device(d->usb_device);
+            d->usb_device = NULL;
+        }
+        d->mode = DEVICE_MODE_UNASSIGNED;
+        d->removing = false;
+        jsdrv_list_add_tail(&s->devices_free, &d->item);
+    }
 }
 
 static void handle_hotplug(struct backend_s * s) {
@@ -635,8 +689,8 @@ static void handle_hotplug(struct backend_s * s) {
 
     jsdrv_list_foreach(&s->devices_active, item) {
         d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
-        if (d->mark == DEVICE_MARK_NONE) {
-            device_remove(s, d);
+        if ((d->mark == DEVICE_MARK_NONE) && !d->removing) {
+            device_remove_begin(s, d);
         }
     }
 }
@@ -790,6 +844,7 @@ void * backend_thread(void * arg) {
             handle_hotplug(s);
         }
         handle_device_close(s);
+        process_removing(s);
     }
 
 exit:
@@ -814,17 +869,17 @@ static void finalize(struct jsdrvbk_s * backend) {
         s->thread_id = 0;
     }
     if (s->backend.cmd_q) {
-        msg_queue_finalize(s->backend.cmd_q);
+        msg_queue_finalize(s->backend.cmd_q, s->context);
         s->backend.cmd_q = NULL;
     }
     for (uint32_t i = 0; i < DEVICES_MAX; ++i) {
         struct dev_s * d = &s->devices[i];
         if (d->ll_device.cmd_q) {
-            msg_queue_finalize(d->ll_device.cmd_q);
+            msg_queue_finalize(d->ll_device.cmd_q, s->context);
             d->ll_device.cmd_q = NULL;
         }
         if (d->ll_device.rsp_q) {
-            msg_queue_finalize(d->ll_device.rsp_q);
+            msg_queue_finalize(d->ll_device.rsp_q, s->context);
             d->ll_device.rsp_q = NULL;
         }
     }

@@ -636,7 +636,12 @@ static DWORD WINAPI device_thread(LPVOID lpParam) {
 
     JSDRV_LOGI("USB device_thread closing %s", d->device.prefix);
     device_close(d);
-    jsdrvp_send_finalize_msg(d->context, d->device.rsp_q, d->device.prefix);
+    // Barrier B1: as our last act, push the LL_TERMINATED sentinel
+    // into rsp_q.  The UL thread treats this as a causal guarantee
+    // that no more LL messages will arrive and exits cleanly.
+    struct jsdrvp_msg_s * sentinel = jsdrvp_msg_alloc(d->context);
+    sentinel->inner_msg_type = JSDRV_MSG_TYPE_LL_TERMINATED;
+    msg_queue_push(d->device.rsp_q, sentinel);
     JSDRV_LOGI("USB device_thread closed %s", d->device.prefix);
     return 0;
 }
@@ -687,9 +692,12 @@ static void device_path_to_serial_number(const char * device_path, char * sn) {
 static void device_thread_stop(struct dev_s * d) {
     if (d->thread) {
         jsdrvp_send_finalize_msg(d->context, d->device.cmd_q, d->device.prefix);
-        // and wait for thread to exit.
-        if (WAIT_OBJECT_0 != WaitForSingleObject(d->thread, 1000)) {
-            JSDRV_LOGW("device thread %s not closed cleanly.", d->device.prefix);
+        // The previous 1000 ms cap raced with blocking USB I/O and
+        // produced ISSUE 2 (LL thread writes to freed rsp_q after
+        // join timeout).  Wait long enough that a stuck thread is a
+        // real bug to investigate, not a routine timeout.
+        if (WAIT_OBJECT_0 != WaitForSingleObject(d->thread, 30000)) {
+            JSDRV_LOGE("device thread %s not closed cleanly.", d->device.prefix);
         }
         CloseHandle(d->thread);
         d->thread = NULL;
@@ -761,15 +769,13 @@ static int32_t device_add(struct backend_s * s, const struct device_type_s * dev
 
 static void device_remove(struct dev_s * d) {
     JSDRV_LOGI("device_remove_msg(%s): %s", d->device.prefix, d->device_path);
+    // Stop the LL device thread.  Its exit pushes LL_TERMINATED into
+    // rsp_q (barrier B1).  The UL thread reads the sentinel, exits,
+    // and emits DEVICE_REMOVE on msg_backend (barrier B2).  The
+    // backend itself no longer emits DEVICE_REMOVE — doing so would
+    // race ahead of in-flight UL messages on msg_backend and produce
+    // the use-after-free pattern in the frontend (ISSUE 1).
     device_thread_stop(d);
-
-    // send device remove message to frontend
-    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(d->context);
-    jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_REMOVE, sizeof(msg->topic));
-    msg->value.type = JSDRV_UNION_STR;
-    msg->value.value.str = msg->payload.str;
-    jsdrv_cstr_copy(msg->payload.str, d->device.prefix, sizeof(msg->payload.str));
-    jsdrvp_backend_send(d->context, msg);
 }
 
 static bool device_update(struct backend_s * s, const struct device_type_s * device_type, const char * device_path) {
@@ -792,12 +798,12 @@ static void device_free(struct backend_s * s, struct dev_s * d) {
     device_thread_stop(d);
 
     if (d->device.cmd_q) {
-        msg_queue_finalize(d->device.cmd_q);
+        msg_queue_finalize(d->device.cmd_q, s->context);
         d->device.cmd_q = NULL;
     }
 
     if (d->device.rsp_q) {
-        msg_queue_finalize(d->device.rsp_q);
+        msg_queue_finalize(d->device.rsp_q, s->context);
         d->device.rsp_q = NULL;
     }
 
@@ -941,7 +947,7 @@ static void finalize(struct jsdrvbk_s * backend) {
             s->thread = NULL;
         }
         if (s->backend.cmd_q) {
-            msg_queue_finalize(s->backend.cmd_q);
+            msg_queue_finalize(s->backend.cmd_q, s->context);
             s->backend.cmd_q = NULL;
         }
         if (s->discovery) {

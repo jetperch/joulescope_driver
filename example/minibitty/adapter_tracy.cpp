@@ -216,7 +216,7 @@ Profiler::~Profiler() {
         free( m_broadcast );
     }
     if (m_queue) {
-        msg_queue_finalize(m_queue);
+        msg_queue_finalize(m_queue, nullptr);
         m_queue = nullptr;
     }
     if (m_stream) {

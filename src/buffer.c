@@ -678,7 +678,7 @@ static void _buffer_remove_inner(struct buffer_mgr_s * self, uint8_t buffer_id) 
     unsubscribe(b->context, b->topic, JSDRV_SFLAG_PUB, _buffer_recv, b);
     msg_queue_push(b->cmd_q, jsdrvp_msg_alloc_value(self->context, JSDRV_MSG_FINALIZE, &jsdrv_union_u8(0)));
     jsdrv_thread_join(&b->thread, 1000);
-    msg_queue_finalize(b->cmd_q);
+    msg_queue_finalize(b->cmd_q, b->context);
     b->cmd_q = NULL;
     _send_buffer_list(self);
 }

@@ -284,6 +284,10 @@ struct dev_s {
     char ll_await_break_topic[JSDRV_TOPIC_LENGTH_MAX];
     struct jsdrv_union_s ll_await_break_value;
     volatile bool do_exit;
+    // Set when LL has emitted JSDRV_MSG_TYPE_LL_TERMINATED into ll.rsp_q.
+    // Causes the UL thread to exit and emit DEVICE_REMOVE on msg_backend
+    // as the causal barrier to the frontend (B2 in the shutdown plan).
+    volatile bool ll_terminated;
     jsdrv_thread_t thread;
     uint8_t state;  // state_e
 
@@ -1816,6 +1820,15 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     if (!msg) {
         return false;
     }
+    if (msg->inner_msg_type == JSDRV_MSG_TYPE_LL_TERMINATED) {
+        // Barrier B1: LL has stopped producing.
+        JSDRV_LOGI("handle_rsp LL_TERMINATED %s", d->ll.prefix);
+        d->ll_terminated = true;
+        d->do_exit = true;
+        msg->inner_msg_type = JSDRV_MSG_TYPE_NORMAL;
+        jsdrvp_msg_free(d->context, msg);
+        return false;
+    }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
         JSDRV_LOGD3("stream_in_data sz=%d", (int) msg->value.size);
         handle_stream_in(d, msg);
@@ -1883,15 +1896,32 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         }
     }
 
+    // Barrier B2: forced removal exits the loop via LL_TERMINATED.
+    // Emit DEVICE_REMOVE as our last act so the frontend sees every
+    // prior msg_backend message before it tears down frontend_dev_s.
+    if (d->ll_terminated) {
+        struct jsdrvp_msg_s * remove_msg = jsdrvp_msg_alloc(d->context);
+        jsdrv_cstr_copy(remove_msg->topic, JSDRV_MSG_DEVICE_REMOVE,
+                        sizeof(remove_msg->topic));
+        remove_msg->value.type = JSDRV_UNION_STR;
+        remove_msg->value.value.str = remove_msg->payload.str;
+        jsdrv_cstr_copy(remove_msg->payload.str, d->ll.prefix,
+                        sizeof(remove_msg->payload.str));
+        jsdrvp_backend_send(d->context, remove_msg);
+    }
+
     JSDRV_LOGI("JS220 USB upper-level thread done %s", d->ll.prefix);
     THREAD_RETURN();
 }
 
 static void join(struct jsdrvp_ul_device_s * device) {
     struct dev_s * d = (struct dev_s *) device;
+    // Harmless on forced-remove (thread already exited via barrier);
+    // required on requested close to drive the UL loop to exit.
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, "");
-    // and wait for thread to exit.
-    jsdrv_thread_join(&d->thread, 1000);
+    // 30 s cap is a diagnostic for a lost barrier; the protocol
+    // guarantees exit.
+    jsdrv_thread_join(&d->thread, 30000);
 
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
         struct port_s *p = &d->ports[idx];

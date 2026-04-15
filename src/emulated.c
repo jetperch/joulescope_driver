@@ -105,7 +105,7 @@ static void backend_finalize(struct jsdrvbk_s * backend) {
             s->thread = NULL;
         }
         if (s->backend.cmd_q) {
-            msg_queue_finalize(s->backend.cmd_q);
+            msg_queue_finalize(s->backend.cmd_q, s->context);
             s->backend.cmd_q = NULL;
         }
         jsdrv_free(s);

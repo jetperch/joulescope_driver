@@ -41,10 +41,25 @@ struct msg_queue_s;
 
 // forward declaration for "jsdrv/frontend.h"
 struct jsdrvp_msg_s;
+struct jsdrv_context_s;
 
 struct msg_queue_s * msg_queue_init(void);
 
-void msg_queue_finalize(struct msg_queue_s * queue);
+/**
+ * @brief Finalize a message queue and free any residual messages.
+ *
+ * @param queue The queue to finalize.  Safe to pass NULL.
+ * @param context The jsdrv context used to properly free residual
+ *      messages (releases heap payloads, decrements tmap refs,
+ *      returns messages to the free pool when possible).  Pass
+ *      NULL only when no context is available (e.g. after
+ *      jsdrv_finalize has already freed it, or for queues that
+ *      do not carry jsdrvp_msg_s payloads).  With NULL, residual
+ *      messages are released with jsdrv_free directly and their
+ *      embedded heap payloads leak.
+ */
+void msg_queue_finalize(struct msg_queue_s * queue,
+                        struct jsdrv_context_s * context);
 
 bool msg_queue_is_empty(struct msg_queue_s* queue);
 
