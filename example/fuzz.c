@@ -29,6 +29,7 @@
 #include "jsdrv_prv/thread.h"
 #include <inttypes.h>
 #include <time.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -80,6 +81,7 @@ struct app_s {
     const char * state_name;
     struct state_s * states;
     char device_prefix[256];
+    char device_filter[256];  // if non-empty, restrict t_open to this prefix
     struct jsdrv_buffer_info_s buffer_info[16];
 };
 
@@ -151,8 +153,24 @@ static int32_t t_open(struct app_s * self) {
         printf("ERROR : open failed, no devices: %s\n", devices_str);
         return 1;
     }
-    uint32_t device_idx = random_range_u32(0, device_count);
-    snprintf(self->device_prefix, sizeof(self->device_prefix), "%s", devices[device_idx]);
+    if (self->device_filter[0]) {
+        bool found = false;
+        for (uint32_t i = 0; i < device_count; ++i) {
+            if (0 == strcmp(devices[i], self->device_filter)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            printf("ERROR: filter device %s not in list: %s\n",
+                   self->device_filter, devices_str);
+            return 1;
+        }
+        snprintf(self->device_prefix, sizeof(self->device_prefix), "%s", self->device_filter);
+    } else {
+        uint32_t device_idx = random_range_u32(0, device_count);
+        snprintf(self->device_prefix, sizeof(self->device_prefix), "%s", devices[device_idx]);
+    }
     printf("open %s\n", self->device_prefix);
     rc = jsdrv_open(self->context, self->device_prefix, 0, 0);
     if (0 == rc) {
@@ -214,7 +232,13 @@ static int32_t t_sample_rate(struct app_s * self) {
     };
     uint32_t sample_rate_idx = random_range_u32(0, ARRAY_SIZE(sample_rates));
     uint32_t sample_rate = sample_rates[sample_rate_idx];
-    ROE(publish_device(self, "h/fs", &jsdrv_union_u32_r(sample_rate), JSDRV_TIMEOUT_MS_DEFAULT));
+    // Not every device supports every rate (e.g. JS320 rejects <1 kHz).
+    // A parameter rejection is an expected fuzz outcome, not a failure.
+    int32_t rc = publish_device(self, "h/fs", &jsdrv_union_u32_r(sample_rate),
+                                JSDRV_TIMEOUT_MS_DEFAULT);
+    if ((rc != 0) && (rc != JSDRV_ERROR_PARAMETER_INVALID)) {
+        return rc;
+    }
     return 0;
 }
 
@@ -375,6 +399,9 @@ static int usage(void) {
         "             off, emergency, alert, critical, [error], warning,\n"
         "             notice, info, debug1, debug2, debug3, all\n"
         "  random     The 64-bit random number seed\n"
+        "  device     Restrict fuzzing to a specific device prefix\n"
+        "             (e.g. u/js320/8W2A).  Without this option, open\n"
+        "             selects randomly from all enumerated devices.\n"
     );
     return 1;
 }
@@ -482,6 +509,11 @@ int main(int argc, char * argv[]) {
             if (jsdrv_cstr_to_u64(argv[0], &random_seed)) {
                 return usage();
             }
+            ARG_CONSUME();
+        } else if (0 == strcmp("--device", argv[0])) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            snprintf(app.device_filter, sizeof(app.device_filter), "%s", argv[0]);
             ARG_CONSUME();
         } else {
             return usage();

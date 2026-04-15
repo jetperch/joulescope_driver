@@ -306,7 +306,29 @@ static void on_bulk_out_done(struct libusb_transfer * transfer) {
     device_rsp_transfer(t);
 }
 
+// Returns true and responds with JSDRV_ERROR_CLOSED if the device cannot
+// accept a USB submission (handle cleared or not in OPEN mode).  Protects
+// against close/open races where the frontend queues USB traffic while
+// the backend has torn down the libusb handle.
+static bool device_closed_reply(struct dev_s * d, struct jsdrvp_msg_s * msg, bool is_ctrl) {
+    if ((d->mode == DEVICE_MODE_OPEN) && d->handle) {
+        return false;
+    }
+    JSDRV_LOGW("%s: device closed, drop msg %s",
+               d->ll_device.prefix, msg->topic);
+    if (is_ctrl) {
+        msg->extra.bkusb_ctrl.status = JSDRV_ERROR_CLOSED;
+    } else {
+        msg->value = jsdrv_union_i32(JSDRV_ERROR_CLOSED);
+    }
+    device_rsp(d, msg);
+    return true;
+}
+
 static void bulk_out_send(struct dev_s * d, struct jsdrvp_msg_s * msg) {
+    if (device_closed_reply(d, msg, false)) {
+        return;
+    }
     struct transfer_s * t = transfer_alloc(d);
     t->msg = msg;
     JSDRV_LOGI("bulk_out_send(%s) %d bytes", d->ll_device.prefix, (int) msg->value.size);
@@ -336,6 +358,9 @@ static void on_ctrl_in_done(struct libusb_transfer * transfer) {
 }
 
 static void ctrl_in_start(struct dev_s * d, struct jsdrvp_msg_s * msg) {
+    if (device_closed_reply(d, msg, true)) {
+        return;
+    }
     struct transfer_s * t = transfer_alloc(d);
     t->msg = msg;
     JSDRV_LOGD3("ctrl_in_start(%s)", d->ll_device.prefix);
@@ -362,6 +387,9 @@ static void on_ctrl_out_done(struct libusb_transfer * transfer) {
 }
 
 static void ctrl_out_start(struct dev_s * d, struct jsdrvp_msg_s * msg) {
+    if (device_closed_reply(d, msg, true)) {
+        return;
+    }
     struct transfer_s * t = transfer_alloc(d);
     t->msg = msg;
     JSDRV_LOGD3("ctrl_out_start(%s) %d bytes", d->ll_device.prefix, (int) msg->value.size);
@@ -436,6 +464,9 @@ static void bulk_in_start(struct dev_s * d, uint8_t pipe_id) {
 }
 
 static void bulk_in_open(struct dev_s * d, struct jsdrvp_msg_s * msg) {
+    if (device_closed_reply(d, msg, false)) {
+        return;
+    }
     uint8_t ep = msg->extra.bkusb_stream.endpoint;
     uint8_t pipe_id = ep | 0x80;
     JSDRV_LOGI("bulk_in_open(%d, endpoint=0x%02x)", d->ll_device.prefix, (int) ep);
