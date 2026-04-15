@@ -380,8 +380,30 @@ static struct bulk_out_s * bulk_out_initialize(struct dev_s * dev, uint8_t pipe_
     return b;
 }
 
+// Drop USB submissions that arrive after device_close cleared d->winusb.
+// Mirrors device_closed_reply() in the libusb backend (commit 88a3a93):
+// the LL cmd_q can contain queued bulk/ctrl traffic behind a CLOSE, and
+// submitting it to WinUsb after the handle is gone crashes inside
+// WinUsb_WritePipe / WinUsb_ControlTransfer.
+static bool device_closed_reply(struct dev_s * d, struct jsdrvp_msg_s * msg, bool is_ctrl) {
+    if (d->winusb != INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    JSDRV_LOGW("%s: device closed, drop msg %s", d->device.prefix, msg->topic);
+    if (is_ctrl) {
+        msg->extra.bkusb_ctrl.status = JSDRV_ERROR_CLOSED;
+    } else {
+        msg->value = jsdrv_union_i32(JSDRV_ERROR_CLOSED);
+    }
+    msg_queue_push(d->device.rsp_q, msg);
+    return true;
+}
+
 static void bulk_out_send(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_BIN);
+    if (device_closed_reply(d, msg, false)) {
+        return;
+    }
     uint8_t ep = msg->extra.bkusb_stream.endpoint;
     struct bulk_out_s * b;
     if (!d->endpoints[ep]) {
@@ -528,6 +550,9 @@ static void ctrl_complete(struct dev_s * d) {
 
 static void ctrl_add(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_LOGD1("ctrl_add");
+    if (device_closed_reply(d, msg, true)) {
+        return;
+    }
     bool do_issue = jsdrv_list_is_empty(&d->ctrl_list);
     jsdrv_list_add_tail(&d->ctrl_list, &msg->item);
     if (do_issue) {
@@ -575,6 +600,9 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     } else if (0 == strcmp(JSDRV_USBBK_MSG_CTRL_OUT, msg->topic)) {
         ctrl_add(d, msg);
     } else if (0 == strcmp(JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN, msg->topic)) {
+        if (device_closed_reply(d, msg, false)) {
+            return true;
+        }
         uint8_t ep = msg->extra.bkusb_stream.endpoint;
         JSDRV_LOGI("bulk_in_stream_open %d", (int) ep);
         ep_finalize_by_id(d, ep);
