@@ -89,3 +89,10 @@ set_target_properties(minibitty_exe PROPERTIES OUTPUT_NAME minibitty)
 add_executable(fuzz fuzz.c)
 add_dependencies(fuzz jsdrv)
 target_link_libraries(fuzz jsdrv)
+# Export dynamic symbols so the POSIX crash handler's backtrace_symbols()
+# can resolve names instead of only printing module+offset.  No-op on
+# Windows (/DEBUG already emits PDB symbols consumed by DbgHelp) and on
+# macOS (default behavior).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(fuzz PROPERTIES ENABLE_EXPORTS ON)
+endif()

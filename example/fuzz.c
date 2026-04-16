@@ -36,6 +36,16 @@
 #include <string.h>
 #include <signal.h>
 
+#if _WIN32
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+#else
+#include <execinfo.h>
+#include <unistd.h>
+#include <pthread.h>
+#endif
+
 #define ARG_CONSUME() --argc; ++argv
 #define ARG_REQUIRE()  if (argc <= 0) {return usage();}
 #define ARRAY_SIZE(x) ( sizeof(x) / sizeof((x)[0]) )
@@ -101,6 +111,186 @@ static void signal_handler(int signal){
         quit_ = 1;
     }
 }
+
+#if _WIN32
+// Walk the crashing thread's stack using DbgHelp and print resolved
+// frames to stderr.  Called from the top-level SEH filter so we have
+// the CONTEXT at the fault, not at the handler entry.
+static void print_stack(CONTEXT * ctx_in) {
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread = GetCurrentThread();
+    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
+    SymInitialize(process, NULL, TRUE);
+
+    CONTEXT ctx = *ctx_in;
+    STACKFRAME64 frame = {0};
+    DWORD machine;
+#if defined(_M_AMD64)
+    machine = IMAGE_FILE_MACHINE_AMD64;
+    frame.AddrPC.Offset    = ctx.Rip;  frame.AddrPC.Mode    = AddrModeFlat;
+    frame.AddrFrame.Offset = ctx.Rbp;  frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = ctx.Rsp;  frame.AddrStack.Mode = AddrModeFlat;
+#elif defined(_M_ARM64)
+    machine = IMAGE_FILE_MACHINE_ARM64;
+    frame.AddrPC.Offset    = ctx.Pc;   frame.AddrPC.Mode    = AddrModeFlat;
+    frame.AddrFrame.Offset = ctx.Fp;   frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = ctx.Sp;   frame.AddrStack.Mode = AddrModeFlat;
+#else
+    fprintf(stderr, "  (stack walk: unsupported architecture)\n");
+    return;
+#endif
+
+    uint8_t sym_buf[sizeof(SYMBOL_INFO) + 256];
+    SYMBOL_INFO * sym = (SYMBOL_INFO *) sym_buf;
+    sym->MaxNameLen = 255;
+    sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+    IMAGEHLP_LINE64 line;
+    line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+
+    for (int i = 0; i < 64; ++i) {
+        if (!StackWalk64(machine, process, thread, &frame, &ctx, NULL,
+                          SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
+            break;
+        }
+        if (frame.AddrPC.Offset == 0) {
+            break;
+        }
+        DWORD64 addr = frame.AddrPC.Offset;
+        DWORD64 disp = 0;
+        if (SymFromAddr(process, addr, &disp, sym)) {
+            DWORD line_disp = 0;
+            if (SymGetLineFromAddr64(process, addr, &line_disp, &line)) {
+                fprintf(stderr, "  #%02d %s+0x%llx  %s:%lu\n",
+                        i, sym->Name, (unsigned long long) disp,
+                        line.FileName, (unsigned long) line.LineNumber);
+            } else {
+                fprintf(stderr, "  #%02d %s+0x%llx\n",
+                        i, sym->Name, (unsigned long long) disp);
+            }
+        } else {
+            fprintf(stderr, "  #%02d 0x%llx (no symbol)\n",
+                    i, (unsigned long long) addr);
+        }
+    }
+    fflush(stderr);
+}
+
+static const char * seh_name(DWORD code) {
+    switch (code) {
+        case EXCEPTION_ACCESS_VIOLATION:         return "EXCEPTION_ACCESS_VIOLATION";
+        case EXCEPTION_STACK_OVERFLOW:           return "EXCEPTION_STACK_OVERFLOW";
+        case EXCEPTION_ILLEGAL_INSTRUCTION:      return "EXCEPTION_ILLEGAL_INSTRUCTION";
+        case EXCEPTION_INT_DIVIDE_BY_ZERO:       return "EXCEPTION_INT_DIVIDE_BY_ZERO";
+        case EXCEPTION_PRIV_INSTRUCTION:         return "EXCEPTION_PRIV_INSTRUCTION";
+        case EXCEPTION_IN_PAGE_ERROR:            return "EXCEPTION_IN_PAGE_ERROR";
+        case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:    return "EXCEPTION_ARRAY_BOUNDS_EXCEEDED";
+        case EXCEPTION_DATATYPE_MISALIGNMENT:    return "EXCEPTION_DATATYPE_MISALIGNMENT";
+        case EXCEPTION_FLT_DIVIDE_BY_ZERO:       return "EXCEPTION_FLT_DIVIDE_BY_ZERO";
+        case EXCEPTION_FLT_INVALID_OPERATION:    return "EXCEPTION_FLT_INVALID_OPERATION";
+        case 0xE06D7363:                         return "C++ exception";
+        default:                                 return "unknown";
+    }
+}
+
+static LONG WINAPI fuzz_unhandled_exception(EXCEPTION_POINTERS * ep) {
+    EXCEPTION_RECORD * r = ep->ExceptionRecord;
+    fprintf(stderr, "\n### UNHANDLED EXCEPTION 0x%08lx (%s) at %p, thread=%lu\n",
+            (unsigned long) r->ExceptionCode, seh_name(r->ExceptionCode),
+            r->ExceptionAddress, GetCurrentThreadId());
+    if ((r->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) && (r->NumberParameters >= 2)) {
+        fprintf(stderr, "  %s 0x%llx\n",
+                r->ExceptionInformation[0] ? "write to" : "read from",
+                (unsigned long long) r->ExceptionInformation[1]);
+    }
+    print_stack(ep->ContextRecord);
+    return EXCEPTION_EXECUTE_HANDLER;  // terminate
+}
+
+// Last-resort CRT handler for abort() / pure-virtual / etc.  These
+// bypass the SEH filter on MSVC's CRT, so we hook them separately.
+static void crt_invalid_parameter(const wchar_t * expr, const wchar_t * func,
+                                  const wchar_t * file, unsigned int line, uintptr_t rsvd) {
+    (void) rsvd;
+    fprintf(stderr, "\n### CRT invalid parameter: %ls at %ls %ls:%u\n",
+            expr ? expr : L"?", func ? func : L"?", file ? file : L"?", line);
+    CONTEXT ctx;
+    RtlCaptureContext(&ctx);
+    print_stack(&ctx);
+}
+
+static void crt_purecall(void) {
+    fprintf(stderr, "\n### CRT pure virtual call\n");
+    CONTEXT ctx;
+    RtlCaptureContext(&ctx);
+    print_stack(&ctx);
+}
+
+static void crash_handler_install(void) {
+    SetUnhandledExceptionFilter(fuzz_unhandled_exception);
+    _set_invalid_parameter_handler(crt_invalid_parameter);
+    _set_purecall_handler(crt_purecall);
+    // Route CRT asserts to stderr rather than a modal dialog.
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+}
+#else
+// POSIX (Linux + macOS) crash handler.  Uses sigaction + execinfo's
+// backtrace() to dump a stack of the crashing thread, then re-raises
+// the signal with SIG_DFL so a core dump is still produced.  Frames
+// include module+offset and, on Linux builds with -rdynamic (or dynsym
+// exports) / macOS normally, resolved symbol names.  Run the resulting
+// output through `addr2line -e ./cmake-build/example/fuzz -f` for
+// source:line when symbols are not inlined.
+#include <string.h>
+
+static const char * posix_signal_name(int sig) {
+    switch (sig) {
+        case SIGSEGV: return "SIGSEGV";
+        case SIGBUS:  return "SIGBUS";
+        case SIGILL:  return "SIGILL";
+        case SIGFPE:  return "SIGFPE";
+        case SIGABRT: return "SIGABRT";
+        default:      return "SIG?";
+    }
+}
+
+static void posix_crash_handler(int sig, siginfo_t * info, void * ctx) {
+    (void) ctx;
+    // async-signal-safe: use write() / dprintf on STDERR_FILENO.
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf),
+            "\n### SIGNAL %d (%s) at addr %p, thread=%p, code=%d\n",
+            sig, posix_signal_name(sig),
+            info ? info->si_addr : NULL,
+            (void *) (uintptr_t) pthread_self(),
+            info ? info->si_code : 0);
+    if (n > 0) {
+        ssize_t wrote = write(STDERR_FILENO, buf, (size_t) n);
+        (void) wrote;
+    }
+    void * frames[64];
+    int nframes = backtrace(frames, (int) (sizeof(frames) / sizeof(frames[0])));
+    backtrace_symbols_fd(frames, nframes, STDERR_FILENO);
+    // Restore default handler and re-raise so a core dump is produced
+    // and the exit status reflects the signal.
+    struct sigaction sa = {0};
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sigaction(sig, &sa, NULL);
+    raise(sig);
+}
+
+static void crash_handler_install(void) {
+    static const int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = posix_crash_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    for (size_t i = 0; i < sizeof(sigs) / sizeof(sigs[0]); ++i) {
+        sigaction(sigs[i], &sa, NULL);
+    }
+}
+#endif
 
 static void state_update(struct app_s * self, const char * name) {
     self->state_name = name;
@@ -520,6 +710,7 @@ int main(int argc, char * argv[]) {
         }
     }
 
+    crash_handler_install();
     signal(SIGABRT, signal_handler);
     signal(SIGINT, signal_handler);
 
