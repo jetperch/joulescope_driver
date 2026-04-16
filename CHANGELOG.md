@@ -4,11 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
-## 2.0.1
+## 2.0.2
 
-2026 Mar 24 [in progress]
+2026 Apr 16 [in progress]
 
 * Added Minibitty support for 3rd generation Joulescope products.
+* Fixed latent issues with segfaults on force disconnects. 
+* Added externally available OS abstraction. 
 
 
 ## 1.12.0

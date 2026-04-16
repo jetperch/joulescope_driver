@@ -90,6 +90,7 @@ struct app_s {
     struct jsdrv_context_s * context;
     const char * state_name;
     struct state_s * states;
+    int32_t nice_level;
     char device_prefix[256];
     char device_filter[256];  // if non-empty, restrict t_open to this prefix
     struct jsdrv_buffer_info_s buffer_info[16];
@@ -435,6 +436,9 @@ static int32_t t_sample_rate(struct app_s * self) {
 static int32_t t_stream_start(struct app_s * self) {
     ROE(publish_device(self, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
     ROE(publish_device(self, "s/v/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+    if (self->nice_level) {
+        publish_device(self, "h/fs", &jsdrv_union_u32_r(1000000),JSDRV_TIMEOUT_MS_DEFAULT);
+    }
     state_update(self, ST_STREAM);
     return 0;
 }
@@ -581,8 +585,14 @@ static void on_log_recv(void * user_data, struct jsdrv_log_header_s const * head
 
 static int usage(void) {
     printf(
-        "usage: fuzz [--<arg> <value>]\n"
+        "usage: fuzz [--<flag>] [--<arg> <value>]\n"
         "Perform Joulescope driver fuzz testing.\n"
+        "\n"
+        "Flags:\n"
+        "  nice       How nice the fuzz test should be.\n"
+        "             Each instance increases the niceness level..\n"
+        "             0 = no niceness\n"
+        "             1 = restore h/fs after streaming\n"
         "\n"
         "Optional arguments:\n"
         "  log_level  Configure the log level to stdout.  One of:\n"
@@ -681,6 +691,7 @@ int main(int argc, char * argv[]) {
             .context = NULL,
             .state_name = ST_FINALIZED,
             .states = states,
+            .nice_level = 0,
     };
     int8_t log_level = JSDRV_LOG_LEVEL_ERROR;
 
@@ -705,6 +716,9 @@ int main(int argc, char * argv[]) {
             ARG_REQUIRE();
             snprintf(app.device_filter, sizeof(app.device_filter), "%s", argv[0]);
             ARG_CONSUME();
+        } else if (0 == strcmp("--nice", argv[0])) {
+            ARG_CONSUME();
+            app.nice_level++;
         } else {
             return usage();
         }
