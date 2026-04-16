@@ -57,7 +57,7 @@ static const char STATE_FETCH_PREFIXES[] = {'c', 's', 0};
 #define STATE_FETCH_PHASE_META_HDR  3
 #define STATE_FETCH_PHASE_META_DATA 4
 
-#define STATE_FETCH_GET_INIT_RETRY_MAX      3
+#define STATE_FETCH_GET_INIT_RETRY_MAX      20
 #define STATE_FETCH_GET_INIT_RETRY_TIMEOUT  (JSDRV_TIME_SECOND / 20)  // 50 ms
 #define STATE_FETCH_META_BLOBS_MAX  8
 #define STATE_FETCH_META_PAGE_SIZE  256
@@ -122,6 +122,8 @@ enum events_e {
 
     EV_API_OPEN_REQUEST,
     EV_API_CLOSE_REQUEST,
+
+    EV_SENSOR_READY,
 };
 
 enum state_e {
@@ -131,6 +133,7 @@ enum state_e {
     ST_LL_BULK_OPEN,
     ST_LINK_REQUEST,
     ST_LINK_IDENTITY,
+    ST_AWAIT_SENSOR_READY,
     ST_OPEN,
 
     // graceful disconnect
@@ -428,6 +431,17 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
     timeout_clear(self);
 
     if (sf->phase == STATE_FETCH_PHASE_GET_INIT) {
+        if (status == JSDRV_ERROR_BUSY) {
+            if (sf->retry_count < STATE_FETCH_GET_INIT_RETRY_MAX) {
+                sf->retry_count++;
+                JSDRV_LOGI("state_fetch: GET_INIT BUSY for '%c', retry %u/%u",
+                           STATE_FETCH_PREFIXES[sf->prefix_idx],
+                           sf->retry_count, STATE_FETCH_GET_INIT_RETRY_MAX);
+                self->timeout_utc = jsdrv_time_utc()
+                        + STATE_FETCH_GET_INIT_RETRY_TIMEOUT;
+                return;
+            }
+        }
         if (status != 0) {
             JSDRV_LOGW("state_fetch: GET_INIT failed status=%u", status);
             state_fetch_advance_prefix(self);
@@ -738,6 +752,12 @@ static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     return true;
 }
 
+// Close-path on_enter helpers arm a 250 ms timeout so EV_TIMEOUT can
+// force progress if the device never responds with the expected ack.
+// Without these timeouts, a misbehaving or disconnected device wedges
+// the UL thread forever and downstream finalize/join times out with
+// UAF risk.  The close path is idempotent device-side, so forcing a
+// transition is safe: a late ack in the new state is simply dropped.
 static bool on_pubsub_flush(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     if (self->drv && self->drv->on_close) {
@@ -745,12 +765,26 @@ static bool on_pubsub_flush(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     }
     // ok to use "." prefix since directly sending to first PubSub instance.
     publish_to_device(self, "././!ping", &jsdrv_union_str(PUBSUB_DISCONNECT_STR));
+    timeout_set(self);
+    return true;
+}
+
+static bool on_pubsub_flush_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) self; (void) event;
+    JSDRV_LOGW("close timeout: no PUBSUB_FLUSH ack, advancing");
     return true;
 }
 
 static bool on_link_disconnect(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     send_frame_ctrl_to_device(self, MB_FRAME_CTRL_DISCONNECT_REQ);
+    timeout_set(self);
+    return true;
+}
+
+static bool on_link_disconnect_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) self; (void) event;
+    JSDRV_LOGW("close timeout: no LINK_DISCONNECT ack, advancing");
     return true;
 }
 
@@ -758,6 +792,13 @@ static bool on_ll_close(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(self->context, JSDRV_MSG_CLOSE, &jsdrv_union_i32(0));
     msg_queue_push(self->ll.cmd_q, m);
+    timeout_set(self);
+    return true;
+}
+
+static bool on_ll_close_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) self; (void) event;
+    JSDRV_LOGW("close timeout: no BACKEND_CLOSE ack, advancing");
     return true;
 }
 
@@ -803,9 +844,35 @@ const struct state_machine_transition_s state_machine_link_request[] = {
 };
 
 const struct state_machine_transition_s state_machine_link_identity[] = {
-    {EV_LINK_IDENTITY_RECEIVED, ST_OPEN, NULL},
+    {EV_LINK_IDENTITY_RECEIVED, ST_AWAIT_SENSOR_READY, NULL},
     {EV_TIMEOUT, ST_LINK_REQUEST, NULL},
     {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
+    TRANSITION_END
+};
+
+// Wait for the device's sensor side to finish booting before running
+// state_fetch.  The firmware publishes `c/comm/sensor/_state = 1`
+// (retained) when the sensor link transitions to CONNECTED.  The host
+// receives this via handle_in_publish on the UL thread.  If the sensor
+// was already on (reconnect after close), the retained value arrives
+// almost immediately.  A 2-second timeout ensures we proceed even when
+// the firmware is old or the signal never arrives.
+static bool on_await_sensor_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) event;
+    self->timeout_utc = jsdrv_time_utc() + 2 * JSDRV_TIME_SECOND;
+    return true;
+}
+
+static bool on_await_sensor_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) self; (void) event;
+    JSDRV_LOGW("sensor ready timeout, proceeding to open");
+    return true;
+}
+
+const struct state_machine_transition_s state_machine_await_sensor[] = {
+    {EV_SENSOR_READY, ST_OPEN, NULL},
+    {EV_TIMEOUT, ST_OPEN, on_await_sensor_timeout},
+    {EV_API_CLOSE_REQUEST, ST_PUBSUB_FLUSH, NULL},
     TRANSITION_END
 };
 
@@ -853,25 +920,26 @@ const struct state_machine_transition_s state_machine_open[] = {
 
 const struct state_machine_transition_s state_machine_pubsub_flush[] = {
     {EV_PUBSUB_FLUSH, ST_LINK_DISCONNECT, NULL},
-    // todo timeout
+    {EV_TIMEOUT, ST_LINK_DISCONNECT, on_pubsub_flush_timeout},
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_link_disconnect[] = {
     {EV_LINK_DISCONNECT_ACK, ST_LL_CLOSE_PEND, NULL},
-    // todo timeout
+    {EV_TIMEOUT, ST_LL_CLOSE_PEND, on_link_disconnect_timeout},
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_ll_close_pend[] = {
     {EV_ADVANCE, ST_LL_CLOSE, NULL},
-    // todo timeout
+    // ST_LL_CLOSE_PEND is internally-advanced from the UL thread loop
+    // (EV_ADVANCE dispatched every iteration) so no timeout is needed.
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_ll_close[] = {
     {EV_BACKEND_CLOSE_ACK, ST_CLOSED, NULL},
-    // todo timeout
+    {EV_TIMEOUT, ST_CLOSED, on_ll_close_timeout},
     TRANSITION_END
 };
 
@@ -886,6 +954,7 @@ const struct state_machine_state_s state_machine_states[] = {
     {ST_LL_BULK_OPEN, "ll_bulk_open", on_ll_bulk_open, NULL, state_machine_ll_bulk_open},
     {ST_LINK_REQUEST, "link_request", on_link_request, NULL, state_machine_link_request},
     {ST_LINK_IDENTITY, "link_identify", on_link_identify, NULL, state_machine_link_identity},
+    {ST_AWAIT_SENSOR_READY, "await_sensor", on_await_sensor_enter, NULL, state_machine_await_sensor},
     {ST_OPEN, "open", on_open_enter, NULL, state_machine_open},
     {ST_PUBSUB_FLUSH, "pubsub_flush", on_pubsub_flush, NULL, state_machine_pubsub_flush},
     {ST_LINK_DISCONNECT, "link_disconnect", on_link_disconnect, NULL, state_machine_link_disconnect},
@@ -1290,6 +1359,20 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
         }
     }
 
+    // Sensor-ready interlock: the first publish arriving with the
+    // sensor-task prefix ('s/...') proves the sensor has finished
+    // booting and its pubsub task is running.  Before this, GET_INIT
+    // returns BUSY because the sensor-side state machine is not yet
+    // serviceable.  Fall back after a 2 s timeout for firmware that
+    // doesn't publish under 's/' during the open window.
+    if ((d->state == ST_AWAIT_SENSOR_READY)
+            && (publish->topic[0] == 's') && (publish->topic[1] == '/')) {
+        JSDRV_LOGI("sensor ready: %s", publish->topic);
+        jsdrvp_backend_send(d->context, m);
+        state_machine_process(d, EV_SENSOR_READY);
+        return;
+    }
+
     if (jsdrv_cstr_ends_with(topic.topic, "/./!pong")
             && (value_type == JSDRV_UNION_STR)
             && jsdrv_cstr_casecmp(PUBSUB_DISCONNECT_STR, m->payload.str)) {
@@ -1561,7 +1644,7 @@ static uint32_t thread_timeout_duration_ms(struct jsdrvp_mb_dev_s * d) {
 
 static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
     struct jsdrvp_mb_dev_s *d = (struct jsdrvp_mb_dev_s *) lpParam;
-    JSDRV_LOGI("MB USB upper-level thread started for %s", d->ll.prefix);
+    JSDRV_LOGI("MB USB upper-level thread started for %s d=%p", d->ll.prefix, (void *) d);
     state_machine_process(d, EV_RESET);
 
 #if _WIN32
@@ -1632,7 +1715,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         jsdrvp_backend_send(d->context, msg);
     }
 
-    JSDRV_LOGI("MB USB upper-level thread done %s", d->ll.prefix);
+    JSDRV_LOGI("MB USB upper-level thread done %s d=%p", d->ll.prefix, (void *) d);
     THREAD_RETURN();
 }
 
@@ -1641,7 +1724,7 @@ static void join(struct jsdrvp_ul_device_s * device) {
     // If the thread is still running (requested-close path), send
     // FINALIZE; on forced-remove the thread has already exited via
     // the LL_TERMINATED barrier and this message is a harmless no-op.
-    JSDRV_LOGI("ul join(%s): send FINALIZE", d->ll.prefix);
+    JSDRV_LOGI("ul join(%s d=%p): send FINALIZE", d->ll.prefix, (void *) d);
     jsdrvp_send_finalize_msg(d->context, d->ul.cmd_q, JSDRV_MSG_FINALIZE);
     // 10 s is a diagnostic cap, not an expected wait: the LL_TERMINATED
     // barrier (forced removal) or the FINALIZE command (requested
@@ -1649,7 +1732,15 @@ static void join(struct jsdrvp_ul_device_s * device) {
     // approaching this cap indicates a lost barrier or a USB stall and
     // is a real bug to investigate.
     int32_t jrc = jsdrv_thread_join(&d->thread, 10000);
-    JSDRV_LOGI("ul join(%s): joined rc=%d", d->ll.prefix, (int) jrc);
+    JSDRV_LOGI("ul join(%s d=%p): joined rc=%d", d->ll.prefix, (void *) d, (int) jrc);
+    if (jrc) {
+        // Thread join timed out: the UL thread is still running and
+        // will UAF if we proceed to free d.  Leak d (and its ul.cmd_q)
+        // rather than crashing.  The LEAK log arms attention — the
+        // root cause (stuck barrier / hung USB op) must be fixed.
+        JSDRV_LOGE("ul join(%s d=%p): LEAK - thread still running, refusing to free", d->ll.prefix, (void *) d);
+        return;
+    }
     if (d->drv && d->drv->finalize) {
         d->drv->finalize(d->drv);
     }
