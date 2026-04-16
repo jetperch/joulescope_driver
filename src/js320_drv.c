@@ -357,8 +357,14 @@ static void js320_port_append(struct js320_drv_s * self,
     // send what we have and start fresh.
     if (port->msg_in != NULL) {
         if (sample_id != port->sample_id_next) {
-            JSDRV_LOGI("ch %u sample_id skip: expected=%" PRIu64 " received=%" PRIu64,
-                       (unsigned) ch, port->sample_id_next, sample_id);
+            uint32_t decimate_runtime_dbg = js320_runtime_decimate(self, ch);
+            JSDRV_LOGI("ch %u sample_id skip: expected=%" PRIu64 " received=%" PRIu64
+                       " signal_dwn_n=%u gpi_dwn_mode=%u gpi_dwn_n=%u runtime_decimate=%u",
+                       (unsigned) ch, port->sample_id_next, sample_id,
+                       (unsigned) self->signal_dwn_n,
+                       (unsigned) self->gpi_dwn_mode,
+                       (unsigned) self->gpi_dwn_n,
+                       (unsigned) decimate_runtime_dbg);
             js320_port_flush(self, dev, ch);
         } else if (index != port->current_index) {
             js320_port_flush(self, dev, ch);
