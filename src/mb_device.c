@@ -48,8 +48,20 @@
 #define MB_TOPIC_SIZE_MAX       (32U)
 #define PUBSUB_DISCONNECT_STR   "h|disconnect"
 
+// One time_map slot per possible pubsub-instance prefix (top-level
+// topic first character).  Devices with any combination of ctrl /
+// sensor / future task prefixes share this table; unused slots are
+// harmless.
+#define MB_DEV_TIME_MAP_COUNT   (256U)
+
 // Hard-coded pubsub prefixes for state fetch (until distributed discovery)
-static const char STATE_FETCH_PREFIXES[] = {'c', 's', 0};
+// Default iteration prefixes when the upper driver does not provide
+// its own via drv->state_fetch_prefixes().  This preserves legacy
+// behavior for drivers that haven't opted into the callback yet and
+// for devices whose firmware exposes both a `c` (ctrl) and `s`
+// (sensor) task.  Drop to "" once null-target GET_INIT lands firmware
+// side (see doc/plans/open_state_management.md).
+static const char STATE_FETCH_PREFIXES_DEFAULT[] = "cs";
 
 #define STATE_FETCH_PHASE_IDLE      0
 #define STATE_FETCH_PHASE_GET_INIT  1
@@ -82,6 +94,10 @@ struct state_fetch_s {
     uint8_t  phase;
     uint8_t  retry_count;
     uint32_t transaction_id;
+    // Null-terminated list of top-level prefixes to iterate.  Set by
+    // state_fetch_start from drv->state_fetch_prefixes() with a
+    // fallback to STATE_FETCH_PREFIXES_DEFAULT.  Outlives the fetch.
+    const char * prefixes;
     // metadata blob info captured from ././info entries
     struct state_fetch_blob_s blobs[STATE_FETCH_META_BLOBS_MAX];
     uint8_t  blob_count;
@@ -122,8 +138,6 @@ enum events_e {
 
     EV_API_OPEN_REQUEST,
     EV_API_CLOSE_REQUEST,
-
-    EV_SENSOR_READY,
 };
 
 enum state_e {
@@ -133,7 +147,6 @@ enum state_e {
     ST_LL_BULK_OPEN,
     ST_LINK_REQUEST,
     ST_LINK_IDENTITY,
-    ST_AWAIT_SENSOR_READY,
     ST_OPEN,
 
     // graceful disconnect
@@ -167,7 +180,13 @@ struct jsdrvp_mb_dev_s {
     FILE * file_in;
 
     struct mb_link_identity_s identity;  // received device identity
-    struct jsdrv_time_map_s time_map;
+    // One time_map per top-level pubsub instance prefix, indexed by
+    // the first character of the instance topic (e.g. time_maps['s']
+    // for the sensor task's timesync, time_maps['c'] for ctrl-side).
+    // counter_rate > 0.0 means the slot has been populated by an
+    // incoming !map; a zero slot returns NULL from the accessor.  All
+    // slots are cleared in on_ll_open() at session start.
+    struct jsdrv_time_map_s time_maps[MB_DEV_TIME_MAP_COUNT];
     struct state_fetch_s state_fetch;
 };
 
@@ -233,6 +252,9 @@ static void send_frame_ctrl_to_device(struct jsdrvp_mb_dev_s * d, uint8_t ctrl) 
 static bool on_ll_open(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     self->out_frame_id = 0;
+    // Drop any stale timesync maps from a previous open so accessors
+    // return NULL until the current session's !map publishes arrive.
+    memset(self->time_maps, 0, sizeof(self->time_maps));
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(self->context, JSDRV_MSG_OPEN, &jsdrv_union_i32(0));
     msg_queue_push(self->ll.cmd_q, m);
     return true;
@@ -340,12 +362,30 @@ static void state_fetch_start(struct jsdrvp_mb_dev_s * self) {
     memset(sf, 0, sizeof(*sf));
     sf->prefix_idx = 0;
     sf->transaction_id = 0x5F00;
+    sf->prefixes = NULL;
+    if (self->drv && self->drv->state_fetch_prefixes) {
+        sf->prefixes = self->drv->state_fetch_prefixes(self->drv);
+    }
+    if (!sf->prefixes || !sf->prefixes[0]) {
+        sf->prefixes = STATE_FETCH_PREFIXES_DEFAULT;
+    }
     state_fetch_send_get_init(self);
+}
+
+void jsdrvp_mb_dev_state_fetch_start(struct jsdrvp_mb_dev_s * dev) {
+    if (!dev) {
+        return;
+    }
+    if (dev->state_fetch.phase != STATE_FETCH_PHASE_IDLE) {
+        // fetch already running or completed; ignore duplicate kicks
+        return;
+    }
+    state_fetch_start(dev);
 }
 
 static void state_fetch_send_get_init(struct jsdrvp_mb_dev_s * self) {
     struct state_fetch_s * sf = &self->state_fetch;
-    char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+    char prefix = sf->prefixes[sf->prefix_idx];
     if (!prefix) {
         state_fetch_start_meta(self);
         return;
@@ -372,7 +412,7 @@ static void state_fetch_send_get_init(struct jsdrvp_mb_dev_s * self) {
 
 static void state_fetch_send_get_next(struct jsdrvp_mb_dev_s * self) {
     struct state_fetch_s * sf = &self->state_fetch;
-    char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+    char prefix = sf->prefixes[sf->prefix_idx];
     sf->phase = STATE_FETCH_PHASE_GET_NEXT;
 
     uint8_t payload[8];
@@ -435,7 +475,7 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
             if (sf->retry_count < STATE_FETCH_GET_INIT_RETRY_MAX) {
                 sf->retry_count++;
                 JSDRV_LOGI("state_fetch: GET_INIT BUSY for '%c', retry %u/%u",
-                           STATE_FETCH_PREFIXES[sf->prefix_idx],
+                           sf->prefixes[sf->prefix_idx],
                            sf->retry_count, STATE_FETCH_GET_INIT_RETRY_MAX);
                 self->timeout_utc = jsdrv_time_utc()
                         + STATE_FETCH_GET_INIT_RETRY_TIMEOUT;
@@ -483,35 +523,11 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
             memcpy(topic, raw_topic, MB_TOPIC_SIZE_MAX);
             topic[MB_TOPIC_SIZE_MAX - 1] = '\0';
 
-            // Validate topic is printable ASCII (reject garbage)
-            {
-                bool valid = true;
-                for (uint32_t ti = 0; topic[ti]; ++ti) {
-                    uint8_t ch = (uint8_t) topic[ti];
-                    if (ch < 0x20 || ch > 0x7E) {
-                        valid = false;
-                        break;
-                    }
-                }
-                if (!valid) {
-                    JSDRV_LOGW("state_fetch: skipping invalid topic at offset %u", offset);
-                    offset += entry_size;
-                    continue;
-                }
-            }
-
             // Publish the retained value to the host pubsub
             state_fetch_publish_state(self, topic, vtype, vdata, vsize);
 
             // Check if this is the ././info topic
-            char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
-            char info_topic[16];
-            info_topic[0] = prefix; info_topic[1] = '/';
-            info_topic[2] = '.'; info_topic[3] = '/';
-            info_topic[4] = 'i'; info_topic[5] = 'n';
-            info_topic[6] = 'f'; info_topic[7] = 'o';
-            info_topic[8] = '\0';
-            if (0 == strcmp(topic, info_topic) && vtype == JSDRV_UNION_STDMSG) {
+            if (0 == strcmp(topic + 1, "/./info") && vtype == JSDRV_UNION_STDMSG) {
                 state_fetch_process_info_entry(self, vdata, vsize);
             }
 
@@ -747,8 +763,16 @@ static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
         }
     }
 
-    // Fetch device state + metadata, then signal OPEN when complete
-    state_fetch_start(self);
+    // Fetch device state + metadata, then signal OPEN when complete.
+    // A driver may defer by implementing open_ready (returning false)
+    // and invoking jsdrvp_mb_dev_state_fetch_start() when ready.
+    bool ready = true;
+    if (self->drv && self->drv->open_ready) {
+        ready = self->drv->open_ready(self->drv, self);
+    }
+    if (ready) {
+        state_fetch_start(self);
+    }
     return true;
 }
 
@@ -844,35 +868,9 @@ const struct state_machine_transition_s state_machine_link_request[] = {
 };
 
 const struct state_machine_transition_s state_machine_link_identity[] = {
-    {EV_LINK_IDENTITY_RECEIVED, ST_AWAIT_SENSOR_READY, NULL},
+    {EV_LINK_IDENTITY_RECEIVED, ST_OPEN, NULL},
     {EV_TIMEOUT, ST_LINK_REQUEST, NULL},
     {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
-    TRANSITION_END
-};
-
-// Wait for the device's sensor side to finish booting before running
-// state_fetch.  The firmware publishes `c/comm/sensor/_state = 1`
-// (retained) when the sensor link transitions to CONNECTED.  The host
-// receives this via handle_in_publish on the UL thread.  If the sensor
-// was already on (reconnect after close), the retained value arrives
-// almost immediately.  A 2-second timeout ensures we proceed even when
-// the firmware is old or the signal never arrives.
-static bool on_await_sensor_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
-    (void) event;
-    self->timeout_utc = jsdrv_time_utc() + 2 * JSDRV_TIME_SECOND;
-    return true;
-}
-
-static bool on_await_sensor_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
-    (void) self; (void) event;
-    JSDRV_LOGW("sensor ready timeout, proceeding to open");
-    return true;
-}
-
-const struct state_machine_transition_s state_machine_await_sensor[] = {
-    {EV_SENSOR_READY, ST_OPEN, NULL},
-    {EV_TIMEOUT, ST_OPEN, on_await_sensor_timeout},
-    {EV_API_CLOSE_REQUEST, ST_PUBSUB_FLUSH, NULL},
     TRANSITION_END
 };
 
@@ -884,7 +882,7 @@ static bool on_open_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     }
     if (sf->phase == STATE_FETCH_PHASE_GET_INIT
             && sf->retry_count < STATE_FETCH_GET_INIT_RETRY_MAX) {
-        char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+        char prefix = sf->prefixes[sf->prefix_idx];
         sf->retry_count++;
         JSDRV_LOGI("state_fetch: retry GET_INIT for '%c' (%u/%u)",
                    prefix, sf->retry_count,
@@ -894,7 +892,7 @@ static bool on_open_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
                 + STATE_FETCH_GET_INIT_RETRY_TIMEOUT;
     } else if (sf->phase == STATE_FETCH_PHASE_GET_INIT
             || sf->phase == STATE_FETCH_PHASE_GET_NEXT) {
-        char prefix = STATE_FETCH_PREFIXES[sf->prefix_idx];
+        char prefix = sf->prefixes[sf->prefix_idx];
         JSDRV_LOGW("state_fetch: timeout waiting for !state response from '%c'", prefix);
         state_fetch_advance_prefix(self);
     } else {
@@ -954,7 +952,6 @@ const struct state_machine_state_s state_machine_states[] = {
     {ST_LL_BULK_OPEN, "ll_bulk_open", on_ll_bulk_open, NULL, state_machine_ll_bulk_open},
     {ST_LINK_REQUEST, "link_request", on_link_request, NULL, state_machine_link_request},
     {ST_LINK_IDENTITY, "link_identify", on_link_identify, NULL, state_machine_link_identity},
-    {ST_AWAIT_SENSOR_READY, "await_sensor", on_await_sensor_enter, NULL, state_machine_await_sensor},
     {ST_OPEN, "open", on_open_enter, NULL, state_machine_open},
     {ST_PUBSUB_FLUSH, "pubsub_flush", on_pubsub_flush, NULL, state_machine_pubsub_flush},
     {ST_LINK_DISCONNECT, "link_disconnect", on_link_disconnect, NULL, state_machine_link_disconnect},
@@ -1299,18 +1296,16 @@ static void handle_in_timesync_map(struct jsdrvp_mb_dev_s * d,
     const struct mb_timesync_map_v1_s * body =
         (const struct mb_timesync_map_v1_s *) (inner + 1);
 
-    // Only the sensor's timesync map is authoritative for sample
-    // timestamping in d->time_map.  Maps from other instances (e.g.,
-    // ctrl 'c/ts/!map') are forwarded to subscribers but not cached
-    // here.  TODO: enable sensor-side timesync task to populate this.
-    if (publish->topic[0] == 's') {
-        d->time_map.offset_time = body->utc;
-        d->time_map.offset_counter = body->counter;
-        d->time_map.counter_rate = ((double) body->counter_rate) / ((double) (1ULL << 32));
-    }
+    // Cache the map keyed by the publishing task's prefix char.  Which
+    // prefix is "authoritative" for a given signal is a device-driver
+    // policy question answered via jsdrvp_mb_dev_time_map(dev, prefix).
+    uint8_t idx = (uint8_t) publish->topic[0];
+    struct jsdrv_time_map_s * map = &d->time_maps[idx];
+    map->offset_time = body->utc;
+    map->offset_counter = body->counter;
+    map->counter_rate = ((double) body->counter_rate) / ((double) (1ULL << 32));
     JSDRV_LOGD1("timesync map %s: utc=%" PRIi64 " counter=%" PRIu64 " rate=%f",
-                publish->topic, body->utc, body->counter,
-                ((double) body->counter_rate) / ((double) (1ULL << 32)));
+                publish->topic, body->utc, body->counter, map->counter_rate);
 }
 
 static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, struct mb_stdmsg_publish_s * publish, uint8_t length) {
@@ -1357,20 +1352,6 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
         } else if (inner_hdr->type == MB_STDMSG_TIMESYNC_MAP) {
             handle_in_timesync_map(d, publish, value_size);
         }
-    }
-
-    // Sensor-ready interlock: the first publish arriving with the
-    // sensor-task prefix ('s/...') proves the sensor has finished
-    // booting and its pubsub task is running.  Before this, GET_INIT
-    // returns BUSY because the sensor-side state machine is not yet
-    // serviceable.  Fall back after a 2 s timeout for firmware that
-    // doesn't publish under 's/' during the open window.
-    if ((d->state == ST_AWAIT_SENSOR_READY)
-            && (publish->topic[0] == 's') && (publish->topic[1] == '/')) {
-        JSDRV_LOGI("sensor ready: %s", publish->topic);
-        jsdrvp_backend_send(d->context, m);
-        state_machine_process(d, EV_SENSOR_READY);
-        return;
     }
 
     if (jsdrv_cstr_ends_with(topic.topic, "/./!pong")
@@ -1827,10 +1808,14 @@ int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev) {
     return dev->open_mode;
 }
 
-const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(struct jsdrvp_mb_dev_s * dev) {
-    return &dev->time_map;
-}
-
-struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map_mut(struct jsdrvp_mb_dev_s * dev) {
-    return &dev->time_map;
+const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(
+        struct jsdrvp_mb_dev_s * dev, char prefix) {
+    if (!dev) {
+        return NULL;
+    }
+    const struct jsdrv_time_map_s * map = &dev->time_maps[(uint8_t) prefix];
+    if (map->counter_rate <= 0.0) {
+        return NULL;  // not yet populated in this session
+    }
+    return map;
 }

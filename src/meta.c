@@ -323,3 +323,71 @@ int32_t jsdrv_meta_value(const char * meta, struct jsdrv_union_s * value) {
     };
     return jsdrv_json_parse(meta, on_value, &self);
 }
+
+// --- Flags parser ---
+
+enum flags_state_e {
+    FLAGS_ST_SEARCH,
+    FLAGS_ST_KEY,
+    FLAGS_ST_ARRAY,
+};
+
+struct flags_s {
+    uint8_t state;
+    uint8_t depth;
+    uint32_t flags;
+};
+
+static int32_t on_flags(void * user_data, const struct jsdrv_union_s * token) {
+    struct flags_s * s = (struct flags_s *) user_data;
+    switch (token->op) {
+        case JSDRV_JSON_VALUE:
+            if (s->state == FLAGS_ST_KEY || s->state == FLAGS_ST_ARRAY) {
+                if (0 == jsdrv_json_strcmp("ro", token)) {
+                    s->flags |= JSDRV_META_FLAG_RO;
+                } else if (0 == jsdrv_json_strcmp("hide", token)) {
+                    s->flags |= JSDRV_META_FLAG_HIDE;
+                } else if (0 == jsdrv_json_strcmp("dev", token)) {
+                    s->flags |= JSDRV_META_FLAG_DEV;
+                }
+                if (s->state == FLAGS_ST_KEY) {
+                    return JSDRV_ERROR_ABORTED;
+                }
+            }
+            break;
+        case JSDRV_JSON_KEY:
+            if ((s->depth == 1) && (0 == jsdrv_json_strcmp("flags", token))) {
+                s->state = FLAGS_ST_KEY;
+            }
+            break;
+        case JSDRV_JSON_OBJ_START: s->depth++; break;
+        case JSDRV_JSON_OBJ_END:   s->depth--; break;
+        case JSDRV_JSON_ARRAY_START:
+            if (s->state == FLAGS_ST_KEY) {
+                s->state = FLAGS_ST_ARRAY;
+            }
+            break;
+        case JSDRV_JSON_ARRAY_END:
+            if (s->state == FLAGS_ST_ARRAY) {
+                return JSDRV_ERROR_ABORTED;
+            }
+            break;
+        default: break;
+    }
+    return 0;
+}
+
+int32_t jsdrv_meta_flags(const char * meta, uint32_t * flags) {
+    if (!meta || !flags) {
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    *flags = 0;
+    struct flags_s self = {
+        .state = FLAGS_ST_SEARCH,
+        .depth = 0,
+        .flags = 0,
+    };
+    jsdrv_json_parse(meta, on_flags, &self);
+    *flags = self.flags;
+    return 0;
+}

@@ -188,14 +188,19 @@ int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev) {
     return 0;
 }
 
-const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(struct jsdrvp_mb_dev_s * dev) {
+const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(struct jsdrvp_mb_dev_s * dev,
+                                                        char prefix) {
     (void) dev;
+    (void) prefix;
+    // Match production semantics: NULL until populated.
+    if (g_cap.time_map.counter_rate <= 0.0) {
+        return NULL;
+    }
     return &g_cap.time_map;
 }
 
-struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map_mut(struct jsdrvp_mb_dev_s * dev) {
+void jsdrvp_mb_dev_state_fetch_start(struct jsdrvp_mb_dev_s * dev) {
     (void) dev;
-    return &g_cap.time_map;
 }
 
 
@@ -269,6 +274,13 @@ static struct js320_drv_s * make_drv(void) {
 
 static int test_setup(void ** state) {
     capture_reset();
+    // Pre-populate the test fixture's time_map so
+    // jsdrvp_mb_dev_time_map() returns non-NULL during the test.
+    // In production, firmware publishes !map at open; in tests, we
+    // seed these values directly since there's no backend.
+    g_cap.time_map.offset_time = 0;
+    g_cap.time_map.offset_counter = 0;
+    g_cap.time_map.counter_rate = 16000000.0;  // JS320 native 16 MHz
     *state = make_drv();
     return 0;
 }

@@ -219,7 +219,7 @@ static int32_t worker_wait_sensor_link(struct worker_s * w,
                                        uint32_t timeout_ms) {
     struct jsdrv_topic_s topic;
     jsdrv_topic_set(&topic, w->device_prefix);
-    jsdrv_topic_append(&topic, "c/comm/sensor/_state");
+    jsdrv_topic_append(&topic, "c/comm/sensor/state");
 
     jsdrv_os_event_reset(w->event);
     jsdrv_subscribe(w->context, topic.topic, JSDRV_SFLAG_PUB,

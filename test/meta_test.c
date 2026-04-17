@@ -94,11 +94,98 @@ static void test_no_default(void **state) {
     assert_false(value.flags & JSDRV_UNION_FLAG_RETAIN);
 }
 
+static void test_flags_none(void **state) {
+    (void) state;
+    uint32_t flags = 0xFFFFFFFF;
+    assert_int_equal(0, jsdrv_meta_flags(META1, &flags));
+    assert_int_equal(0, flags);
+}
+
+static void test_flags_no_flags_key(void **state) {
+    (void) state;
+    uint32_t flags = 0xFFFFFFFF;
+    assert_int_equal(0, jsdrv_meta_flags(META_NO_DEFAULT, &flags));
+    assert_int_equal(0, flags);
+}
+
+static void test_flags_ro_string(void **state) {
+    (void) state;
+    const char * meta = "{\"dtype\": \"u8\", \"flags\": \"ro\"}";
+    uint32_t flags = 0;
+    assert_int_equal(0, jsdrv_meta_flags(meta, &flags));
+    assert_int_equal(JSDRV_META_FLAG_RO, flags);
+}
+
+static void test_flags_hide_string(void **state) {
+    (void) state;
+    const char * meta = "{\"dtype\": \"u8\", \"flags\": \"hide\"}";
+    uint32_t flags = 0;
+    assert_int_equal(0, jsdrv_meta_flags(meta, &flags));
+    assert_int_equal(JSDRV_META_FLAG_HIDE, flags);
+}
+
+static void test_flags_dev_string(void **state) {
+    (void) state;
+    const char * meta = "{\"dtype\": \"u8\", \"flags\": \"dev\"}";
+    uint32_t flags = 0;
+    assert_int_equal(0, jsdrv_meta_flags(meta, &flags));
+    assert_int_equal(JSDRV_META_FLAG_DEV, flags);
+}
+
+static void test_flags_array_single(void **state) {
+    (void) state;
+    const char * meta = "{\"dtype\": \"u8\", \"flags\": [\"ro\"]}";
+    uint32_t flags = 0;
+    assert_int_equal(0, jsdrv_meta_flags(meta, &flags));
+    assert_int_equal(JSDRV_META_FLAG_RO, flags);
+}
+
+static void test_flags_array_multiple(void **state) {
+    (void) state;
+    const char * meta = "{\"dtype\": \"u8\", \"flags\": [\"ro\", \"hide\"]}";
+    uint32_t flags = 0;
+    assert_int_equal(0, jsdrv_meta_flags(meta, &flags));
+    assert_int_equal(JSDRV_META_FLAG_RO | JSDRV_META_FLAG_HIDE, flags);
+}
+
+static void test_flags_array_all(void **state) {
+    (void) state;
+    const char * meta = "{\"dtype\": \"u8\", \"flags\": [\"ro\", \"hide\", \"dev\"]}";
+    uint32_t flags = 0;
+    assert_int_equal(0, jsdrv_meta_flags(meta, &flags));
+    assert_int_equal(JSDRV_META_FLAG_RO | JSDRV_META_FLAG_HIDE | JSDRV_META_FLAG_DEV, flags);
+}
+
+static void test_flags_unknown_ignored(void **state) {
+    (void) state;
+    const char * meta = "{\"dtype\": \"u8\", \"flags\": [\"ro\", \"no_traverse\"]}";
+    uint32_t flags = 0;
+    assert_int_equal(0, jsdrv_meta_flags(meta, &flags));
+    assert_int_equal(JSDRV_META_FLAG_RO, flags);
+}
+
+static void test_flags_null_params(void **state) {
+    (void) state;
+    uint32_t flags = 0;
+    assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_meta_flags(NULL, &flags));
+    assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_meta_flags("{}", NULL));
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_basic),
             cmocka_unit_test(test_value),
             cmocka_unit_test(test_no_default),
+            cmocka_unit_test(test_flags_none),
+            cmocka_unit_test(test_flags_no_flags_key),
+            cmocka_unit_test(test_flags_ro_string),
+            cmocka_unit_test(test_flags_hide_string),
+            cmocka_unit_test(test_flags_dev_string),
+            cmocka_unit_test(test_flags_array_single),
+            cmocka_unit_test(test_flags_array_multiple),
+            cmocka_unit_test(test_flags_array_all),
+            cmocka_unit_test(test_flags_unknown_ignored),
+            cmocka_unit_test(test_flags_null_params),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

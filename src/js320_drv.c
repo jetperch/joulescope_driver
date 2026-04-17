@@ -196,7 +196,22 @@ struct js320_drv_s {
     // scopes i/v/p (ch 5-7), `gpi` scopes GPI + trigger (ch 8-12).
     struct js320_ack_state_s signal_ack;
     struct js320_ack_state_s gpi_ack;
+
+    // Deferred-state-fetch interlock.  After ST_OPEN is entered, the
+    // JS320 ctrl firmware has only just told its sensor task to boot
+    // (the sensor side powers up in response to the USBD link-connect
+    // event).  state_fetch would hit BUSY until the sensor pubsub task
+    // is alive, so open_ready returns false and we call
+    // jsdrvp_mb_dev_state_fetch_start() from handle_publish when the
+    // first `s/...` publish proves the sensor task is running, or from
+    // on_timeout as a 2 s fallback.
+    bool     waiting_for_sensor;
 };
+
+// How long to wait for the sensor task to come up before falling back
+// to state_fetch anyway.  The JS320 ctrl firmware powers the sensor on
+// USBD connect; typical boot time is < 1 s.
+#define JS320_SENSOR_READY_TIMEOUT_NS (2 * JSDRV_TIME_SECOND)
 
 // --- Streaming signal helpers ---
 
@@ -285,16 +300,12 @@ static struct jsdrvp_msg_s * js320_stream_msg_alloc(struct jsdrvp_mb_dev_s * dev
     struct jsdrv_stream_signal_s * signal = (struct jsdrv_stream_signal_s *) m->payload.bin;
     js320_signal_init(signal, def, index, sample_id, decimate_runtime);
 
-    // Lazy-init: until the sensor's timesync converges, seed the device
-    // time_map with host UTC + the current sample_id and the signal's
-    // native sample rate.  Mirrors JS220 behavior in
-    // js220_usb.c::time_map_update().  After the first s/ts/!map arrives,
-    // mb_device.c::handle_in_timesync_map() refines the values.
-    struct jsdrv_time_map_s * mtmap = jsdrvp_mb_dev_time_map_mut(dev);
-    if (mtmap->offset_time == 0) {
-        mtmap->offset_time = jsdrv_time_utc();
-        mtmap->offset_counter = sample_id;
-        mtmap->counter_rate = (def->sample_rate > 0) ? (double) def->sample_rate : 1.0;
+    // The sensor's timesync map is authoritative for sample timestamping.
+    const struct jsdrv_time_map_s * mtmap = jsdrvp_mb_dev_time_map(dev, 's');
+    if (!mtmap) {
+        // no time map yet, so no streaming data
+        jsdrvp_msg_free(context, m);
+        return NULL;
     }
     signal->time_map = *mtmap;
 
@@ -379,6 +390,12 @@ static void js320_port_append(struct js320_drv_s * self,
     if (port->msg_in == NULL) {
         port->msg_in = js320_stream_msg_alloc(dev, def, data_topic_override,
                                               index, sample_id, decimate_runtime);
+        if (port->msg_in == NULL) {
+            // Allocation deferred (e.g. sensor !map not yet received);
+            // drop this frame — the next one will retry once the map
+            // is populated.
+            return;
+        }
         port->sample_id_next = sample_id;
         port->current_index = index;
     }
@@ -613,6 +630,27 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
                identity->vendor_id, identity->product_id);
 }
 
+// The JS320 exposes two top-level pubsub tasks: `c` (ctrl-side) and
+// `s` (sensor-side).  state_fetch must enumerate both.
+static const char * js320_state_fetch_prefixes(struct jsdrvp_mb_drv_s * drv) {
+    (void) drv;
+    return "cs";
+}
+
+// Defer state_fetch until the sensor task publishes — see
+// waiting_for_sensor doc on struct js320_drv_s.  The JS320 ctrl
+// firmware powers the sensor only after USBD reports connected, so
+// the sensor-side pubsub can take up to ~1 s to come up after the
+// host has already reached ST_OPEN.  Arming a 2 s driver timeout here
+// lets on_timeout fall back to state_fetch_start if the sensor-ready
+// signal never arrives.
+static bool js320_open_ready(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev) {
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    self->waiting_for_sensor = true;
+    jsdrvp_mb_dev_set_timeout(dev, jsdrv_time_utc() + JS320_SENSOR_READY_TIMEOUT_NS);
+    return false;  // defer
+}
+
 static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     // Drop any in-flight per-port accumulators so we don't leak the
@@ -630,6 +668,7 @@ static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s 
     for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
         self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
     }
+    self->waiting_for_sensor = false;
     js320_fwup_on_close(self->fwup);
     js320_jtag_on_close(self->jtag);
     self->dev = NULL;
@@ -676,18 +715,13 @@ static void js320_handle_statistics(struct js320_drv_s * self,
         dst->p_max *= p_scale;
         dst->charge_f64 *= self->i_scale;
         dst->energy_f64 *= p_scale;
-        // Lazy-init: until the sensor's timesync converges, seed the
-        // device time_map with host UTC + the current statistics sample
-        // id and the native counter rate.  Mirrors JS220 behavior in
-        // js220_usb.c::time_map_update().
-        struct jsdrv_time_map_s * mtmap = jsdrvp_mb_dev_time_map_mut(dev);
-        if (mtmap->offset_time == 0) {
-            mtmap->offset_time = jsdrv_time_utc();
-            mtmap->offset_counter = dst->block_sample_id;
-            mtmap->counter_rate = (double) dst->sample_freq;
+        const struct jsdrv_time_map_s * mtmap = jsdrvp_mb_dev_time_map(dev, 's');
+        if (mtmap) {
+            dst->time_map = *mtmap;
+            jsdrvp_mb_dev_backend_send(dev, m);
+        } else {
+            jsdrvp_msg_free(context, m);
         }
-        dst->time_map = *mtmap;
-        jsdrvp_mb_dev_backend_send(dev, m);
     } else {
         jsdrvp_msg_free(context, m);
     }
@@ -1090,7 +1124,18 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
                                   const char * subtopic,
                                   const struct jsdrv_union_s * value) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
-    (void) dev;
+
+    // Sensor-ready interlock: any publish from the `s/...` subtree is
+    // proof that the sensor task's pubsub is running, and state_fetch
+    // can now proceed without hitting BUSY.
+    if (self->waiting_for_sensor && (subtopic[0] == 's') && (subtopic[1] == '/')) {
+        JSDRV_LOGI("sensor ready: %s", subtopic);
+        self->waiting_for_sensor = false;
+        jsdrvp_mb_dev_set_timeout(dev, 0);
+        jsdrvp_mb_dev_state_fetch_start(dev);
+        // fall through; we want the frontend to see this publish too
+    }
+
     // Firmware acknowledgment that a dwnN change has taken effect.
     // Value is the 16 MHz sample_id at which the new decimation becomes
     // valid.  Latest ack wins; the drop window closes once all
@@ -1124,6 +1169,14 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
 static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
                               struct jsdrvp_mb_dev_s * dev) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    if (self->waiting_for_sensor) {
+        // Sensor never published within JS320_SENSOR_READY_TIMEOUT_NS.
+        // Proceed with state_fetch anyway; GET_INIT BUSY retry will
+        // backstop if the firmware is genuinely still booting.
+        JSDRV_LOGW("sensor ready timeout, proceeding to state_fetch");
+        self->waiting_for_sensor = false;
+        jsdrvp_mb_dev_state_fetch_start(dev);
+    }
     js320_ack_timeout_check(&self->signal_ack, dev, "s/dwnN");
     js320_ack_timeout_check(&self->gpi_ack,    dev, "s/gpi/+/dwnN");
     js320_fwup_on_timeout(self->fwup);
@@ -1161,6 +1214,8 @@ static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     self->drv.handle_cmd = js320_handle_cmd;
     self->drv.handle_publish = js320_handle_publish;
     self->drv.on_timeout = js320_on_timeout;
+    self->drv.state_fetch_prefixes = js320_state_fetch_prefixes;
+    self->drv.open_ready = js320_open_ready;
     self->drv.finalize = js320_finalize;
     *drv = &self->drv;
     return 0;

@@ -148,6 +148,43 @@ struct jsdrvp_mb_drv_s {
                              struct jsdrvp_mb_dev_s * dev);
 
     /**
+     * @brief Return the null-terminated list of top-level topic prefixes
+     *        that mb_device should iterate during state_fetch.
+     *
+     * Example: a device with separate ctrl and sensor pubsub tasks
+     * returns "cs".  The returned pointer must outlive the open
+     * session.  If NULL or if this hook returns NULL, mb_device uses
+     * a built-in default ("cs" today for backwards compatibility;
+     * replaceable with null-target GET_INIT once firmware supports it).
+     *
+     * @param drv This driver instance.
+     * @return Null-terminated prefix character list, or NULL for default.
+     */
+    const char * (*state_fetch_prefixes)(struct jsdrvp_mb_drv_s * drv);
+
+    /**
+     * @brief Gate state_fetch on driver-specific readiness.
+     *
+     * Called once on open, after drv->on_open and any RESUME/DEFAULTS
+     * handling.  Return true to let mb_device start state_fetch
+     * immediately.  Return false to defer state_fetch until the driver
+     * explicitly calls jsdrvp_mb_dev_state_fetch_start(dev) from a
+     * later callback (e.g. handle_publish when a readiness signal
+     * arrives, or on_timeout as a fallback).
+     *
+     * NULL is treated as "always ready" — the generic fast path.
+     *
+     * The driver is responsible for arming its own readiness timeout
+     * via jsdrvp_mb_dev_set_timeout + on_timeout if it defers.
+     *
+     * @param drv This driver instance.
+     * @param dev The mb_device handle.
+     * @return true to proceed with state_fetch immediately, false to defer.
+     */
+    bool (*open_ready)(struct jsdrvp_mb_drv_s * drv,
+                       struct jsdrvp_mb_dev_s * dev);
+
+    /**
      * @brief Called to destroy the upper driver instance.
      *
      * @param drv This driver instance.  Free all resources including drv itself.
@@ -254,21 +291,35 @@ void jsdrvp_mb_dev_send_return_code(struct jsdrvp_mb_dev_s * dev,
 int32_t jsdrvp_mb_dev_open_mode(struct jsdrvp_mb_dev_s * dev);
 
 /**
- * @brief Get the current time mapping.
+ * @brief Get the cached timesync map for the given pubsub-instance prefix.
+ *
+ * mb_device caches one map per top-level pubsub-instance prefix char
+ * (e.g. 's' for sensor-side, 'c' for ctrl-side).  Each incoming
+ * `<prefix>/ts/!map` publish updates its slot.  Device-specific drivers
+ * choose which slot they trust for sample timestamping.
  *
  * @param dev The mb_device handle.
- * @return Pointer to the device's time_map.
+ * @param prefix The first character of the pubsub-instance topic.
+ * @return Pointer to the device's cached map for this prefix, or NULL
+ *         if no !map has arrived for this prefix in the current open
+ *         session.  The returned pointer stays valid for the session;
+ *         contents are updated in place by subsequent !map publishes.
  */
-const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(struct jsdrvp_mb_dev_s * dev);
+const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(
+        struct jsdrvp_mb_dev_s * dev, char prefix);
 
 /**
- * @brief Mutable accessor to the device's time_map for drivers that need
- *        to lazy-initialize it before the on-device timesync converges.
+ * @brief Start the device state_fetch protocol exchange.
+ *
+ * Called automatically during open unless drv->open_ready returned
+ * false, in which case the driver is expected to invoke this
+ * explicitly once it becomes ready.  Safe to call at most once per
+ * open session; subsequent calls before the fetch completes are
+ * ignored.
  *
  * @param dev The mb_device handle.
- * @return Pointer to the device's time_map (writable).
  */
-struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map_mut(struct jsdrvp_mb_dev_s * dev);
+void jsdrvp_mb_dev_state_fetch_start(struct jsdrvp_mb_dev_s * dev);
 
 JSDRV_CPP_GUARD_END
 
