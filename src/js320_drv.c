@@ -1133,6 +1133,12 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
         self->waiting_for_sensor = false;
         jsdrvp_mb_dev_set_timeout(dev, 0);
         jsdrvp_mb_dev_state_fetch_start(dev);
+        // Trigger sensor timesync resync so s/ts/!map arrives
+        // promptly.  The sensor-side comm link stays up across
+        // host reconnects, so ./comm/./!add only fires 
+        // on the first open.  This explicit resync forces map update.
+        jsdrvp_mb_dev_publish_to_device(dev, "s/ts/!resync",
+            &jsdrv_union_u8_r(1));
         // fall through; we want the frontend to see this publish too
     }
 
