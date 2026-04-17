@@ -1,7 +1,33 @@
 # Fuzz session WIP — 2026-04-16
 
 Snapshot of fuzz-robustness work produced during the 2026-04-16
-session. All remaining changes are on branch `feature/js320`.
+session.
+
+## Status: complete (2026-04-17)
+
+All 7 "In flight" items below landed on `feature/js320`:
+
+| Item | Commit |
+|---|---|
+| 1. GET_INIT BUSY retry | `aac71e6` |
+| 2. Close-path timeouts | `aac71e6` |
+| 3. Safe UL join on timeout | `aac71e6` |
+| 4. d-pointer correlation logs | `aac71e6` |
+| 5. `ST_AWAIT_SENSOR_READY` | **superseded** by `dd0103b` — the mb_device genericize refactor replaced the dedicated state with a generic `open_ready` driver hook. JS320 implements sensor-ready waiting via that hook instead. |
+| 6. Sample-ID skip diagnostics | `62c6f3d` |
+| 7. Cross-platform crash handler | `2dae1f1` |
+
+Follow-on work from the same session:
+
+* `37c6b9f` — fuzz `--nice` option.
+* `dd0103b` — mb_device genericize (removes JS220/JS320-specific paths;
+  see `doc/plans/completed/mb_device_genericize.md`).
+* `70fd94b` + minibitty `cf4ad52` — timesync `!resync` topic so the
+  JS320 host forces a sensor-side burst on open, since the sensor-side
+  comm link stays up across host disconnect/reconnect.
+
+The `sample_id skip` class of fuzz failures noted below remains
+deferred to `doc/plans/open_state_management.md`.
 
 ## Landed (committed on feature/js320)
 
