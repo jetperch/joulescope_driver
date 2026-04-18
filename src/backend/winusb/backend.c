@@ -84,6 +84,13 @@ struct bulk_in_s {
     struct endpoint_s ep;
     struct jsdrv_list_s transfers_pending;
     struct jsdrv_list_s transfers_free;
+    // Transfers dispatched to the UL via STREAM_IN_DATA and awaiting the
+    // round-trip return on cmd_q.  These are neither on transfers_pending
+    // nor transfers_free while the UL owns them.  bulk_in_finalize must
+    // keep this struct (and each in-flight transfer) alive until every
+    // one of them returns, or bulk_in_transfer_return will UAF.
+    uint32_t in_flight;
+    bool finalized;
 };
 
 struct bulk_out_s {
@@ -144,6 +151,26 @@ static void bulk_in_transfer_free(struct bulk_in_transfer_s * t) {
     jsdrv_list_add_tail(&t->bulk->transfers_free, &t->item);
 }
 
+// Called from device_handle_msg when the UL returns a STREAM_IN_DATA
+// message so the LL can recycle the transfer.  If bulk_in_finalize
+// already ran, this transfer is orphaned — free it here and, when the
+// last orphan returns, free the deferred bulk_in_s.  Without this the
+// naive bulk_in_transfer_free path UAFs on t->bulk (freed by finalize).
+static void bulk_in_transfer_return(struct bulk_in_transfer_s * t) {
+    struct bulk_in_s * b = t->bulk;
+    JSDRV_LOGD3("bulk_in_transfer_return %p", &t->overlapped);
+    JSDRV_ASSERT(b->in_flight > 0);
+    b->in_flight--;
+    if (b->finalized) {
+        jsdrv_free(t);
+        if (b->in_flight == 0) {
+            jsdrv_free(b);
+        }
+    } else {
+        jsdrv_list_add_tail(&b->transfers_free, &t->item);
+    }
+}
+
 static void bulk_in_finalize(struct endpoint_s * ep) {
     struct bulk_in_s * b = (struct bulk_in_s *) ep;
     JSDRV_LOGI("bulk_in_finalize ep=0x%02x", b->ep.pipe_id);
@@ -166,7 +193,16 @@ static void bulk_in_finalize(struct endpoint_s * ep) {
         CloseHandle(b->ep.event);
     }
     b->ep.event = NULL;
-    jsdrv_free(b);
+
+    // Transfers still in-flight with the UL hold live t->bulk pointers
+    // into `b`.  Keep `b` alive until each one comes back through
+    // bulk_in_transfer_return; the last return frees `b`.  The endpoint
+    // is already out of d->endpoints_active (ep_finalize_by_id), so no
+    // new in-flight transfers can be created.
+    b->finalized = true;
+    if (b->in_flight == 0) {
+        jsdrv_free(b);
+    }
 }
 
 static int32_t bulk_in_pend(struct bulk_in_s * b) {
@@ -210,6 +246,7 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
             jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_STREAM_IN_DATA, sizeof(m->topic));
             m->value = jsdrv_union_bin(t->buffer, sz);
             m->extra.bkusb_stream.endpoint = b->ep.pipe_id;
+            b->in_flight++;
             msg_queue_push(b->ep.dev->device.rsp_q, m);
         } else {
             DWORD ec = GetLastError();
@@ -566,7 +603,7 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
         struct bulk_in_transfer_s * t = JSDRV_CONTAINER_OF(msg->value.value.bin, struct bulk_in_transfer_s, buffer);
-        bulk_in_transfer_free(t);
+        bulk_in_transfer_return(t);
         jsdrvp_msg_free(d->context, msg);
     } else if (0 == strcmp(JSDRV_USBBK_MSG_BULK_OUT_DATA, msg->topic)) {
         bulk_out_send(d, msg);
