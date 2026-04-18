@@ -95,9 +95,11 @@ struct state_fetch_s {
     uint8_t  retry_count;
     uint32_t transaction_id;
     // Null-terminated list of top-level prefixes to iterate.  Set by
-    // state_fetch_start from drv->state_fetch_prefixes() with a
-    // fallback to STATE_FETCH_PREFIXES_DEFAULT.  Outlives the fetch.
+    // state_fetch_start from drv->state_fetch_prefixes(), else from
+    // d->identity.pubsub_prefix (single char built into prefix_buf),
+    // else STATE_FETCH_PREFIXES_DEFAULT.  Outlives the fetch.
     const char * prefixes;
+    char     prefix_buf[2];  // backing storage for identity-derived prefix
     // metadata blob info captured from ././info entries
     struct state_fetch_blob_s blobs[STATE_FETCH_META_BLOBS_MAX];
     uint8_t  blob_count;
@@ -367,7 +369,13 @@ static void state_fetch_start(struct jsdrvp_mb_dev_s * self) {
         sf->prefixes = self->drv->state_fetch_prefixes(self->drv);
     }
     if (!sf->prefixes || !sf->prefixes[0]) {
-        sf->prefixes = STATE_FETCH_PREFIXES_DEFAULT;
+        if (self->identity.pubsub_prefix) {
+            sf->prefix_buf[0] = self->identity.pubsub_prefix;
+            sf->prefix_buf[1] = '\0';
+            sf->prefixes = sf->prefix_buf;
+        } else {
+            sf->prefixes = STATE_FETCH_PREFIXES_DEFAULT;
+        }
     }
     state_fetch_send_get_init(self);
 }
