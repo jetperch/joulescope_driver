@@ -26,6 +26,7 @@
 #include "jsdrv/time.h"
 #include "jsdrv/topic.h"
 #include "jsdrv/version.h"
+#include "jsdrv_prv/platform.h"
 #include "jsdrv_prv/thread.h"
 #include <inttypes.h>
 #include <time.h>
@@ -94,6 +95,13 @@ struct app_s {
     char device_prefix[256];
     char device_filter[256];  // if non-empty, restrict t_open to this prefix
     struct jsdrv_buffer_info_s buffer_info[16];
+
+    // Sample-arrival verification for streaming.
+    uint32_t stream_sample_rate;  // last accepted h/fs, 0 if never set this session
+    uint32_t stream_start_ms;     // jsdrv_time_ms_u32() when stream subscribe completed
+    uint64_t stream_i_count;      // element_count sum from s/i/!data
+    uint64_t stream_v_count;      // element_count sum from s/v/!data
+    bool stream_subscribed;
 };
 
 static uint32_t random_u32(void) {
@@ -363,7 +371,7 @@ static int32_t t_open(struct app_s * self) {
         snprintf(self->device_prefix, sizeof(self->device_prefix), "%s", devices[device_idx]);
     }
     printf("open %s\n", self->device_prefix);
-    rc = jsdrv_open(self->context, self->device_prefix, 0, 0);
+    rc = jsdrv_open(self->context, self->device_prefix, 0, JSDRV_TIMEOUT_MS_DEFAULT);
     if (0 == rc) {
         state_update(self, ST_OPEN);
     }
@@ -374,7 +382,7 @@ static int32_t t_close(struct app_s * self) {
     int32_t rc = 0;
     if (self->device_prefix[0]) {
         printf("close %s\n", self->device_prefix);
-        rc = jsdrv_close(self->context, self->device_prefix, 0);
+        rc = jsdrv_close(self->context, self->device_prefix, JSDRV_TIMEOUT_MS_DEFAULT);
     }
     self->device_prefix[0] = 0;
     state_update(self, ST_INITIALIZED);
@@ -411,7 +419,6 @@ static int32_t publish_device(struct app_s * self, const char * topic, const str
 }
 
 static int32_t t_sample_rate(struct app_s * self) {
-    (void) self;
     const uint32_t sample_rates[] = {
             1000000,
             500000, 200000, 100000,
@@ -421,6 +428,10 @@ static int32_t t_sample_rate(struct app_s * self) {
             50, 20, 10,
             5, 2, 1,
     };
+    if (self->nice_level) {
+        return 0;
+    }
+
     uint32_t sample_rate_idx = random_range_u32(0, ARRAY_SIZE(sample_rates));
     uint32_t sample_rate = sample_rates[sample_rate_idx];
     // Not every device supports every rate (e.g. JS320 rejects <1 kHz).
@@ -430,22 +441,98 @@ static int32_t t_sample_rate(struct app_s * self) {
     if ((rc != 0) && (rc != JSDRV_ERROR_PARAMETER_INVALID)) {
         return rc;
     }
+    if (0 == rc) {
+        self->stream_sample_rate = sample_rate;
+    }
     return 0;
 }
 
+static void on_stream_sample_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    uint64_t * count = (uint64_t *) user_data;
+    (void) topic;
+    if ((NULL == value->value.bin) || (value->size < JSDRV_STREAM_HEADER_SIZE)) {
+        return;
+    }
+    const struct jsdrv_stream_signal_s * sig = (const struct jsdrv_stream_signal_s *) value->value.bin;
+    *count += sig->element_count;
+}
+
+// Minimum stream duration (ms) before absence of samples is a failure.
+// Shorter runs can legitimately finish before the first batch arrives.
+#define STREAM_SAMPLE_CHECK_MIN_MS (3000U)
+// Only enforce the check when the sample rate is high enough that at least
+// one batched sample should have arrived within STREAM_SAMPLE_CHECK_MIN_MS.
+#define STREAM_SAMPLE_CHECK_MIN_RATE (100U)
+
 static int32_t t_stream_start(struct app_s * self) {
-    ROE(publish_device(self, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
-    ROE(publish_device(self, "s/v/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+    struct jsdrv_topic_s t;
+    self->stream_i_count = 0;
+    self->stream_v_count = 0;
+
+    jsdrv_topic_set(&t, self->device_prefix);
+    jsdrv_topic_append(&t, "s/i/!data");
+    ROE(jsdrv_subscribe(self->context, t.topic, JSDRV_SFLAG_PUB,
+                        on_stream_sample_data, &self->stream_i_count,
+                        JSDRV_TIMEOUT_MS_DEFAULT));
+    jsdrv_topic_set(&t, self->device_prefix);
+    jsdrv_topic_append(&t, "s/v/!data");
+    ROE(jsdrv_subscribe(self->context, t.topic, JSDRV_SFLAG_PUB,
+                        on_stream_sample_data, &self->stream_v_count,
+                        JSDRV_TIMEOUT_MS_DEFAULT));
+    self->stream_subscribed = true;
+
     if (self->nice_level) {
         publish_device(self, "h/fs", &jsdrv_union_u32_r(1000000),JSDRV_TIMEOUT_MS_DEFAULT);
+        self->stream_sample_rate = 1000000;
     }
+    ROE(publish_device(self, "s/i/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+    ROE(publish_device(self, "s/v/ctrl", &jsdrv_union_u32_r(1), JSDRV_TIMEOUT_MS_DEFAULT));
+    self->stream_start_ms = jsdrv_time_ms_u32();
     state_update(self, ST_STREAM);
     return 0;
 }
 
 static int32_t t_stream_stop(struct app_s * self) {
-    ROE(publish_device(self, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
-    ROE(publish_device(self, "s/v/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT));
+    uint32_t duration_ms = jsdrv_time_ms_u32() - self->stream_start_ms;
+    uint32_t rate = self->stream_sample_rate;
+    int32_t rc = 0;
+
+    int32_t rc_i = publish_device(self, "s/i/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+    int32_t rc_v = publish_device(self, "s/v/ctrl", &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
+
+    // Synchronous unsubscribe flushes any in-flight callbacks before returning,
+    // so the counts below reflect every sample delivered while streaming.
+    if (self->stream_subscribed) {
+        struct jsdrv_topic_s t;
+        jsdrv_topic_set(&t, self->device_prefix);
+        jsdrv_topic_append(&t, "s/i/!data");
+        jsdrv_unsubscribe(self->context, t.topic, on_stream_sample_data,
+                          &self->stream_i_count, JSDRV_TIMEOUT_MS_DEFAULT);
+        jsdrv_topic_set(&t, self->device_prefix);
+        jsdrv_topic_append(&t, "s/v/!data");
+        jsdrv_unsubscribe(self->context, t.topic, on_stream_sample_data,
+                          &self->stream_v_count, JSDRV_TIMEOUT_MS_DEFAULT);
+        self->stream_subscribed = false;
+    }
+
+    printf("stream duration %u ms, rate %u Hz, i=%" PRIu64 " v=%" PRIu64 " samples\n",
+           (unsigned) duration_ms, (unsigned) rate,
+           self->stream_i_count, self->stream_v_count);
+
+    if ((duration_ms >= STREAM_SAMPLE_CHECK_MIN_MS) && (rate >= STREAM_SAMPLE_CHECK_MIN_RATE)) {
+        if (0 == self->stream_i_count) {
+            printf("ERROR: no s/i samples in %u ms at %u Hz\n", (unsigned) duration_ms, (unsigned) rate);
+            rc = 1;
+        }
+        if (0 == self->stream_v_count) {
+            printf("ERROR: no s/v samples in %u ms at %u Hz\n", (unsigned) duration_ms, (unsigned) rate);
+            rc = 1;
+        }
+    }
+
+    if (rc_i) { return rc_i; }
+    if (rc_v) { return rc_v; }
+    if (rc) { return rc; }
     state_update(self, ST_OPEN);
     return 0;
 }
