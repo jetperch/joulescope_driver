@@ -63,6 +63,14 @@ static void to_u32_hex(void **state) {
     assert_int_equal(0x12345678, value);
 }
 
+static void to_u32_hex_with_underscore(void **state) {
+    (void) state; /* unused */
+    uint32_t value = 0;
+    assert_int_equal(0, jsdrv_cstr_to_u32("0x1234_5678", &value));
+    assert_int_equal(0x12345678, value);
+}
+
+
 struct i32s_case_s {
     const char * str;
     int32_t exponent;
@@ -388,6 +396,7 @@ int main(void) {
         cmocka_unit_test(to_u32_42),
         cmocka_unit_test(to_u32_0_h),
         cmocka_unit_test(to_u32_hex),
+        cmocka_unit_test(to_u32_hex_with_underscore),
         cmocka_unit_test(to_i32s),
         cmocka_unit_test(copy_zero_tgt_size),
         cmocka_unit_test(copy_zero_src_size),

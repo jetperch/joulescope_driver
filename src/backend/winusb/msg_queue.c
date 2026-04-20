@@ -58,17 +58,24 @@ struct msg_queue_s * msg_queue_init() {
     return q;
 }
 
-void msg_queue_finalize(struct msg_queue_s * queue) {
+void msg_queue_finalize(struct msg_queue_s * queue,
+                        struct jsdrv_context_s * context) {
     struct jsdrvp_msg_s * msg;
     if (NULL != queue) {
         //JSDRV_LOGI("msg_queue free %p %p", queue, queue->available_event);
         EnterCriticalSection(&queue->critical_section);
         while (1) {
-            // return items in the queue.
+            // release remaining items; context path properly frees
+            // heap payloads and decrements tmap refs (ISSUE 3).
             struct jsdrv_list_s * item = jsdrv_list_remove_tail(&queue->items);
             if (item) {
                 msg = JSDRV_CONTAINER_OF(item, struct jsdrvp_msg_s, item);
-                jsdrv_free(msg);
+                jsdrv_list_initialize(&msg->item);
+                if (context) {
+                    jsdrvp_msg_free(context, msg);
+                } else {
+                    jsdrv_free(msg);
+                }
             } else {
                 break;
             }

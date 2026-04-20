@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2023 Jetperch LLC
+ * Copyright 2014-2024 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -143,7 +143,7 @@ const struct command_s COMMANDS[] = {
 
 static int usage(void) {
     const struct command_s * cmd = COMMANDS;
-    printf("usage: jsdrv_util [--log-level <LEVEL>] <COMMAND> [...args]\n");
+    printf("usage: jsdrv [--log-level <LEVEL>] <COMMAND> [...args]\n");
     printf("\n--log_level: Configure the log level to stdout\n"
            "    off, emergency, alert, critical, [error], warning,\n"
            "    notice, info, debug1, debug2, debug3, all\n");

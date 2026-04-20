@@ -1,6 +1,7 @@
 Debug
 Release
 cmake-build*
+cmake_build*
 build
 build-cppcheck
 __pycache__

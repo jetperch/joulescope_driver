@@ -1,4 +1,4 @@
-# Copyright 2014-2025 Jetperch LLC
+# Copyright 2014-2026 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ else()
 endif()
 
 project(JOULESCOPE_DRIVER
-        VERSION 1.12.0
-        LANGUAGES C)
+        VERSION 2.0.3
+        LANGUAGES C CXX)
 SET(PROJECT_PREFIX JSDRV)
 SET(VERSION_STRING "${PROJECT_VERSION}")
 SET(VERSION_UNDERSCORE "${PROJECT_VERSION_MAJOR}_${PROJECT_VERSION_MINOR}_${PROJECT_VERSION_PATCH}")

@@ -31,7 +31,7 @@ char const log_level_char[JSDRV_LOG_LEVEL_ALL + 1] = {
         '!', 'A', 'C', 'E', 'W', 'N', 'I', 'D', 'D', 'D', '.'
 };
 
-void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, const char * format, ...) {
+void jsdrv_log_publish(int8_t level, const char * filename, uint32_t line, const char * format, ...) {
     char buf[256];
     va_list args;
     va_start(args, format);

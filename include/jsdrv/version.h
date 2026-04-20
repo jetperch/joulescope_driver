@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2025 Jetperch LLC
+ * Copyright 2014-2026 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@
  * Changes in the major version indicate that this release
  * breaks backwards compatibility.
  */
-#define JSDRV_VERSION_MAJOR 1
+#define JSDRV_VERSION_MAJOR 2
 
 /**
  * @brief The Joulescope driver minor version.
@@ -53,17 +53,17 @@
  * added.  Any changes that break backwards compatibility should
  * not adversely affect performance.
  */
-#define JSDRV_VERSION_MINOR 12
+#define JSDRV_VERSION_MINOR 0
 
 /**
  * @brief The Joulescope driver patch version.
  *
  * Changes in the patch version indicate bug fixes and improvements.
  */
-#define JSDRV_VERSION_PATCH 0
+#define JSDRV_VERSION_PATCH 3
 
 /**
- * \brief The maximum version string length.
+ * @brief The maximum version string length.
  *
  * The actual length is 14 bytes (MMM.mmm.ppppp\\x00), but round up
  * to simplify packing.
@@ -71,12 +71,12 @@
 #define JSDRV_VERSION_STR_LENGTH_MAX  (16)
 
 /**
- * \brief Macro to encode version to uint32_t
+ * @brief Macro to encode version to uint32_t
  *
- * \param major The major release number (0 to 255)
- * \param minor The minor release number (0 to 255)
- * \param patch The patch release number (0 to 65535)
- * \returns The 32-bit encoded version number.
+ * @param major The major release number (0 to 255)
+ * @param minor The minor release number (0 to 255)
+ * @param patch The patch release number (0 to 65535)
+ * @return The 32-bit encoded version number.
  */
 #define JSDRV_VERSION_ENCODE_U32(major, minor, patch) \
     ( (( ((uint32_t) (major)) &   0xff) << 24) | \
@@ -91,20 +91,20 @@
 #define JSDRV_VERSION_DECODE_U32_PATCH(ver_u32_)   ((uint16_t) ((ver_u32_ >> 0) & 0xffff))
 
 /**
- * \brief Internal macro to convert argument to string.
+ * @brief Internal macro to convert argument to string.
  *
- * \param x The argument to convert to a string.
- * \return The string version of x.
+ * @param x The argument to convert to a string.
+ * @return The string version of x.
  */
 #define JSDRV_VERSION__STR(x) #x
 
 /**
- * \brief Macro to create the version string separated by "." characters.
+ * @brief Macro to create the version string separated by "." characters.
  *
- * \param major The major release number (0 to 255)
- * \param minor The minor release number (0 to 255)
- * \param patch The patch release number (0 to 65535)
- * \returns The firmware string.
+ * @param major The major release number (0 to 255)
+ * @param minor The minor release number (0 to 255)
+ * @param patch The patch release number (0 to 65535)
+ * @return The version string.
  */
 #define JSDRV_VERSION_ENCODE_STR(major, minor, patch) \
         JSDRV_VERSION__STR(major) "." JSDRV_VERSION__STR(minor) "." JSDRV_VERSION__STR(patch)
@@ -116,14 +116,16 @@
 #define JSDRV_VERSION_STR JSDRV_VERSION_ENCODE_STR(JSDRV_VERSION_MAJOR, JSDRV_VERSION_MINOR, JSDRV_VERSION_PATCH)
 
 /**
- * \brief Convert a u32 encoded version as a string.
+ * @brief Convert a u32 encoded version as a string.
  *
- * \param[in] u32 The u32 encoded version.
- * \param[out] str The output string, which should have at least 14
- *      bytes available to avoid truncation.
- * \param[in] size The number of bytes available in str.
+ * @param[in] u32 The u32 encoded version.
+ * @param[out] str The output string, which should have at least
+ *      #JSDRV_VERSION_STR_LENGTH_MAX bytes available to avoid truncation.
+ * @param[in] size The number of bytes available in str.
  */
+JSDRV_CPP_GUARD_START
 JSDRV_API void jsdrv_version_u32_to_str(uint32_t u32, char * str, size_t size);
+JSDRV_CPP_GUARD_END
 
 /** @} */
 

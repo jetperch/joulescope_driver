@@ -20,7 +20,7 @@
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/assert.h"
-#include "js220_api.h"
+#include "jsdrv_prv/devices/js220/js220_api.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv/cstr.h"
@@ -105,7 +105,7 @@ static void backend_finalize(struct jsdrvbk_s * backend) {
             s->thread = NULL;
         }
         if (s->backend.cmd_q) {
-            msg_queue_finalize(s->backend.cmd_q);
+            msg_queue_finalize(s->backend.cmd_q, s->context);
             s->backend.cmd_q = NULL;
         }
         jsdrv_free(s);

@@ -15,15 +15,13 @@
 from .version import *
 from . import time64
 from .record import Record
-
-try:
-    from .binding import Driver, ElementType, Field, ErrorCode, LogLevel, SubscribeFlags, calibration_hash
-except (ModuleNotFoundError, ImportError):
-    print('Could not import cython binding')
+from .stdmsg import StdMsg
+from .mem_client import MemClient
+from .binding import Driver, ElementType, Field, ErrorCode, LogLevel, SubscribeFlags, calibration_hash
 
 
 __all__ = [
-    'Driver', 'Record',
+    'Driver', 'MemClient', 'Record', 'StdMsg',
     'ElementType', 'Field', 'ErrorCode', 'LogLevel', 'SubscribeFlags',
     'calibration_hash',
     'time64',

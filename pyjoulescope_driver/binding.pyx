@@ -28,10 +28,12 @@ from libc.math cimport isfinite, NAN
 from libc.string cimport memset, strcpy
 
 from collections.abc import Iterable, Mapping
+from .stdmsg import StdMsg
 import json
 import logging
 import numpy as np
 include "module.pxi"
+import threading
 import time
 cimport numpy as np
 from . cimport c_jsdrv
@@ -89,21 +91,22 @@ _TIME_MAP_GET_DTYPE = np.dtype({
 
 
 cdef class TimeMap:
-    """Python wrapper for jsdrv_tmap_s instance."""
+    """Python wrapper for jsdrv_tmap_s instance.
+
+    Each instance owns its underlying jsdrv_tmap_s.  TimeMap values
+    returned from driver responses are independent snapshots; copy()
+    and deepcopy() produce further independent instances.
+    """
 
     cdef c_jsdrv.jsdrv_tmap_s * this
-    cdef uint64_t _reader_active
-
-    def __init__(self):
-        self._reader_active = 0
 
     def __len__(self):
         return c_jsdrv.jsdrv_tmap_length(self.this)
 
     @staticmethod
     cdef factory(c_jsdrv.jsdrv_tmap_s * this):
+        """Wrap an existing jsdrv_tmap_s, taking ownership of it."""
         cdef TimeMap instance = TimeMap.__new__(TimeMap)
-        c_jsdrv.jsdrv_tmap_ref_incr(this)
         instance.this = this
         return instance
 
@@ -112,30 +115,27 @@ cdef class TimeMap:
         cdef c_jsdrv.jsdrv_tmap_s * this = c_jsdrv.jsdrv_tmap_alloc(initial_size)
         return TimeMap.factory(this)
 
-    def __del__(self):
-        c_jsdrv.jsdrv_tmap_ref_decr(self.this)
+    def __dealloc__(self):
+        c_jsdrv.jsdrv_tmap_free(self.this)
         self.this = NULL
 
     def __copy__(self):
-        return TimeMap.factory(self.this)
+        return TimeMap.factory(c_jsdrv.jsdrv_tmap_copy(self.this))
 
     def __deepcopy__(self, memo):
-        return TimeMap.factory(self.this)
+        return TimeMap.factory(c_jsdrv.jsdrv_tmap_copy(self.this))
 
     def __enter__(self):
-        c_jsdrv.jsdrv_tmap_reader_enter(self.this)
-        self._reader_active += 1
+        # Kept as a no-op for backward compatibility with the previous
+        # reader-locked API.  The instance is already an owned snapshot,
+        # so no synchronization is required to query it.
         return self
 
     def __exit__(self, type, value, traceback):
-        c_jsdrv.jsdrv_tmap_reader_exit(self.this)
-        self._reader_active -= 1
+        return None
 
     def sample_id_to_timestamp(self, sample_id):
         cdef int64_t r
-        if 0 == self._reader_active:
-            with self:
-                return self.sample_id_to_timestamp(sample_id)
         if isinstance(sample_id, Iterable):
             sz = len(sample_id)
             result = np.empty(sz, dtype=np.int64)
@@ -150,9 +150,6 @@ cdef class TimeMap:
 
     def timestamp_to_sample_id(self, timestamp):
         cdef uint64_t r
-        if 0 == self._reader_active:
-            with self:
-                return self.timestamp_to_sample_id(timestamp)
         if isinstance(timestamp, Iterable):
             sz = len(timestamp)
             result = np.empty(sz, dtype=np.uint64)
@@ -179,9 +176,6 @@ cdef class TimeMap:
             Access as either a[0]['offset_counter'] or a[0][1].
         """
         cdef c_jsdrv.jsdrv_time_map_s time_map
-        if 0 == self._reader_active:
-            with self:
-                return self.get(index)
         n = len(self)
         if index is None:
             index = 0, n
@@ -261,7 +255,9 @@ cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
         'tmap': None,
     }
     if (info[0].tmap):
-        v['tmap'] = TimeMap.factory(info[0].tmap)
+        # C owns info[0].tmap and frees it when the message is torn down.
+        # Copy so the Python TimeMap has an independent instance.
+        v['tmap'] = TimeMap.factory(c_jsdrv.jsdrv_tmap_copy(info[0].tmap))
     return v
 
 
@@ -337,6 +333,10 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
     cdef np.npy_intp shape[1]
     cdef uint8_t[:] u8_mem
     cdef int32_t idx
+    cdef uint8_t * u8_ptr;
+    cdef uint16_t * u16_ptr;
+    cdef uint32_t * u32_ptr;
+    cdef uint64_t * u64_ptr;
     t = value[0].type
     try:
         if t == c_jsdrv.JSDRV_UNION_STR:
@@ -371,6 +371,10 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 elif el == (c_jsdrv.JSDRV_DATA_TYPE_UINT, 1):  # uint1, 8 per uint8
                     shape[0] = <np.npy_intp> ((stream[0].element_count + 7) / 8)
                     ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_UINT8, <void *> stream[0].data)
+                    v['data'] = ndarray.copy()
+                elif el == (c_jsdrv.JSDRV_DATA_TYPE_INT, 32):  # int32
+                    shape[0] = <np.npy_intp> stream[0].element_count
+                    ndarray = np.PyArray_SimpleNewFromData(1, shape, np.NPY_INT32, <void *> stream[0].data)
                     v['data'] = ndarray.copy()
                 elif el == (c_jsdrv.JSDRV_DATA_TYPE_INT, 16):  # int16
                     shape[0] = <np.npy_intp> stream[0].element_count
@@ -471,6 +475,51 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                 v = _parse_buffer_rsp(<c_jsdrv.jsdrv_buffer_response_s *> &(value[0].value.bin[0]))
             else:
                 v = value[0].value.bin[:value[0].size]
+        elif t == c_jsdrv.JSDRV_UNION_STDMSG:
+            if value[0].size < 8:
+                _log_c.warning('STDMSG malformed: size %d < 8 byte header', value[0].size)
+                v = None
+            else:
+                u8_ptr = <uint8_t *> &value[0].value.bin[0]
+                u16_ptr = <uint16_t *> &value[0].value.bin[0]
+                u32_ptr = <uint32_t *> &value[0].value.bin[0]
+                u64_ptr = <uint64_t *> &value[0].value.bin[0]
+                v = {
+                    'dtype': 'stdmsg',
+                    'version': u16_ptr[0],
+                    'version_major': value[0].value.bin[0],
+                    'version_minor': value[0].value.bin[1],
+                    'metadata': u32_ptr[1],
+                }
+                if value[0].value.bin[2] == 0x05: # MB_STDMSG_COMM_STATS
+                    if value[0].size < 44:
+                        _log_c.warning('MB_STDMSG_COMM_STATS malformed: size %d < 44', value[0].size)
+                        v = None
+                    else:
+                        v['stdmsg_type'] = 'comm_stats'
+                        v['counter_start'] = u64_ptr[1]
+                        v['counter_end'] = u64_ptr[2]
+                        v['frames'] = u32_ptr[6]
+                        v['bytes'] = u32_ptr[7]
+                        v['frame_error'] = u32_ptr[8]
+                        v['link_error'] = u32_ptr[9]
+                        v['app_error'] = u32_ptr[10]
+                elif value[0].value.bin[2] == 0x07:  # MB_STDMSG_MEM
+                    if value[0].size < 32:
+                        _log_c.warning('MB_STDMSG_MEM malformed: size %d < 32 byte header', value[0].size)
+                        v = None
+                    else:
+                        v['transaction_id'] = u32_ptr[2]
+                        v['target'] = u8_ptr[12]
+                        v['operation'] = u8_ptr[13]
+                        v['flags'] = u8_ptr[14]
+                        v['status'] = u8_ptr[15]
+                        v['timeout_ms'] = u16_ptr[8]
+                        v['offset'] = u32_ptr[5]
+                        v['length'] = u32_ptr[6]
+                        v['delay_us'] = u32_ptr[7]
+                        data_size = value[0].size - 32
+                        v['data'] = bytes(u8_ptr[32:32 + data_size])
         elif t == c_jsdrv.JSDRV_UNION_F32:
             v = value[0].value.f32
         elif t == c_jsdrv.JSDRV_UNION_F64:
@@ -543,7 +592,7 @@ _error_code_to_meta = {
     5: (5, 'PARAMETER_INVALID', 'The parameter value is invalid'),
     6: (6, 'INVALID_RETURN_CONDITION', 'The function return condition is invalid'),
     7: (7, 'INVALID_CONTEXT', 'The context is invalid'),
-    8: (8, 'INVALID_MESSAGE_LENGTH', 'The message length in invalid'),
+    8: (8, 'INVALID_MESSAGE_LENGTH', 'The message length is invalid'),
     9: (9, 'MESSAGE_INTEGRITY', 'The message integrity check failed'),
     10: (10, 'SYNTAX_ERROR', 'A syntax error was detected'),
     11: (11, 'TIMED_OUT', 'The operation did not complete in time'),
@@ -569,7 +618,7 @@ _error_code_to_meta = {
     'PARAMETER_INVALID': (5, 'PARAMETER_INVALID', 'The parameter value is invalid'),
     'INVALID_RETURN_CONDITION': (6, 'INVALID_RETURN_CONDITION', 'The function return condition is invalid'),
     'INVALID_CONTEXT': (7, 'INVALID_CONTEXT', 'The context is invalid'),
-    'INVALID_MESSAGE_LENGTH': (8, 'INVALID_MESSAGE_LENGTH', 'The message length in invalid'),
+    'INVALID_MESSAGE_LENGTH': (8, 'INVALID_MESSAGE_LENGTH', 'The message length is invalid'),
     'MESSAGE_INTEGRITY': (9, 'MESSAGE_INTEGRITY', 'The message integrity check failed'),
     'SYNTAX_ERROR': (10, 'SYNTAX_ERROR', 'A syntax error was detected'),
     'TIMED_OUT': (11, 'TIMED_OUT', 'The operation did not complete in time'),
@@ -829,6 +878,11 @@ cdef class Driver:
             v.value.bin = <const uint8_t *> byte_str
             v.app = c_jsdrv.JSDRV_PAYLOAD_TYPE_BUFFER_REQ
             v.size = <uint32_t> len(value)
+        elif isinstance(value, StdMsg):
+            byte_str = value
+            v.type = c_jsdrv.JSDRV_UNION_STDMSG
+            v.value.bin = <const uint8_t *> byte_str
+            v.size = <uint32_t> len(value)
         elif isinstance(value, bytes):
             byte_str = value
             v.type = c_jsdrv.JSDRV_UNION_BIN
@@ -866,6 +920,41 @@ cdef class Driver:
             rc = c_jsdrv.jsdrv_query(self._context, <char *> &topic_str[0], &v, timeout_ms)
         _handle_rc(rc, 'jsdrv_query', topic)
         return _jsdrv_union_to_py(&v)
+
+    def publish_and_wait(self, publish_topic, publish_value,
+                         response_topic, timeout=None):
+        """Publish a value and wait for a response on another topic.
+
+        :param publish_topic: The topic to publish to.
+        :param publish_value: The value to publish.
+        :param response_topic: The topic to subscribe to for
+            the response.
+        :param timeout: The timeout in float seconds.
+            None (default) uses the default timeout.
+        :return: The value received on response_topic.
+        :raises TimeoutError: If no response arrives in time.
+        """
+        if timeout is None:
+            timeout = _TIMEOUT_MS_DEFAULT / 1000.0
+        event = threading.Event()
+        result = [None]
+
+        def on_response(topic, value):
+            result[0] = value
+            event.set()
+
+        self.subscribe(response_topic, 'pub', on_response)
+        try:
+            self.publish(publish_topic, publish_value, timeout=0)
+            if not event.wait(timeout):
+                raise TimeoutError(
+                    f'publish_and_wait timed out: '
+                    f'publish={publish_topic}, '
+                    f'response={response_topic}'
+                )
+            return result[0]
+        finally:
+            self.unsubscribe(response_topic, on_response)
 
     def device_paths(self, timeout=None):
         """List the currently connected devices.
@@ -1054,5 +1143,7 @@ def calibration_hash(msg):
 
     hash = np.zeros(16, dtype=np.uint32)
     hash_u32 = hash
-    c_jsdrv.jsdrv_calibration_hash(&msg_u32[0], len(msg), &hash_u32[0])
+    rc = c_jsdrv.jsdrv_calibration_hash(&msg_u32[0], len(msg), &hash_u32[0])
+    if rc:
+        raise ValueError(f'jsdrv_calibration_hash failed: {rc}')
     return hash

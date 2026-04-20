@@ -29,6 +29,8 @@
 #ifndef JSDRV_PRV_FRONTEND_H_
 #define JSDRV_PRV_FRONTEND_H_
 
+JSDRV_CPP_GUARD_START
+
 // also see jsdrv_payload_type_e
 enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
     JSDRV_PAYLOAD_TYPE_SUB  = 128,          // jsdrv_payload_subscribe_s
@@ -40,6 +42,10 @@ enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
 // enum jsdrvp_msg_type_e
 #define JSDRV_MSG_TYPE_NORMAL   0x55aa1234U
 #define JSDRV_MSG_TYPE_DATA     0xaa55F00FU
+// Sentinel: final message pushed by the LL thread into rsp_q as it exits.
+// The UL thread treats receipt as a causal barrier — no more LL pushes will
+// ever arrive after this message — and safely exits rsp_q consumption.
+#define JSDRV_MSG_TYPE_LL_TERMINATED 0x3c5aa53cU
 
 struct jsdrvp_payload_subscribe_s {  // also for unsubscribe
     char topic[JSDRV_TOPIC_LENGTH_MAX];
@@ -63,9 +69,16 @@ struct jsdrvp_ul_device_s {
     void (*join)(struct jsdrvp_ul_device_s *);
 };
 
+// forward declaration for MiniBitty devices
+struct jsdrvp_mb_drv_s;
+
 // create and bind to ll
 int32_t jsdrvp_ul_js110_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
 int32_t jsdrvp_ul_js220_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
+int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context,
+                                        struct jsdrvp_ll_device_s * ll, struct jsdrvp_mb_drv_s * drv);
+int32_t jsdrvp_mb_device_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
+int32_t jsdrvp_js320_device_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
 int32_t jsdrvp_ul_emu_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context, struct jsdrvp_ll_device_s * ll);
 
 
@@ -214,5 +227,6 @@ void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_
 void jsdrvp_device_unsubscribe(struct jsdrv_context_s * context, const char * dev_topic,
                                const char * topic, uint8_t flags);
 
+JSDRV_CPP_GUARD_END
 
 #endif  /* JSDRV_PRV_FRONTEND_H_ */

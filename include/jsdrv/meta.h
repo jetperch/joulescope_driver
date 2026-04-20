@@ -21,8 +21,8 @@
  * @brief Metadata handling
  */
 
-#ifndef JSDRV_META_H__
-#define JSDRV_META_H__
+#ifndef JSDRV_META_H_
+#define JSDRV_META_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include "jsdrv/union.h"
@@ -75,8 +75,30 @@ JSDRV_API int32_t jsdrv_meta_default(const char * meta, struct jsdrv_union_s * v
  */
 JSDRV_API int32_t jsdrv_meta_value(const char * meta, struct jsdrv_union_s * value);
 
+/**
+ * @brief Metadata flag bits (mirrors minibitty's mb_pubsub_meta_flags_e).
+ */
+enum jsdrv_meta_flag_e {
+    JSDRV_META_FLAG_RO   = 0x01,    ///< Topic is read-only; cannot be updated by the host.
+    JSDRV_META_FLAG_HIDE = 0x02,    ///< Topic should not appear in the user interface.
+    JSDRV_META_FLAG_DEV  = 0x04,    ///< Developer option; not for production use.
+};
+
+/**
+ * @brief Get the flags bitmask from the metadata.
+ *
+ * Parses the "flags" key from the JSON metadata, which is a list
+ * of string tokens: "ro", "hide", "dev".  Returns a bitmask of
+ * jsdrv_meta_flag_e.  If "flags" is absent, *flags is set to 0.
+ *
+ * @param meta The JSON metadata.
+ * @param[out] flags The resulting bitmask.
+ * @return 0 or error code.
+ */
+JSDRV_API int32_t jsdrv_meta_flags(const char * meta, uint32_t * flags);
+
 JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_META_H__ */
+#endif  /* JSDRV_META_H_ */

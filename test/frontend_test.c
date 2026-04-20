@@ -24,7 +24,7 @@
 #include "jsdrv/log.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/assert.h"
-#include "js220_api.h"
+#include "jsdrv_prv/devices/js220/js220_api.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/thread.h"
@@ -62,9 +62,9 @@ struct test_s self_;
 #define TEARDOWN() \
     assert_int_equal(0, jsdrv_unsubscribe(self->context, "@", subscribe_cmd_fn, self, 1000)); \
     jsdrv_finalize(self->context, 1000);        \
-    msg_queue_finalize(self->sub_msgs);         \
-    msg_queue_finalize(self->ll_dev1.cmd_q);    \
-    msg_queue_finalize(self->ll_dev1.rsp_q);    \
+    msg_queue_finalize(self->sub_msgs, NULL);   \
+    msg_queue_finalize(self->ll_dev1.cmd_q, NULL); \
+    msg_queue_finalize(self->ll_dev1.rsp_q, NULL); \
     memset(&self_, 0, sizeof(self_))
 
 #if 0
@@ -158,7 +158,7 @@ static void expect_subscribe_cmd_bin(struct test_s * t, const char * parameter_,
 #endif
 
 static void bk_finalize(struct jsdrvbk_s * backend) {
-    msg_queue_finalize(backend->cmd_q);
+    msg_queue_finalize(backend->cmd_q, NULL);
     // function_called();
 }
 
@@ -430,6 +430,11 @@ static void test_stream_raw_0(void ** state) {
     uint32_t payload[80][512 / 4];
     uint32_t expected_u32[(JSDRV_STREAM_HEADER_SIZE + 80 * 504) / 4];
     struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) expected_u32;
+    s->version = 1;
+    s->rsv1_u8 = 0;
+    s->rsv2_u8 = 0;
+    s->rsv3_u8 = 0;
+    s->rsv4_u32 = 0;
     s->sample_id = 0;
     s->field_id = JSDRV_FIELD_RAW;
     s->index = 0;
@@ -475,7 +480,7 @@ static void test_stream_raw_0(void ** state) {
     TEARDOWN();
 }
 
-static THREAD_RETURN_TYPE dev_pubsub_echo_task(THREAD_ARG_TYPE lpParam) {
+static JSDRV_THREAD_RETURN_TYPE dev_pubsub_echo_task(JSDRV_THREAD_ARG_TYPE lpParam) {
     struct test_s * self = (struct test_s *) lpParam;
     struct jsdrvp_msg_s * msg;
     struct jsdrvp_msg_s * rsp;
@@ -511,7 +516,7 @@ static THREAD_RETURN_TYPE dev_pubsub_echo_task(THREAD_ARG_TYPE lpParam) {
             assert_true(false);
         }
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void dev_pubsub_echo_start(struct test_s * self) {

@@ -7,23 +7,31 @@
         'src/joulescope_driver.cc',
         '../src/buffer.c',
         '../src/buffer_signal.c',
+        '../src/calibration_hash.c',
         '../src/cstr.c',
         '../src/devices.c',
         '../src/downsample.c',
         '../src/error_code.c',
-        '../src/js110_cal.c',
-        '../src/js110_sample_processor.c',
-        '../src/js110_stats.c',
-        '../src/js110_usb.c',
-        '../src/js220_i128.c',
-        '../src/js220_params.c',
-        '../src/js220_usb.c',
-        '../src/js220_stats.c',
+        '../src/devices/js110/js110_cal.c',
+        '../src/devices/js110/js110_sample_processor.c',
+        '../src/devices/js110/js110_stats.c',
+        '../src/devices/js110/js110_usb.c',
+        '../src/devices/js220/js220_i128.c',
+        '../src/devices/js220/js220_params.c',
+        '../src/devices/js220/js220_usb.c',
+        '../src/devices/js220/js220_stats.c',
+        '../src/devices/js320/js320_drv.c',
+        '../src/devices/js320/js320_fwup.c',
+        '../src/devices/js320/js320_fwup_mgr.c',
+        '../src/devices/js320/js320_jtag.c',
+        '../src/devices/js320/js320_stats.c',
         '../src/jsdrv.c',
         '../src/json.c',
         '../src/log.c',
-        '../src/pubsub.c',
+        '../src/devices/mb_device/mb_device.c',
         '../src/meta.c',
+        '../src/meta_binary.c',
+        '../src/pubsub.c',
         '../src/sample_buffer_f32.c',
         '../src/statistics.c',
         '../src/time.c',
@@ -32,6 +40,7 @@
         '../src/topic.c',
         '../src/union.c',
         '../src/version.c',
+        '../third-party/miniz/miniz.c',
         '../third-party/tinyprintf/tinyprintf.c'
       ],
       'conditions': [
@@ -78,7 +87,7 @@
                 '../third-party/libusb/libusb',
                 '../third-party/libusb/include/linux'
               ],
-              'libraries': []
+              'libraries': ['-ludev']
             }]
           ]
         }]
@@ -87,6 +96,7 @@
         "<!@(node -p \"require('node-addon-api').include\")",
         "../include",
         "../include_private",
+        "../third-party/miniz",
         "../third-party/tinyprintf"
       ],
       'dependencies': ["<!(node -p \"require('node-addon-api').gyp\")"],

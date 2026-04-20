@@ -167,7 +167,7 @@ static struct msg_s * msg_alloc() {
     return msg;
 }
 
-void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, const char * format, ...) {
+void jsdrv_log_publish(int8_t level, const char * filename, uint32_t line, const char * format, ...) {
     va_list args;
     if (0 == log_instance_.active_count) {
         dprintf("jsdrv_log_publish but not active");
@@ -416,7 +416,7 @@ static void thread_stop() {
 }
 #endif
 
-void jsdrv_log_initialize() {
+void jsdrv_log_initialize(void) {
     dprintf("jsdrv_log_initialize");
 
     if (0 == log_instance_.initialized) {
@@ -466,7 +466,7 @@ void jsdrv_log_initialize() {
     UNLOCK_DISPATCH();
 }
 
-void jsdrv_log_finalize() {
+void jsdrv_log_finalize(void) {
     dprintf("jsdrv_log_finalize");
     if (0 == log_instance_.active_count) {
         dprintf("ERROR: jsdrv_log_finalize but 0 == active_count");
@@ -505,7 +505,7 @@ void jsdrv_log_level_set(int8_t level) {
     log_instance_.level = level;
 }
 
-int8_t jsdrv_log_level_get() {
+int8_t jsdrv_log_level_get(void) {
     return log_instance_.level;
 }
 

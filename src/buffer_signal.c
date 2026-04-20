@@ -21,7 +21,7 @@
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv/time.h"
-#include "jsdrv_prv/js220_i128.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
 #include "jsdrv_prv/statistics.h"
 #include "jsdrv/tmap.h"
 #include <inttypes.h>
@@ -126,7 +126,7 @@ void jsdrv_bufsig_free(struct bufsig_s * self) {
     self->N = 0;
     self->level_count = 0;
     self->sample_id_head = 0;
-    jsdrv_tmap_ref_decr(self->tmap);
+    jsdrv_tmap_free(self->tmap);
     self->tmap = NULL;
 }
 
@@ -190,8 +190,7 @@ bool jsdrv_bufsig_info(struct bufsig_s * self, struct jsdrv_buffer_info_s * info
         size_t tmap_sz = jsdrv_tmap_length(self->tmap);
         if (tmap_sz) {
             jsdrv_tmap_get(self->tmap, tmap_sz - 1, &info->time_map);
-            jsdrv_tmap_ref_incr(self->tmap);
-            info->tmap = self->tmap;
+            info->tmap = jsdrv_tmap_copy(self->tmap);
         }
     }
     return true;

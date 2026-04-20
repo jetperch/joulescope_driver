@@ -47,17 +47,17 @@ set(SUPPORT_SOURCES
         error_code.c
         calibration_hash.c
         cstr.c
-        devices.c
         downsample.c
-        js110_cal.c
-        js220_i128.c
-        js110_sample_processor.c
-        js110_stats.c
-        js220_stats.c
+        devices/js110/js110_cal.c
+        devices/js220/js220_i128.c
+        devices/js110/js110_sample_processor.c
+        devices/js110/js110_stats.c
+        devices/js220/js220_stats.c
         json.c
         log.c
         pubsub.c
         meta.c
+        meta_binary.c
         sample_buffer_f32.c
         statistics.c
         time.c
@@ -71,11 +71,18 @@ set(SUPPORT_SOURCES
 
 set(SOURCES
         buffer.c
+        devices.c
         #emu.c
         #emulated.c
-        js110_usb.c
-        js220_usb.c
-        js220_params.c
+        devices/js110/js110_usb.c
+        devices/js220/js220_usb.c
+        devices/js220/js220_params.c
+        devices/js320/js320_drv.c
+        devices/js320/js320_fwup.c
+        devices/js320/js320_fwup_mgr.c
+        devices/js320/js320_jtag.c
+        devices/js320/js320_stats.c
+        devices/mb_device/mb_device.c
         jsdrv.c
         ${PLATFORM_SRC}
 )
@@ -94,7 +101,7 @@ target_link_libraries(jsdrv_support_objlib tinyprintf ${PLATFORM_LIBS})
 target_link_directories(jsdrv_support_objlib PUBLIC ${PLATFORM_TARGET_LINK_DIRS})
 
 add_library(jsdrv ${SOURCES})
-add_dependencies(jsdrv jsdrv_support_objlib tinyprintf ${PLATFORM_DEPENDENCIES})
-target_link_libraries(jsdrv PRIVATE jsdrv_support_objlib tinyprintf ${PLATFORM_LIBS})
+add_dependencies(jsdrv jsdrv_support_objlib tinyprintf miniz ${PLATFORM_DEPENDENCIES})
+target_link_libraries(jsdrv PRIVATE jsdrv_support_objlib tinyprintf miniz ${PLATFORM_LIBS})
 target_link_directories(jsdrv PUBLIC ${PLATFORM_TARGET_LINK_DIRS})
 target_include_directories(jsdrv PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)

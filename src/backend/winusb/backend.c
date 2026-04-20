@@ -84,6 +84,13 @@ struct bulk_in_s {
     struct endpoint_s ep;
     struct jsdrv_list_s transfers_pending;
     struct jsdrv_list_s transfers_free;
+    // Transfers dispatched to the UL via STREAM_IN_DATA and awaiting the
+    // round-trip return on cmd_q.  These are neither on transfers_pending
+    // nor transfers_free while the UL owns them.  bulk_in_finalize must
+    // keep this struct (and each in-flight transfer) alive until every
+    // one of them returns, or bulk_in_transfer_return will UAF.
+    uint32_t in_flight;
+    bool finalized;
 };
 
 struct bulk_out_s {
@@ -144,6 +151,26 @@ static void bulk_in_transfer_free(struct bulk_in_transfer_s * t) {
     jsdrv_list_add_tail(&t->bulk->transfers_free, &t->item);
 }
 
+// Called from device_handle_msg when the UL returns a STREAM_IN_DATA
+// message so the LL can recycle the transfer.  If bulk_in_finalize
+// already ran, this transfer is orphaned — free it here and, when the
+// last orphan returns, free the deferred bulk_in_s.  Without this the
+// naive bulk_in_transfer_free path UAFs on t->bulk (freed by finalize).
+static void bulk_in_transfer_return(struct bulk_in_transfer_s * t) {
+    struct bulk_in_s * b = t->bulk;
+    JSDRV_LOGD3("bulk_in_transfer_return %p", &t->overlapped);
+    JSDRV_ASSERT(b->in_flight > 0);
+    b->in_flight--;
+    if (b->finalized) {
+        jsdrv_free(t);
+        if (b->in_flight == 0) {
+            jsdrv_free(b);
+        }
+    } else {
+        jsdrv_list_add_tail(&b->transfers_free, &t->item);
+    }
+}
+
 static void bulk_in_finalize(struct endpoint_s * ep) {
     struct bulk_in_s * b = (struct bulk_in_s *) ep;
     JSDRV_LOGI("bulk_in_finalize ep=0x%02x", b->ep.pipe_id);
@@ -166,7 +193,16 @@ static void bulk_in_finalize(struct endpoint_s * ep) {
         CloseHandle(b->ep.event);
     }
     b->ep.event = NULL;
-    jsdrv_free(b);
+
+    // Transfers still in-flight with the UL hold live t->bulk pointers
+    // into `b`.  Keep `b` alive until each one comes back through
+    // bulk_in_transfer_return; the last return frees `b`.  The endpoint
+    // is already out of d->endpoints_active (ep_finalize_by_id), so no
+    // new in-flight transfers can be created.
+    b->finalized = true;
+    if (b->in_flight == 0) {
+        jsdrv_free(b);
+    }
 }
 
 static int32_t bulk_in_pend(struct bulk_in_s * b) {
@@ -210,6 +246,7 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
             jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_STREAM_IN_DATA, sizeof(m->topic));
             m->value = jsdrv_union_bin(t->buffer, sz);
             m->extra.bkusb_stream.endpoint = b->ep.pipe_id;
+            b->in_flight++;
             msg_queue_push(b->ep.dev->device.rsp_q, m);
         } else {
             DWORD ec = GetLastError();
@@ -380,8 +417,30 @@ static struct bulk_out_s * bulk_out_initialize(struct dev_s * dev, uint8_t pipe_
     return b;
 }
 
+// Drop USB submissions that arrive after device_close cleared d->winusb.
+// Mirrors device_closed_reply() in the libusb backend (commit 88a3a93):
+// the LL cmd_q can contain queued bulk/ctrl traffic behind a CLOSE, and
+// submitting it to WinUsb after the handle is gone crashes inside
+// WinUsb_WritePipe / WinUsb_ControlTransfer.
+static bool device_closed_reply(struct dev_s * d, struct jsdrvp_msg_s * msg, bool is_ctrl) {
+    if (d->winusb != INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    JSDRV_LOGW("%s: device closed, drop msg %s", d->device.prefix, msg->topic);
+    if (is_ctrl) {
+        msg->extra.bkusb_ctrl.status = JSDRV_ERROR_CLOSED;
+    } else {
+        msg->value = jsdrv_union_i32(JSDRV_ERROR_CLOSED);
+    }
+    msg_queue_push(d->device.rsp_q, msg);
+    return true;
+}
+
 static void bulk_out_send(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_BIN);
+    if (device_closed_reply(d, msg, false)) {
+        return;
+    }
     uint8_t ep = msg->extra.bkusb_stream.endpoint;
     struct bulk_out_s * b;
     if (!d->endpoints[ep]) {
@@ -528,6 +587,9 @@ static void ctrl_complete(struct dev_s * d) {
 
 static void ctrl_add(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_LOGD1("ctrl_add");
+    if (device_closed_reply(d, msg, true)) {
+        return;
+    }
     bool do_issue = jsdrv_list_is_empty(&d->ctrl_list);
     jsdrv_list_add_tail(&d->ctrl_list, &msg->item);
     if (do_issue) {
@@ -541,7 +603,7 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     }
     if (0 == strcmp(JSDRV_USBBK_MSG_STREAM_IN_DATA, msg->topic)) {
         struct bulk_in_transfer_s * t = JSDRV_CONTAINER_OF(msg->value.value.bin, struct bulk_in_transfer_s, buffer);
-        bulk_in_transfer_free(t);
+        bulk_in_transfer_return(t);
         jsdrvp_msg_free(d->context, msg);
     } else if (0 == strcmp(JSDRV_USBBK_MSG_BULK_OUT_DATA, msg->topic)) {
         bulk_out_send(d, msg);
@@ -555,8 +617,15 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             msg->value = jsdrv_union_i32(0);
             msg_queue_push(d->device.rsp_q, msg);
         } else if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
-            msg->value = jsdrv_union_i32(0);
-            msg_queue_push(d->device.rsp_q, msg);
+            // Do NOT echo a FINALIZE response into rsp_q.  The UL
+            // thread would read it ahead of the LL_TERMINATED barrier
+            // and misinterpret it as a requested close: mb_device
+            // sets finalize_pending (which suppresses DEVICE_REMOVE at
+            // B2), and js220_usb sets do_exit (which skips consuming
+            // LL_TERMINATED entirely).  Both break forced-remove.
+            // The LL_TERMINATED sentinel pushed after device_close()
+            // is the only signal UL needs.
+            jsdrvp_msg_free(d->context, msg);
             d->do_exit = true;
             return false;
         } else {
@@ -568,6 +637,9 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     } else if (0 == strcmp(JSDRV_USBBK_MSG_CTRL_OUT, msg->topic)) {
         ctrl_add(d, msg);
     } else if (0 == strcmp(JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN, msg->topic)) {
+        if (device_closed_reply(d, msg, false)) {
+            return true;
+        }
         uint8_t ep = msg->extra.bkusb_stream.endpoint;
         JSDRV_LOGI("bulk_in_stream_open %d", (int) ep);
         ep_finalize_by_id(d, ep);
@@ -636,7 +708,12 @@ static DWORD WINAPI device_thread(LPVOID lpParam) {
 
     JSDRV_LOGI("USB device_thread closing %s", d->device.prefix);
     device_close(d);
-    jsdrvp_send_finalize_msg(d->context, d->device.rsp_q, d->device.prefix);
+    // Barrier B1: as our last act, push the LL_TERMINATED sentinel
+    // into rsp_q.  The UL thread treats this as a causal guarantee
+    // that no more LL messages will arrive and exits cleanly.
+    struct jsdrvp_msg_s * sentinel = jsdrvp_msg_alloc(d->context);
+    sentinel->inner_msg_type = JSDRV_MSG_TYPE_LL_TERMINATED;
+    msg_queue_push(d->device.rsp_q, sentinel);
     JSDRV_LOGI("USB device_thread closed %s", d->device.prefix);
     return 0;
 }
@@ -686,10 +763,17 @@ static void device_path_to_serial_number(const char * device_path, char * sn) {
 
 static void device_thread_stop(struct dev_s * d) {
     if (d->thread) {
+        JSDRV_LOGI("ll device_thread_stop(%s): send FINALIZE", d->device.prefix);
         jsdrvp_send_finalize_msg(d->context, d->device.cmd_q, d->device.prefix);
-        // and wait for thread to exit.
-        if (WAIT_OBJECT_0 != WaitForSingleObject(d->thread, 1000)) {
-            JSDRV_LOGW("device thread %s not closed cleanly.", d->device.prefix);
+        // 10 s is a diagnostic cap, not an expected wait.  The previous
+        // 1000 ms cap raced with blocking USB I/O and produced ISSUE 2
+        // (LL thread writes to freed rsp_q after join timeout).  Any USB
+        // operation taking >10 s is a real bug — investigate rather than
+        // extend the cap.
+        if (WAIT_OBJECT_0 != WaitForSingleObject(d->thread, 10000)) {
+            JSDRV_LOGE("device thread %s not closed cleanly.", d->device.prefix);
+        } else {
+            JSDRV_LOGI("ll device_thread_stop(%s): joined", d->device.prefix);
         }
         CloseHandle(d->thread);
         d->thread = NULL;
@@ -732,6 +816,7 @@ static int32_t device_add(struct backend_s * s, const struct device_type_s * dev
     device->device_type = device_type;
     jsdrv_cstr_copy(device->device_path, device_path, sizeof(device->device_path));
     device_path_to_serial_number(device_path, serial_number);
+    jsdrv_cstr_toupper(serial_number);
     tfp_snprintf(device->device.prefix, sizeof(device->device.prefix), "%c/%s/%s",
                  s->backend.prefix, device_type->model, serial_number);
     JSDRV_LOGI("device_add_msg %s : %s", device->device.prefix, device_path);
@@ -760,15 +845,13 @@ static int32_t device_add(struct backend_s * s, const struct device_type_s * dev
 
 static void device_remove(struct dev_s * d) {
     JSDRV_LOGI("device_remove_msg(%s): %s", d->device.prefix, d->device_path);
+    // Stop the LL device thread.  Its exit pushes LL_TERMINATED into
+    // rsp_q (barrier B1).  The UL thread reads the sentinel, exits,
+    // and emits DEVICE_REMOVE on msg_backend (barrier B2).  The
+    // backend itself no longer emits DEVICE_REMOVE — doing so would
+    // race ahead of in-flight UL messages on msg_backend and produce
+    // the use-after-free pattern in the frontend (ISSUE 1).
     device_thread_stop(d);
-
-    // send device remove message to frontend
-    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(d->context);
-    jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_REMOVE, sizeof(msg->topic));
-    msg->value.type = JSDRV_UNION_STR;
-    msg->value.value.str = msg->payload.str;
-    jsdrv_cstr_copy(msg->payload.str, d->device.prefix, sizeof(msg->payload.str));
-    jsdrvp_backend_send(d->context, msg);
 }
 
 static bool device_update(struct backend_s * s, const struct device_type_s * device_type, const char * device_path) {
@@ -791,12 +874,12 @@ static void device_free(struct backend_s * s, struct dev_s * d) {
     device_thread_stop(d);
 
     if (d->device.cmd_q) {
-        msg_queue_finalize(d->device.cmd_q);
+        msg_queue_finalize(d->device.cmd_q, s->context);
         d->device.cmd_q = NULL;
     }
 
     if (d->device.rsp_q) {
-        msg_queue_finalize(d->device.rsp_q);
+        msg_queue_finalize(d->device.rsp_q, s->context);
         d->device.rsp_q = NULL;
     }
 
@@ -822,9 +905,9 @@ static void device_scan(struct backend_s * s) {
         s->devices[i].mark = DEVICE_MARK_NONE;
     }
 
-    while (dt->device_type) {
-        JSDRV_LOGD1("scan device_type %d: model=%s, vid=0x%04x, pid=0x%04x",
-                  dt->device_type, dt->model, dt->vendor_id, dt->product_id);
+    while (dt->model) {
+        JSDRV_LOGD1("scan: model=%s, vid=0x%04x, pid=0x%04x",
+                    dt->model, dt->vendor_id, dt->product_id);
         HANDLE handle = SetupDiGetClassDevsW(&dt->guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
         if (!handle) {
             JSDRV_LOGE("SetupDiGetClassDevs failed.");
@@ -845,7 +928,7 @@ static void device_scan(struct backend_s * s) {
                 wcstombs_s(0, device_path, sizeof(device_path), dev_interface_detail->DevicePath, _TRUNCATE);
                 device_update(s, dt, device_path);
             } else {
-                WINDOWS_LOGE("SetupDiGetDeviceInterfaceDetailW failed %d", dt->device_type);
+                WINDOWS_LOGE("SetupDiGetDeviceInterfaceDetailW failed %s", dt->model);
             }
             jsdrv_free(dev_interface_detail);
             jsdrv_memset(&dev_interface, 0, sizeof(dev_interface));
@@ -928,19 +1011,23 @@ static void finalize(struct jsdrvbk_s * backend) {
     if (backend) {
         topic[0] = backend->prefix;
         struct backend_s * s = (struct backend_s *) backend;
-        JSDRV_LOGI("finalize usb backend");
+        JSDRV_LOGI("finalize usb backend: device_change_notifier_finalize start");
         device_change_notifier_finalize();
+        JSDRV_LOGI("finalize usb backend: device_change_notifier_finalize done");
         if (s->thread) {
             jsdrvp_send_finalize_msg(s->context, s->backend.cmd_q, topic);
             // and wait for thread to exit.
+            JSDRV_LOGI("finalize usb backend: join backend_thread");
             if (WAIT_OBJECT_0 != WaitForSingleObject(s->thread, 1000)) {
                 JSDRV_LOGE("winusb thread not closed cleanly.");
+            } else {
+                JSDRV_LOGI("finalize usb backend: backend_thread joined");
             }
             CloseHandle(s->thread);
             s->thread = NULL;
         }
         if (s->backend.cmd_q) {
-            msg_queue_finalize(s->backend.cmd_q);
+            msg_queue_finalize(s->backend.cmd_q, s->context);
             s->backend.cmd_q = NULL;
         }
         if (s->discovery) {
@@ -948,10 +1035,12 @@ static void finalize(struct jsdrvbk_s * backend) {
             s->discovery = NULL;
         }
 
+        JSDRV_LOGI("finalize usb backend: device_free loop start");
         for (uint16_t i = 0; i < DEVICES_MAX; ++i) {
             struct dev_s * d = &s->devices[i];
             device_free(s, d);
         }
+        JSDRV_LOGI("finalize usb backend: device_free loop done");
 
         jsdrv_free(s);
     }

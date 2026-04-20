@@ -70,8 +70,7 @@ static uint8_t on_subscribe_internal(void * user_data, struct jsdrvp_msg_s * msg
         case JSDRV_UNION_JSON: check_expected_ptr_value(msg->value.value.str); break;
         case JSDRV_UNION_U32: check_expected_value(msg->value.value.u32); break;
         case JSDRV_UNION_I32: check_expected_value(msg->value.value.i32); break;
-        default:
-            assert_true(false);
+        default: assert_true(false); break;
     }
     return 0;
 }
@@ -99,8 +98,7 @@ static void on_subscribe_external(void * user_data, const char * topic, const st
         case JSDRV_UNION_JSON: check_expected_ptr_value(value->value.str); break;
         case JSDRV_UNION_U32: check_expected_value(value->value.u32); break;
         case JSDRV_UNION_I32: check_expected_value(value->value.i32); break;
-        default:
-            assert_true(false);
+        default: assert_true(false); break;
     }
 }
 

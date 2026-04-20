@@ -21,10 +21,11 @@
  * @brief Union type.
  */
 
-#ifndef JSDRV_UNION_TYPE_H__
-#define JSDRV_UNION_TYPE_H__
+#ifndef JSDRV_UNION_H_
+#define JSDRV_UNION_H_
 
 #include "jsdrv/cmacro_inc.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -41,22 +42,22 @@ JSDRV_CPP_GUARD_START
 
 /// The allowed data types.
 enum jsdrv_union_e {
-    JSDRV_UNION_NULL = 0,   ///< NULL value.  Also used to clear existing value.
-    JSDRV_UNION_STR  = 1,   ///< UTF-8 string value, null terminated.
-    JSDRV_UNION_JSON = 2,   ///< UTF-8 JSON string value, null terminated.
-    JSDRV_UNION_BIN  = 3,   ///< Raw binary value
-    JSDRV_UNION_RSV0 = 4,   ///< Reserved, do not use
-    JSDRV_UNION_RSV1 = 5,   ///< Reserved, do not use
-    JSDRV_UNION_F32  = 6,   ///< 32-bit IEEE 754 floating point
-    JSDRV_UNION_F64  = 7,   ///< 64-bit IEEE 754 floating point
-    JSDRV_UNION_U8   = 8,   ///< Unsigned 8-bit integer value.
-    JSDRV_UNION_U16  = 9,   ///< Unsigned 16-bit integer value.
-    JSDRV_UNION_U32  = 10,  ///< Unsigned 32-bit integer value.
-    JSDRV_UNION_U64  = 11,  ///< Unsigned 64-bit integer value.
-    JSDRV_UNION_I8   = 12,  ///< Signed 8-bit integer value.
-    JSDRV_UNION_I16  = 13,  ///< Signed 16-bit integer value.
-    JSDRV_UNION_I32  = 14,  ///< Signed 32-bit integer value.
-    JSDRV_UNION_I64  = 15,  ///< Signed 64-bit integer value.
+    JSDRV_UNION_NULL   = 0,   ///< NULL value.  Also used to clear existing value.
+    JSDRV_UNION_STR    = 1,   ///< UTF-8 string value, null terminated.
+    JSDRV_UNION_JSON   = 2,   ///< UTF-8 JSON string value, null terminated.
+    JSDRV_UNION_BIN    = 3,   ///< Raw binary value
+    JSDRV_UNION_STDMSG = 4,   ///< mb_stdmsg_s constant binary message, see mb/stdmsg.h
+    JSDRV_UNION_FRAME  = 5,   ///< Comm frame binary message, see doc/comm/frame.md and mb/comm/frame.h.
+    JSDRV_UNION_F32    = 6,   ///< 32-bit IEEE 754 floating point
+    JSDRV_UNION_F64    = 7,   ///< 64-bit IEEE 754 floating point
+    JSDRV_UNION_U8     = 8,   ///< Unsigned 8-bit integer value.
+    JSDRV_UNION_U16    = 9,   ///< Unsigned 16-bit integer value.
+    JSDRV_UNION_U32    = 10,  ///< Unsigned 32-bit integer value.
+    JSDRV_UNION_U64    = 11,  ///< Unsigned 64-bit integer value.
+    JSDRV_UNION_I8     = 12,  ///< Signed 8-bit integer value.
+    JSDRV_UNION_I16    = 13,  ///< Signed 16-bit integer value.
+    JSDRV_UNION_I32    = 14,  ///< Signed 32-bit integer value.
+    JSDRV_UNION_I64    = 15,  ///< Signed 64-bit integer value.
 };
 
 /**
@@ -107,30 +108,43 @@ struct jsdrv_union_s {
     union jsdrv_union_inner_u value;
 };
 
-// Convenience value creation macros
+// Static assert: this library assumes little-endian byte order.
+// All union convenience macros use the widest member (.u64/.i64) to ensure
+// the full 8 bytes are zero-extended or sign-extended, which is only correct
+// on little-endian architectures.
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__)
+#error "jsdrv requires a little-endian target"
+#elif defined(_MSC_VER) && !defined(_M_IX86) && !defined(_M_X64) && !defined(_M_ARM) && !defined(_M_ARM64)
+#error "jsdrv requires a little-endian target"
+#endif
+
+// Convenience value creation macros.
+// All integer macros write through the widest union member (.u64 or .i64)
+// to ensure the full 8-byte value field is properly cleared and any
+// width view of the union reads the correct value on little-endian targets.
 #define jsdrv_union_null() ((struct jsdrv_union_s){.type=JSDRV_UNION_NULL, .op=0, .flags=0, .app=0, .value={.u64=0}, .size=0})
-#define jsdrv_union_null_r() ((struct jsdrv_union_s){.type=JSDRV_UNION_NULL, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u32=0}, .size=0})
+#define jsdrv_union_null_r() ((struct jsdrv_union_s){.type=JSDRV_UNION_NULL, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=0}, .size=0})
 #define jsdrv_union_f32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F32, .op=0, .flags=0, .app=0, .value={.f32=_value}, .size=0})
 #define jsdrv_union_f32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F32, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.f32=_value}, .size=0})
 #define jsdrv_union_f64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F64, .op=0, .flags=0, .app=0, .value={.f64=_value}, .size=0})
-#define jsdrv_union_f64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F64, .op=0, .app=0, .flags=JSDRV_UNION_FLAG_RETAIN, .value={.f64=_value}, .size=0})
-#define jsdrv_union_u8(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U8, .op=0, .flags=0, .app=0, .value={.u8=_value}, .size=0})
-#define jsdrv_union_u8_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U8, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=_value}, .size=0})
-#define jsdrv_union_u16(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U16, .op=0, .flags=0, .app=0, .value={.u16=_value}, .size=0})
-#define jsdrv_union_u16_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U16, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=_value}, .size=0})
-#define jsdrv_union_u32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U32, .op=0, .flags=0, .app=0, .value={.u32=_value}, .size=0})
-#define jsdrv_union_u32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U32, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=_value}, .size=0})
-#define jsdrv_union_u64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U64, .op=0, .flags=0, .app=0, .value={.u64=_value}, .size=0})
-#define jsdrv_union_u64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=_value}, .size=0})
+#define jsdrv_union_f64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_F64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.f64=_value}, .size=0})
+#define jsdrv_union_u8(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U8, .op=0, .flags=0, .app=0, .value={.u64=(uint8_t)(_value)}, .size=0})
+#define jsdrv_union_u8_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U8, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=(uint8_t)(_value)}, .size=0})
+#define jsdrv_union_u16(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U16, .op=0, .flags=0, .app=0, .value={.u64=(uint16_t)(_value)}, .size=0})
+#define jsdrv_union_u16_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U16, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=(uint16_t)(_value)}, .size=0})
+#define jsdrv_union_u32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U32, .op=0, .flags=0, .app=0, .value={.u64=(uint32_t)(_value)}, .size=0})
+#define jsdrv_union_u32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U32, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=(uint32_t)(_value)}, .size=0})
+#define jsdrv_union_u64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U64, .op=0, .flags=0, .app=0, .value={.u64=(_value)}, .size=0})
+#define jsdrv_union_u64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_U64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.u64=(_value)}, .size=0})
 
-#define jsdrv_union_i8(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I8, .op=0, .flags=0, .app=0, .value={.i8=_value}, .size=0})
-#define jsdrv_union_i8_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I8, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=_value}, .size=0})
-#define jsdrv_union_i16(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I16, .op=0, .flags=0, .app=0, .value={.i16=_value}, .size=0})
-#define jsdrv_union_i16_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I16, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=_value}, .size=0})
-#define jsdrv_union_i32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I32, .op=0, .flags=0, .app=0, .value={.i32=_value}, .size=0})
-#define jsdrv_union_i32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I32, .op=0, .flags= JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=_value}, .size=0})
-#define jsdrv_union_i64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I64, .op=0, .flags=0, .app=0, .value={.i64=_value}, .size=0})
-#define jsdrv_union_i64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=_value}, .size=0})
+#define jsdrv_union_i8(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I8, .op=0, .flags=0, .app=0, .value={.i64=(int8_t)(_value)}, .size=0})
+#define jsdrv_union_i8_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I8, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=(int8_t)(_value)}, .size=0})
+#define jsdrv_union_i16(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I16, .op=0, .flags=0, .app=0, .value={.i64=(int16_t)(_value)}, .size=0})
+#define jsdrv_union_i16_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I16, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=(int16_t)(_value)}, .size=0})
+#define jsdrv_union_i32(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I32, .op=0, .flags=0, .app=0, .value={.i64=(int32_t)(_value)}, .size=0})
+#define jsdrv_union_i32_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I32, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=(int32_t)(_value)}, .size=0})
+#define jsdrv_union_i64(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I64, .op=0, .flags=0, .app=0, .value={.i64=(_value)}, .size=0})
+#define jsdrv_union_i64_r(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_I64, .op=0, .flags=JSDRV_UNION_FLAG_RETAIN, .app=0, .value={.i64=(_value)}, .size=0})
 
 #define jsdrv_union_str(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=0, .flags=0, .app=0, .value={.str=_value}, .size=0})
 #define jsdrv_union_cstr(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=0, .flags=JSDRV_UNION_FLAG_CONST, .app=0, .value={.str=_value}, .size=0})
@@ -152,8 +166,8 @@ struct jsdrv_union_s {
  * @return True if equal, false if not equal.
  *
  * This check only compares the type and value.  The types and values must match
- * exactly.  However, if ignores the additional fields
- * [flags, op, app].  Use jsdrv_union_eq_strict() to also compare these fields.
+ * exactly.  However, it ignores the additional fields
+ * [flags, op, app].  Use jsdrv_union_eq_exact() to also compare these fields.
  * Use jsdrv_union_equiv() to more loosely check the value.
  */
 JSDRV_API bool jsdrv_union_eq(const struct jsdrv_union_s * v1, const struct jsdrv_union_s * v2);
@@ -188,8 +202,8 @@ JSDRV_API bool jsdrv_union_equiv(const struct jsdrv_union_s * v1, const struct j
  * @see jsdrv_union_as_type()
  *
  * This widening conversion preserves float, signed, and unsigned characteristics.
- * This check performs type up-conversions to attempt to match the
- * two fields.
+ * Float types are widened to f64, signed integer types to i64, and unsigned
+ * integer types to u64.  Pointer types (string, JSON, binary) are unchanged.
  */
 JSDRV_API void jsdrv_union_widen(struct jsdrv_union_s * x);
 
@@ -251,8 +265,34 @@ JSDRV_API const char * jsdrv_union_type_to_str(uint8_t type);
  */
 JSDRV_API int32_t jsdrv_union_value_to_str(const struct jsdrv_union_s * value, char * str, uint32_t str_len, uint32_t opts);
 
+/**
+ * @brief Copy a union value into caller-owned storage.
+ *
+ * @param[out] dst The destination union.  Its fields will be fully
+ *      overwritten; it does not need to be pre-initialized.
+ * @param[in] src The source union.
+ * @param[out] buffer Caller-provided storage used only for pointer
+ *      types (string, JSON, binary, stdmsg, frame).  May be NULL when
+ *      buffer_size is 0 and the caller knows src is a scalar type.
+ * @param[in] buffer_size The size of buffer in bytes.
+ * @return 0 on success, or
+ *      #JSDRV_ERROR_PARAMETER_INVALID if dst or src is NULL, or
+ *      #JSDRV_ERROR_TOO_SMALL if buffer is too small for a pointer payload.
+ *
+ * This helper makes it safe to retain a jsdrv_union_s past a
+ * jsdrv_subscribe_fn callback invocation (the callback documents that
+ * value and any referenced memory are only valid for the duration of
+ * the call).  For scalar types the struct is copied verbatim.  For
+ * pointer types, the payload is copied into buffer and dst is updated
+ * to reference buffer.  The JSDRV_UNION_FLAG_HEAP_MEMORY flag is
+ * cleared on dst since the caller owns buffer.
+ */
+JSDRV_API int32_t jsdrv_union_copy(struct jsdrv_union_s * dst,
+                                   const struct jsdrv_union_s * src,
+                                   void * buffer, size_t buffer_size);
+
 JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_UNION_TYPE_H__ */
+#endif  /* JSDRV_UNION_H_ */

@@ -41,7 +41,7 @@ static inline int _isdigit(char c) {
 }
 
 
-int jsdrv_cstr_copy(char * tgt, char const * src, size_t tgt_size) {
+int32_t jsdrv_cstr_copy(char * tgt, const char * src, size_t tgt_size) {
     if ((NULL == tgt) || (tgt_size <= 0)) {
         return -1; // nonsensical input.
     }
@@ -64,7 +64,7 @@ int jsdrv_cstr_copy(char * tgt, char const * src, size_t tgt_size) {
     return 0;
 }
 
-int jsdrv_cstr_join(char * tgt, char const * src1, char const * src2, size_t tgt_size) {
+int32_t jsdrv_cstr_join(char * tgt, const char * src1, const char * src2, size_t tgt_size) {
     if ((NULL == tgt) || (tgt_size <= 0)) {
         return -1; // nonsensical input.
     }
@@ -90,7 +90,7 @@ int jsdrv_cstr_join(char * tgt, char const * src1, char const * src2, size_t tgt
     return 0;
 }
 
-int jsdrv_cstr_casecmp(const char * s1, const char * s2) {
+int32_t jsdrv_cstr_casecmp(const char * s1, const char * s2) {
     char c1;
     char c2;
     if (!s1) {
@@ -136,27 +136,27 @@ const char * jsdrv_cstr_starts_with(const char * s, const char * prefix) {
     }
 }
 
-const char * jsdrv_cstr_ends_with(const char * s, const char * prefix) {
-    if (!prefix || !*prefix || !s) {
+const char * jsdrv_cstr_ends_with(const char * s, const char * suffix) {
+    if (!suffix || !*suffix || !s) {
         return s;
     }
     const char * s_end = s;
-    const char * prefix_end = prefix;
+    const char * suffix_end = suffix;
 
     while (*s_end) {
         ++s_end;
     }
 
-    while (*prefix_end) {
-        ++prefix_end;
+    while (*suffix_end) {
+        ++suffix_end;
     }
 
-    if ((s_end - s) < (prefix_end - prefix)) {
+    if ((s_end - s) < (suffix_end - suffix)) {
         return 0;  // s too short to match
     }
 
-    while (prefix_end >= prefix) {
-        if (*prefix_end-- != *s_end--) {
+    while (suffix_end >= suffix) {
+        if (*suffix_end-- != *s_end--) {
             return 0;
         }
     }
@@ -164,7 +164,7 @@ const char * jsdrv_cstr_ends_with(const char * s, const char * prefix) {
     return s_end;
 }
 
-int jsdrv_cstr_to_u32(const char * src, uint32_t * value) {
+int32_t jsdrv_cstr_to_u32(const char * src, uint32_t * value) {
     uint32_t v = 0;
 
     if ((NULL == src) || (NULL == value)) {
@@ -189,6 +189,9 @@ int jsdrv_cstr_to_u32(const char * src, uint32_t * value) {
                 nibble = c - 'a' + 10;
             } else if ((c >= 'A') && (c <= 'F')) {
                 nibble = c - 'A' + 10;
+            } else if (c == '_') {
+                ++src;
+                continue;
             } else {
                 break;
             }
@@ -210,8 +213,8 @@ int jsdrv_cstr_to_u32(const char * src, uint32_t * value) {
     return 0;
 }
 
-int jsdrv_cstr_to_i32(const char * src, int32_t * value) {
-    int neg = 0;
+int32_t jsdrv_cstr_to_i32(const char * src, int32_t * value) {
+    int32_t neg = 0;
     uint32_t v;
 
     if ((NULL == src) || (NULL == value)) {
@@ -229,7 +232,7 @@ int jsdrv_cstr_to_i32(const char * src, int32_t * value) {
         ++src;
     }
 
-    int rc = jsdrv_cstr_to_u32(src, &v);
+    int32_t rc = jsdrv_cstr_to_u32(src, &v);
     if (rc) {
         return rc;
     }
@@ -240,10 +243,10 @@ int jsdrv_cstr_to_i32(const char * src, int32_t * value) {
     return 0;
 }
 
-int jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * value) {
+int32_t jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * value) {
     int32_t v = 0;
     int32_t decimal = -1;  // still on integer part
-    int neg = 0;
+    int32_t neg = 0;
 
     if (!src) {
         return 0;
@@ -315,7 +318,7 @@ int jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * value) {
     return 0;
 }
 
-int jsdrv_cstr_to_u64(const char * src, uint64_t * value) {
+int32_t jsdrv_cstr_to_u64(const char * src, uint64_t * value) {
     uint64_t v = 0;
 
     if ((NULL == src) || (NULL == value)) {
@@ -370,8 +373,8 @@ int jsdrv_cstr_to_u64(const char * src, uint64_t * value) {
     return 0;
 }
 
-int jsdrv_cstr_to_i64(const char * src, int64_t * value) {
-    int neg = 0;
+int32_t jsdrv_cstr_to_i64(const char * src, int64_t * value) {
+    int32_t neg = 0;
     uint64_t v;
 
     if ((NULL == src) || (NULL == value)) {
@@ -389,7 +392,7 @@ int jsdrv_cstr_to_i64(const char * src, int64_t * value) {
         ++src;
     }
 
-    int rc = jsdrv_cstr_to_u64(src, &v);
+    int32_t rc = jsdrv_cstr_to_u64(src, &v);
     if (rc) {
         return rc;
     }
@@ -413,7 +416,7 @@ const float exp_pow[] = {  // binary lookup table for exponent
         10.0e32f,
 };
 
-int jsdrv_cstr_to_f32(const char * src, float * value) {
+int32_t jsdrv_cstr_to_f32(const char * src, float * value) {
     float x;
     float exp = 1.0f;
     const float * exp_pow_ptr = exp_pow;
@@ -501,7 +504,7 @@ int jsdrv_cstr_to_f32(const char * src, float * value) {
 }
 #endif
 
-int jsdrv_u32_to_cstr(uint32_t u32, char * str, size_t str_size) {
+int32_t jsdrv_u32_to_cstr(uint32_t u32, char * str, size_t str_size) {
     char buf[11];
     char *p = buf;
     if (!str || !str_size) {
@@ -528,7 +531,7 @@ int jsdrv_u32_to_cstr(uint32_t u32, char * str, size_t str_size) {
     return 0;
 }
 
-int jsdrv_cstr_toupper(char * s) {
+int32_t jsdrv_cstr_toupper(char * s) {
     if (NULL == s) {
         return 1;
     }
@@ -539,11 +542,11 @@ int jsdrv_cstr_toupper(char * s) {
     return 0;
 }
 
-int jsdrv_cstr_to_index(char const * s, char const * const * table, int * index) {
+int32_t jsdrv_cstr_to_index(const char * s, const char * const * table, int32_t * index) {
     if ((NULL == s) || (NULL == table) || (NULL == index)) {
         return 2;
     }
-    int idx = 0;
+    int32_t idx = 0;
     while (*table) {
         if (strcmp(s, *table) == 0) {
             *index = idx;
@@ -558,9 +561,9 @@ int jsdrv_cstr_to_index(char const * s, char const * const * table, int * index)
 static const char * const true_table_[] = {"ON", "1", "TRUE", "YES", "ENABLE", "ENABLED", NULL};
 static const char * const false_table[] = {"OFF", "0", "FALSE", "NO", "DISABLE", "DISABLED", "NULL", "NONE", NULL};
 
-int jsdrv_cstr_to_bool(char const * s, bool * value) {
+int32_t jsdrv_cstr_to_bool(const char * s, bool * value) {
     char buffer[16]; // longer than any entry
-    int index;
+    int32_t index;
     if ((s == NULL) || (NULL == value)) {
         return 1;
     }

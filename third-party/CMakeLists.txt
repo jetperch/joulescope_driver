@@ -15,6 +15,7 @@ if (NOT CMAKE_CROSSCOMPILING)
 endif()
 
 
+add_subdirectory(miniz)
 add_subdirectory(tinyprintf)
 if (WIN32)
     # use joulescope_driver support, not libusb

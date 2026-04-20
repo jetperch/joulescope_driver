@@ -39,14 +39,12 @@ cdef extern from "jsdrv/time.h":
 cdef extern from "jsdrv/tmap.h":
     struct jsdrv_tmap_s
     jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size)
-    void jsdrv_tmap_ref_incr(jsdrv_tmap_s * self)
-    void jsdrv_tmap_ref_decr(jsdrv_tmap_s * self)
+    void jsdrv_tmap_free(jsdrv_tmap_s * self)
+    jsdrv_tmap_s * jsdrv_tmap_copy(const jsdrv_tmap_s * src)
     void jsdrv_tmap_clear(jsdrv_tmap_s * self)
     size_t jsdrv_tmap_length(jsdrv_tmap_s * self)
     void jsdrv_tmap_add(jsdrv_tmap_s * self, const jsdrv_time_map_s * time_map)
     void jsdrv_tmap_expire_by_sample_id(jsdrv_tmap_s * self, uint64_t sample_id)
-    void jsdrv_tmap_reader_enter(jsdrv_tmap_s * self)
-    void jsdrv_tmap_reader_exit(jsdrv_tmap_s * self)
     int32_t jsdrv_tmap_sample_id_to_timestamp(jsdrv_tmap_s * self, uint64_t sample_id, int64_t * timestamp)
     int32_t jsdrv_tmap_timestamp_to_sample_id(jsdrv_tmap_s * self, int64_t timestamp, uint64_t * sample_id)
     int32_t jsdrv_tmap_get(jsdrv_tmap_s * self, size_t index, jsdrv_time_map_s * time_map)
@@ -58,8 +56,8 @@ cdef extern from "jsdrv/union.h":
         JSDRV_UNION_STR = 1   # UTF-8 string value, null terminated.
         JSDRV_UNION_JSON = 2  # UTF-8 JSON string value, null terminated.
         JSDRV_UNION_BIN = 3   # Raw binary value
-        JSDRV_UNION_RSV0 = 4  # Reserved, do not use
-        JSDRV_UNION_RSV1 = 5  # Reserved, do not use
+        JSDRV_UNION_STDMSG = 4  # mb_stdmsg_s constant binary message, see mb/stdmsg.h
+        JSDRV_UNION_FRAME = 5  # Comm frame binary message, see doc/comm/frame.md and mb/comm/frame.h.
         JSDRV_UNION_F32 = 6   # 32-bit IEEE 754 floating point
         JSDRV_UNION_F64 = 7   # 64-bit IEEE 754 floating point
         JSDRV_UNION_U8 = 8    # Unsigned 8-bit integer value.
@@ -242,7 +240,7 @@ cdef extern from "jsdrv.h":
     int32_t jsdrv_subscribe(jsdrv_context_s * context, const char * topic, uint8_t flags, jsdrv_subscribe_fn cbk_fn, void * cbk_user_data, uint32_t timeout_ms) nogil
     int32_t jsdrv_unsubscribe(jsdrv_context_s * context, const char * topic, jsdrv_subscribe_fn cbk_fn, void * cbk_user_data, uint32_t timeout_ms) nogil
     int32_t jsdrv_unsubscribe_all(jsdrv_context_s * context, jsdrv_subscribe_fn cbk_fn, void * cbk_user_data, uint32_t timeout_ms) nogil
-    void jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash) nogil
+    int32_t jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash) nogil
 
 
 cdef extern from "jsdrv/log.h":

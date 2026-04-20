@@ -20,8 +20,8 @@
  * \brief Trivial logging support.
  */
 
-#ifndef JSDRV_LOG_H_
-#define JSDRV_LOG_H_
+#ifndef JSDRV_PRV_LOG_H_
+#define JSDRV_PRV_LOG_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include "jsdrv/log.h"
@@ -90,7 +90,7 @@ JSDRV_CPP_GUARD_START
  *
  * This implementation is thread safe.
  */
-void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, const char * format, ...);
+void jsdrv_log_publish(int8_t level, const char * filename, uint32_t line, const char * format, ...);
 
 /**
  * @brief The printf-style variadic arguments define to handle log messages.
@@ -224,4 +224,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif /* JSDRV_LOG_H_ */
+#endif /* JSDRV_PRV_LOG_H_ */

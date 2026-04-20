@@ -24,6 +24,7 @@
 #define JSDRV_INCLUDE_H_
 
 #include "jsdrv/cmacro_inc.h"
+#include "jsdrv/error_code.h"
 #include "jsdrv/union.h"
 #include "jsdrv/time.h"
 #include "jsdrv/tmap.h"
@@ -91,8 +92,8 @@
  * Topics with the following suffix characters have special meanings:
  * - '%': metadata request (value should be NULL)
  * - '$': metadata response
- * - '?': query request (value should be NULL)
- * - '&': query response
+ * - '&': query request (value should be NULL)
+ * - '?': query response
  * - '#': return code.  Value is i32 return code. 0=success.
  *
  * Note that the topic owner will respond to jsdrv_publish
@@ -126,12 +127,12 @@
 /// The maximum size for normal PubSub messages
 #define JSDRV_PAYLOAD_LENGTH_MAX        (1024U)
 /// The header size of jsdrv_stream_signal_s before the data field.
-#define JSDRV_STREAM_HEADER_SIZE        (48U)
+#define JSDRV_STREAM_HEADER_SIZE        (56U)
 /// The size of data in jsdrv_stream_signal_s.
 #define JSDRV_STREAM_DATA_SIZE          (1024 * 256)    // 256 kB max
 
 /**
- * @defgroup jsdrv_topis Topics
+ * @defgroup jsdrv_topics Topics
  *
  * @brief Topic characters, commands, suffixes, and prefixes.
  *
@@ -171,7 +172,7 @@
 /// The local topic prefix (handled by host, no distributed pubsub).
 #define JSDRV_TOPIC_PREFIX_LOCAL          '_'
 
-/// The driver commad prefix (handled by host, no distributed pubsub).
+/// The driver command prefix (handled by host, no distributed pubsub).
 #define JSDRV_TOPIC_PREFIX_COMMAND        '@'
 
 // driver-level commands
@@ -182,7 +183,7 @@
 #define JSDRV_MSG_INITIALIZE            "@/!init"       // CAUTION: internal use only
 #define JSDRV_MSG_FINALIZE              "@/!final"      // CAUTION: internal use only
 #define JSDRV_MSG_VERSION               "@/version"     ///< Driver version: subscribe only JSDRV version (u32)
-#define JSDRV_MSG_TIMEOUT               "@/timeout"     ///< UnhandledDriver version: subscribe only JSDRV version (u32)
+#define JSDRV_MSG_TIMEOUT               "@/timeout"     ///< Explict timeout command for testing.
 
 
 // device-specific commands in format {device}/{command}
@@ -191,6 +192,20 @@
 
 /** @} */
 
+/**
+ * @brief Timeout value requesting asynchronous (non-blocking) operation.
+ *
+ * For jsdrv_publish(), jsdrv_subscribe(), jsdrv_unsubscribe(),
+ * jsdrv_unsubscribe_all(), jsdrv_open(), and jsdrv_close(), passing
+ * timeout_ms == #JSDRV_TIMEOUT_MS_ASYNC (0) makes the call return
+ * immediately without waiting for the operation to complete.
+ *
+ * jsdrv_initialize(), jsdrv_finalize(), and jsdrv_query() are
+ * always synchronous and interpret timeout_ms == 0 as a request
+ * to use the default timeout (#JSDRV_TIMEOUT_MS_DEFAULT or
+ * #JSDRV_TIMEOUT_MS_INIT as appropriate).
+ */
+#define JSDRV_TIMEOUT_MS_ASYNC         0
 #define JSDRV_TIMEOUT_MS_DEFAULT       1000             ///< The recommended default timeout
 #define JSDRV_TIMEOUT_MS_INIT          5000             ///< The recommended default jsdrv_initialize() timeout.
 
@@ -210,9 +225,19 @@ struct jsdrv_context_s;
  *
  * This function will be called from the Joulescope driver frontend thread.
  * The function is responsible for performing any resynchronization to
- * an application target thread, if needed.  However, the value only
- * remains valid for the duration of the callback.  Any binary or string
- * data must be copied!
+ * an application target thread, if needed.
+ *
+ * Lifetime: `topic`, `value`, and everything reachable through `value`
+ * are valid ONLY for the duration of this callback.  This includes:
+ *   - string / JSON / raw binary payloads (copy the bytes with memcpy)
+ *   - union-typed values (use #jsdrv_union_copy)
+ *   - the pubsub-owned binary structs (#jsdrv_stream_signal_s,
+ *     #jsdrv_statistics_s, #jsdrv_buffer_info_s, #jsdrv_buffer_response_s)
+ *   - pointer fields embedded in those structs, such as
+ *     #jsdrv_buffer_info_s.tmap (use #jsdrv_tmap_copy)
+ *
+ * Storing any of these pointers for use after the callback returns is
+ * undefined behavior.  Copy everything you need before returning.
  */
 typedef void (*jsdrv_subscribe_fn)(void * user_data, const char * topic, const struct jsdrv_union_s * value);
 
@@ -250,7 +275,7 @@ enum jsdrv_field_e {
     JSDRV_FIELD_CURRENT   = 1,
     JSDRV_FIELD_VOLTAGE   = 2,
     JSDRV_FIELD_POWER     = 3,
-    JSDRV_FIELD_RANGE     = 4, // 0=current, 1=voltage
+    JSDRV_FIELD_RANGE     = 4,
     JSDRV_FIELD_GPI       = 5,
     JSDRV_FIELD_UART      = 6,
     JSDRV_FIELD_RAW       = 7,
@@ -258,11 +283,23 @@ enum jsdrv_field_e {
 
 /**
  * @brief A contiguous, uncompressed sample block for a channel.
+ *
+ * Consumers MUST read `version` before dereferencing any other field.
+ * If `version` is greater than the value this consumer was compiled
+ * against, either degrade gracefully by reading only the v1 fields or
+ * reject the payload.  Newer versions MUST NOT change the offset or
+ * meaning of any v1 field; they may only repurpose reserved fields or
+ * append.
  */
 struct jsdrv_stream_signal_s {
+    uint8_t version;                        ///< The response format version == 1.
+    uint8_t rsv1_u8;                        ///< Reserved, set to 0.
+    uint8_t rsv2_u8;                        ///< Reserved, set to 0.
+    uint8_t rsv3_u8;                        ///< Reserved, set to 0.
+    uint32_t rsv4_u32;                      ///< Reserved, set to 0.
     uint64_t sample_id;                     ///< the starting sample id, which increments by decimate_factor.
     uint8_t field_id;                       ///< jsdrv_field_e
-    uint8_t index;                          ///< The channel index within the field.
+    uint8_t index;                          ///< The channel index within the field.  For JSDRV_FIELD_RANGE, 0=current, 1=voltage.
     uint8_t element_type;                   ///< jsdrv_element_type_e
     uint8_t element_size_bits;              ///< The element size in bits
     uint32_t element_count;                 ///< size of data in elements
@@ -274,15 +311,22 @@ struct jsdrv_stream_signal_s {
 
 /**
  * @brief The payload data structure for statistics updates.
+ *
+ * Consumers MUST read `version` before dereferencing any other field.
+ * If `version` is greater than the value this consumer was compiled
+ * against, either degrade gracefully by reading only the v1 fields or
+ * reject the payload.  Newer versions MUST NOT change the offset or
+ * meaning of any v1 field; they may only repurpose reserved fields or
+ * append.
  */
 struct jsdrv_statistics_s {
     uint8_t version;             ///< The version, only 1 currently supported
     uint8_t rsv1_u8;             ///< Reserved = 0
     uint8_t rsv2_u8;             ///< Reserved = 0
-    uint8_t decimate_factor;     ///< The decimate factor from sample_id to calculated samples = 2.
+    uint8_t decimate_factor;     ///< The decimate factor from sample_id to calculated samples.
     uint32_t block_sample_count; ///< Samples used to compute this block, in decimated samples.
     uint32_t sample_freq;        ///< The samples per second for *_sample_id (undecimated)
-    uint32_t rsv3_u8;            ///< Reserved = 0
+    uint32_t rsv3_u32;           ///< Reserved = 0
     uint64_t block_sample_id;    ///< First sample in this block's statistics computation.
     uint64_t accum_sample_id;    ///< First sample in the integration statistics computation.
     double i_avg;                ///< The average current over the block.
@@ -343,6 +387,13 @@ struct jsdrv_time_range_samples_s {
  * the buffer size.  When the buffer is full, the range will be
  * close to the size.  The range when full is not required to be the
  * entire size to allow for buffering optimizations.
+ *
+ * Consumers MUST read `version` before dereferencing any other field.
+ * If `version` is greater than the value this consumer was compiled
+ * against, either degrade gracefully by reading only the v1 fields or
+ * reject the payload.  Newer versions MUST NOT change the offset or
+ * meaning of any v1 field; they may only repurpose reserved fields or
+ * append.
  */
 struct jsdrv_buffer_info_s {
     uint8_t version;                        ///< The response format version == 1.
@@ -356,7 +407,7 @@ struct jsdrv_buffer_info_s {
     char topic[JSDRV_TOPIC_LENGTH_MAX];     ///< The source topic that provides jsdrv_stream_signal_s.
     int64_t size_in_utc;                    ///< The total buffer size in UTC time based on nominal sample rate.
     uint64_t size_in_samples;               ///< The total buffer size in samples.
-    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time based on tmap (not deprecated time_map).
+    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time, derived from the invariant tmap.
     struct jsdrv_time_range_samples_s time_range_samples;  ///< In sample time.
 
     /**
@@ -384,10 +435,9 @@ struct jsdrv_buffer_info_s {
      * @brief The time map for the response.
      * @see time_map
      *
-     * This instance is reference counted.  Call jsdrv_tmap_ref_incr()
-     * to hold onto this instance and jsdrv_tmap_ref_decr() to release it.
-     * Use jsdrv_tmap_reader_enter() and jsdrv_tmap_reader_exit()
-     * to actively access the time map functions.
+     * This instance is a snapshot owned by the consumer.  Call
+     * jsdrv_tmap_free() when done.  No locking is required; the
+     * snapshot is independent of the writer's tmap.
      */
     struct jsdrv_tmap_s * tmap;             ///< The time map for the response.
 };
@@ -424,6 +474,12 @@ union jsdrv_buffer_request_time_range_u {
  *
  * The buffer implementation may deduplicate requests using
  * the combination rsp_topic and rsp_id.
+ *
+ * Consumers MUST populate `version` with the maximum version they
+ * understand.  Producers MAY examine `version` to stay within the
+ * consumer's capabilities.  Newer versions MUST NOT change the offset
+ * or meaning of any v1 field; they may only repurpose reserved fields
+ * or append.
  */
 struct jsdrv_buffer_request_s {
     uint8_t version;                     ///< The request format version == 1.
@@ -450,9 +506,18 @@ enum jsdrv_buffer_response_type_e {
 struct jsdrv_summary_entry_s {
     float avg;                  ///< The average (mean) over the window.
     float std;                  ///< The standard deviation over the window.
-    float min;                  ///< The maximum value over the window.
-    float max;                  ///< The minimum value over the window.
+    float min;                  ///< The minimum value over the window.
+    float max;                  ///< The maximum value over the window.
 };
+
+#ifdef __cplusplus
+// C++ does not support flexible array member
+// Use length 1 to avoid errors with pedantic
+#define JSDRV_VARIABLE_LENGTH_ARRAY 1
+#else
+// C flexible array member is [] without a number
+#define JSDRV_VARIABLE_LENGTH_ARRAY
+#endif
 
 /**
  * @brief The response to jsdrv_buffer_request_s produced by the memory buffer.
@@ -466,6 +531,13 @@ struct jsdrv_summary_entry_s {
  *
  * For response_type JSDRV_BUFFER_RESPONSE_SAMPLES, the data type depends
  * upon info.element_type and info.element_size_bits.
+ *
+ * Consumers MUST read `version` before dereferencing any other field.
+ * If `version` is greater than the value this consumer was compiled
+ * against, either degrade gracefully by reading only the v1 fields or
+ * reject the payload.  Newer versions MUST NOT change the offset or
+ * meaning of any v1 field; they may only repurpose reserved fields or
+ * append.
  */
 struct jsdrv_buffer_response_s {
     uint8_t version;                        ///< The response format version == 1.
@@ -491,14 +563,14 @@ struct jsdrv_buffer_response_s {
      * For response_type JSDRV_BUFFER_RESPONSE_SAMPLES, the data
      * is defined by info.element_type and info.element_size_bits.
      */
-    uint64_t data[];
+    uint64_t data[JSDRV_VARIABLE_LENGTH_ARRAY];
 };
 
 /// The subscriber flags for jsdrv_subscribe().
 enum jsdrv_subscribe_flag_e {
     /// No flags (always 0).
     JSDRV_SFLAG_NONE = 0,
-    /// Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.
+    /// Immediately forward retained PUB and/or METADATA, depending upon JSDRV_SFLAG_PUB and JSDRV_SFLAG_METADATA_RSP.
     JSDRV_SFLAG_RETAIN = (1 << 0),
     /// Receive normal topic publish.
     JSDRV_SFLAG_PUB = (1 << 1),
@@ -550,14 +622,19 @@ JSDRV_API int32_t jsdrv_initialize(struct jsdrv_context_s ** context,
 /**
  * @brief Finalize the Joulescope driver (synchronous).
  *
- * @param context The context from jsdrv_initialize().
+ * @param context The context from jsdrv_initialize().  The context is
+ *      no longer usable after this call returns, regardless of return
+ *      status.  The caller must not invoke any other jsdrv API on the
+ *      context after jsdrv_finalize().
  * @param timeout_ms This function is always blocking and waits for up to
  *      timeout_ms for the operation to complete.
  *      When 0, use the default timeout [recommended].
  *      When nonzero, override the default timeout.
  *
  * This function releases all Joulescope driver resources including
- * memory and threads.
+ * memory and threads.  On timeout or error the context is still
+ * invalidated; a nonzero status may indicate that some resources
+ * (threads, memory) could not be released cleanly and may have leaked.
  *
  * This function must not be called from the driver frontend thread.
  * Therefore, do not call this function directly from a subscriber
@@ -571,10 +648,21 @@ JSDRV_API void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout
  * @param context The Joulescope driver context.
  * @param topic The topic to publish.
  * @param value The new topic value.
- * @param timeout_ms When 0, publish asynchronously without awaiting
- *      the result.  When nonzero, block awaiting the return code message.
+ * @param timeout_ms Timeout in milliseconds.  Pass
+ *      #JSDRV_TIMEOUT_MS_ASYNC (0) for asynchronous (non-blocking)
+ *      operation: the publish is queued and this function returns
+ *      immediately without reporting any processing result.
+ *      Pass a positive value to wait for synchronous processing: the
+ *      call blocks until the topic owner (if any) has processed the
+ *      publish, and the return value reflects that processing.  On
+ *      timeout returns #JSDRV_ERROR_TIMED_OUT.
  * @return 0 or error code.  All calls may return #JSDRV_ERROR_PARAMETER_INVALID.
  *      Each topic may return other error codes.
+ *
+ * @note The return code reflects synchronous processing only.  In
+ *       asynchronous mode the value is queued; no processing errors
+ *       are reported.  During development, prefer a non-zero timeout
+ *       so failures surface immediately.
  */
 JSDRV_API int32_t jsdrv_publish(struct jsdrv_context_s * context,
         const char * topic, const struct jsdrv_union_s * value,
@@ -607,18 +695,24 @@ JSDRV_API int32_t jsdrv_query(struct jsdrv_context_s * context,
  * @param context The Joulescope driver context.
  * @param topic The subscription topic.  The cbk_fn will be called whenever
  *      this topic or a child is updated.
- * @param flags The #jsdrv_subscribe_flag_e bitmap. 0 (#JSDRV_SFLAG_NONE) for no flags.
+ * @param flags The #jsdrv_subscribe_flag_e bitmap.  As a convenience,
+ *      a flags value of 0 is treated as
+ *      (#JSDRV_SFLAG_PUB | #JSDRV_SFLAG_RETAIN), which is the common
+ *      default.  Pass an explicit non-zero bitmap when you want a
+ *      different combination.
  * @param cbk_fn The function to call with topic updates.  When called, this function
  *      will be invoked from the Joulescope driver thread.  The function must NOT
- *      call jsdrv_finalize() or jsdrv_wait().
+ *      call jsdrv_finalize().
  * @param cbk_user_data The arbitrary data provided to cbk_fn.
- * @param timeout_ms When 0, subscribe asynchronously.  When nonzero, block awaiting
- *      the subscription operation to complete.
+ * @param timeout_ms Timeout in milliseconds.  Pass
+ *      #JSDRV_TIMEOUT_MS_ASYNC for asynchronous (non-blocking) operation.
+ *      Pass a positive value to block until the subscribe operation
+ *      completes; on timeout returns #JSDRV_ERROR_TIMED_OUT.
  * @return 0 or error code.
  *
  * Synchronous, blocking subscription is most useful when flags contains
  * #JSDRV_SFLAG_RETAIN.  The operation will not complete until cbk_fn()
- * is called with all retained values.
+ * has been called with all retained values.
  */
 JSDRV_API int32_t jsdrv_subscribe(struct jsdrv_context_s * context, const char * topic, uint8_t flags,
         jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,
@@ -632,8 +726,10 @@ JSDRV_API int32_t jsdrv_subscribe(struct jsdrv_context_s * context, const char *
  * @param cbk_fn The previous subscribed function.
  * @param cbk_user_data The arbitrary data provided to cbk_fn which must match
  *      the value provided to jsdrv_subscribe().
- * @param timeout_ms When 0, unsubscribe asynchronously.
- *      When nonzero, block awaiting the unsubscribe operation to complete.
+ * @param timeout_ms Timeout in milliseconds.  Pass
+ *      #JSDRV_TIMEOUT_MS_ASYNC for asynchronous (non-blocking) operation.
+ *      Pass a positive value to block until the unsubscribe operation
+ *      completes; on timeout returns #JSDRV_ERROR_TIMED_OUT.
  * @return 0 or error code.
  * @see jsdrv_subscribe
  * @see jsdrv_unsubscribe_all
@@ -643,6 +739,11 @@ JSDRV_API int32_t jsdrv_subscribe(struct jsdrv_context_s * context, const char *
  * function returns.  With asynchronous unsubscribe, cbk_fn() may be called
  * for some indefinite number of times and duration until the unsubscribe
  * request is handled internally.
+ *
+ * Both cbk_fn AND cbk_user_data must match the values passed to
+ * jsdrv_subscribe().  A mismatch is not an error; the operation
+ * succeeds but the subscription remains active.  Use the identical
+ * pointer values used at subscribe time.
  */
 JSDRV_API int32_t jsdrv_unsubscribe(struct jsdrv_context_s * context, const char * topic,
         jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,
@@ -655,8 +756,10 @@ JSDRV_API int32_t jsdrv_unsubscribe(struct jsdrv_context_s * context, const char
  * @param cbk_fn The previous subscribed function.
  * @param cbk_user_data The arbitrary data provided to cbk_fn which must match
  *      the value provided to jsdrv_subscribe().
- * @param timeout_ms When 0, unsubscribe asynchronously.
- *      When nonzero, block awaiting the unsubscribe operation to complete.
+ * @param timeout_ms Timeout in milliseconds.  Pass
+ *      #JSDRV_TIMEOUT_MS_ASYNC for asynchronous (non-blocking) operation.
+ *      Pass a positive value to block until the unsubscribe operation
+ *      completes; on timeout returns #JSDRV_ERROR_TIMED_OUT.
  * @return 0 or error code.
  * @see jsdrv_unsubscribe
  *
@@ -673,6 +776,10 @@ JSDRV_API int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
  * @param context The Joulescope driver context.
  * @param device_prefix The device prefix string.
  * @param mode The #jsdrv_device_open_mode_e.
+ * @param timeout_ms Timeout in milliseconds.  Pass
+ *      #JSDRV_TIMEOUT_MS_ASYNC for asynchronous (non-blocking) operation.
+ *      Pass a positive value to block until the open operation
+ *      completes; on timeout returns #JSDRV_ERROR_TIMED_OUT.
  * @return 0 or error code.
  *
  * This is a convenience function that wraps a single call to
@@ -680,13 +787,18 @@ JSDRV_API int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
  * Language wrappers should not wrap this function and instead
  * call jsdrv_publish() directly.
  */
-JSDRV_API int32_t jsdrv_open(struct jsdrv_context_s * context, const char * device_prefix, int32_t mode);
+JSDRV_API int32_t jsdrv_open(struct jsdrv_context_s * context, const char * device_prefix, int32_t mode,
+                             uint32_t timeout_ms);
 
 /**
  * @brief Close a device.
  *
  * @param context The Joulescope driver context.
  * @param device_prefix The device prefix string.
+ * @param timeout_ms Timeout in milliseconds.  Pass
+ *      #JSDRV_TIMEOUT_MS_ASYNC for asynchronous (non-blocking) operation.
+ *      Pass a positive value to block until the close operation
+ *      completes; on timeout returns #JSDRV_ERROR_TIMED_OUT.
  * @return 0 or error code.
  *
  * This is a convenience function that wraps a single call to
@@ -694,18 +806,20 @@ JSDRV_API int32_t jsdrv_open(struct jsdrv_context_s * context, const char * devi
  * Language wrappers should not wrap this function and instead
  * call jsdrv_publish() directly.
  */
-JSDRV_API int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix);
+JSDRV_API int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix, uint32_t timeout_ms);
 
 /**
  * @brief Compute the calibration hash.
  *
- * @param msg[in] The calibration message.
- * @param length[in] The length of message in bytes which must be
- *      a multiple of 32 bytes.
- * @param hash[out] The u32[16] hash of the message.
+ * @param[in] msg The calibration message.  Must not be NULL.
+ * @param[in] length The length of message in bytes which must be
+ *      nonzero and a multiple of 32 bytes.
+ * @param[out] hash The u32[16] hash of the message.  Must not be NULL.
  *      The total length is u32 x 16 = 64-byte = 512 bit.
+ * @return 0 on success or #JSDRV_ERROR_PARAMETER_INVALID if any parameter
+ *      is NULL or length is 0 or not a multiple of 32 bytes.
  */
-JSDRV_API void jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash);
+JSDRV_API int32_t jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash);
 
 JSDRV_CPP_GUARD_END
 

@@ -17,6 +17,7 @@
 // https://en.wikipedia.org/wiki/Salsa20
 
 #include "jsdrv.h"
+#include "jsdrv/error_code.h"
 
 #define ROUNDS 20
 #define DOUBLE_ROUNDS (ROUNDS / 2)
@@ -78,10 +79,12 @@ static void copy_u32(uint32_t * dst, const uint32_t * src, uint32_t length) {
 }
 
 // See https://en.wikipedia.org/wiki/One-way_compression_function
-void jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash) {
+int32_t jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * hash) {
     uint32_t i, j;
     uint32_t h[16];
-    // assert(0 == (length & 0x1f));            // must be multiple of 32 bytes
+    if ((NULL == msg) || (NULL == hash) || (0 == length) || (0 != (length & 0x1f))) {
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
     const uint32_t length_u32 = length >> 2;    // Compute length in 32-bit words
 
     for (i = 0; i < 16; ++i) {
@@ -102,4 +105,5 @@ void jsdrv_calibration_hash(const uint32_t * msg, uint32_t length, uint32_t * ha
             hash[j] ^= h[j];
         }
     }
+    return 0;
 }

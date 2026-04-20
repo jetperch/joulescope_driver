@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
-import time
 
 
 def parser_config(p):
@@ -25,21 +24,11 @@ def parser_config(p):
 
 
 def _query_gpi_value(d, device):
-    gpi_value = None
-
-    def on_gpi_value(topic, value):
-        nonlocal gpi_value
-        gpi_value = value
-
-    d.subscribe(f'{device}/s/gpi/+/!value', 'pub', on_gpi_value)
-    d.publish(f'{device}/s/gpi/+/!req', 0)
-    t_start = time.time()
-    while gpi_value is None:
-        if time.time() - t_start > 1.0:
-            raise RuntimeError('_query_gpi_value timed out')
-        time.sleep(0.001)
-    d.unsubscribe(f'{device}/s/gpi/+/!value', on_gpi_value)
-    return gpi_value
+    return d.publish_and_wait(
+        f'{device}/s/gpi/+/!req', 0,
+        f'{device}/s/gpi/+/!value',
+        timeout=1.0,
+    )
 
 
 def on_cmd(args):
@@ -49,7 +38,7 @@ def on_cmd(args):
             try:
                 d.open(device, 'restore')
                 gpi = _query_gpi_value(d, device)
-                print(f'{device}: 0x{gpi:02x}')
+                print(f'{device}: 0x{gpi:08x}')
                 d.close(device)
             except Exception:
                 print(f'{device} unavailable')

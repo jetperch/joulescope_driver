@@ -28,7 +28,9 @@
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/buffer.h"
+#include "jsdrv_prv/devices/js320/js320_fwup_mgr.h"
 #include "jsdrv_prv/cdef.h"
+#include "jsdrv_prv/devices.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/pubsub.h"
 #include "jsdrv_prv/thread.h"
@@ -43,6 +45,12 @@
 #define BACKEND_COUNT_MAX   (127U)  // Allow prefixes 0-9, a-z, A-Z
 #define DEVICE_LOOKUP_MAX   (BACKEND_COUNT_MAX * DEVICE_COUNT_MAX)
 #define API_TIMEOUT_MS      (3000)
+// jsdrv_finalize default cap for joining the frontend thread.  The
+// frontend thread's exit path joins each device's UL thread (10 s cap)
+// and each backend's LL device threads (10 s cap).  20 s covers a
+// typical 1-2 device station even if one stage runs slow.  If this
+// fires, dig into the stage instrumentation in the log before bumping.
+#define FINALIZE_TIMEOUT_MS (20000)
 #define FRONTEND_THREAD_POLL_MS  (1000)
 
 #ifndef UNITTEST
@@ -140,7 +148,8 @@ struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const s
             case JSDRV_UNION_STR:
                 m->value.value.str = m->payload.str;
                 break;
-            case JSDRV_UNION_BIN:
+            case JSDRV_UNION_BIN:   // intentional fall-through
+            case JSDRV_UNION_STDMSG:
                 if (m->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
                     uint8_t *ptr = jsdrv_alloc(m->value.size);
                     memcpy(ptr, m->value.value.bin, m->value.size);
@@ -151,6 +160,17 @@ struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const s
                 break;
             default:
                 break;
+        }
+    }
+    // Payloads that embed an owned jsdrv_tmap_s pointer must deep-copy it
+    // so both the original and the clone own independent instances.
+    if (m->value.type == JSDRV_UNION_BIN) {
+        if (m->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_RSP) {
+            struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) m->value.value.bin;
+            rsp->info.tmap = jsdrv_tmap_copy(rsp->info.tmap);
+        } else if (m->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_INFO) {
+            struct jsdrv_buffer_info_s * info = (struct jsdrv_buffer_info_s *) m->value.value.bin;
+            info->tmap = jsdrv_tmap_copy(info->tmap);
         }
     }
     jsdrv_list_initialize(&m->item);
@@ -170,7 +190,8 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_value(struct jsdrv_context_s * context, c
                 m->value.size = (uint32_t) (strlen(value->value.str) + 1);
             }
             /* intentional fall-through */
-        case JSDRV_UNION_BIN:
+        case JSDRV_UNION_BIN:   /* intentional fall-through */
+        case JSDRV_UNION_STDMSG:
             if (value->size > sizeof(m->payload.bin)) {
                 JSDRV_LOGD2("publish %s size %d using heap", topic, (int) value->size);
                 uint8_t * ptr = jsdrv_alloc(value->size);
@@ -506,16 +527,9 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
     jsdrv_list_add_tail(&c->devices, &d->item);
 
     int rv = 1;
-    if (0 == strcmp("js220", model)) {
-        rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
-    } else if (0 == strcmp("js110", model)) {
-        rv = jsdrvp_ul_js110_usb_factory(&d->device, c, &msg->payload.device);
-    } else if (0 == strcmp("&js220", model))  {
-        rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
-#if UNITTEST == 0
-    //} else if (0 == strcmp("emu", model)) {
-    //    rv = jsdrvp_ul_emu_factory(&d->device, c, &msg->payload.device);
-#endif
+    const struct device_type_s * dt = device_type_lookup(model);
+    if (dt && dt->device_factory) {
+        rv = dt->device_factory(&d->device, c, &msg->payload.device);
     }
     if (rv) {
         JSDRV_LOGE("device_add(%s) failed with %d", model, rv);
@@ -532,14 +546,33 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
 }
 
 static void device_remove(struct jsdrv_context_s * c, struct frontend_dev_s * d) {
-    (void) c;
     if (!d) {
         return;
     }
+    // Join the UL thread.  On forced removal, the UL thread has
+    // already emitted DEVICE_REMOVE into msg_backend and exited via
+    // the LL_TERMINATED barrier, so join returns promptly.  On
+    // requested close, join sends FINALIZE and waits.  Either way,
+    // after join returns no thread is producing device-scoped
+    // messages for d into msg_backend or ll_device.rsp_q.
     d->device->join(d->device);
+
+    // Drain msg_pend of any device_subscriber invocations still
+    // queued for d.  This runs on the frontend thread (we got here
+    // from device_remove_msg), so it executes synchronously and
+    // guarantees no callback with user_data==d remains in flight
+    // after this call returns.  Fixes the use-after-free that
+    // occurred when forced-remove yanked a streaming device.
+    jsdrv_pubsub_process(c->pubsub);
+
+    // Swap the subscriber for a "device removed" responder so any
+    // late API calls to this prefix produce a clean error rather
+    // than a silent drop.  Both publishes go through msg_pend and
+    // must be flushed before we free d.
     device_removed_responder(c, d->prefix, JSDRV_PUBSUB_SUBSCRIBE);
     device_sub(d, JSDRV_PUBSUB_UNSUBSCRIBE);
-    // todo update state
+    jsdrv_pubsub_process(c->pubsub);
+
     jsdrv_list_remove(&d->item);
     jsdrv_free(d);
 }
@@ -706,10 +739,10 @@ static int32_t backend_init(struct jsdrv_context_s * c, jsdrv_backend_factory fa
     if (backend_init(context_, factory_)) {                 \
         JSDRV_LOGE("backend failed to initialize");         \
         jsdrv_finalize(context_, 0);                        \
-        THREAD_RETURN();                                    \
+        JSDRV_THREAD_RETURN();                                    \
     }                                                       \
 
-static THREAD_RETURN_TYPE frontend_thread(THREAD_ARG_TYPE lpParam) {
+static JSDRV_THREAD_RETURN_TYPE frontend_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     struct jsdrv_context_s * c = (struct jsdrv_context_s *) lpParam;
     int32_t timeout_ms;
     JSDRV_LOGI("USB frontend thread started");
@@ -755,10 +788,14 @@ static THREAD_RETURN_TYPE frontend_thread(THREAD_ARG_TYPE lpParam) {
         timeout_process(c);
     }
 
+    JSDRV_LOGI("frontend_thread exit: device_remove_all start");
     device_remove_all(c);
+    JSDRV_LOGI("frontend_thread exit: backends_finalize start");
     backends_finalize(c);
+    JSDRV_LOGI("frontend_thread exit: timeouts_finalize start");
     timeouts_finalize(c);
-    THREAD_RETURN();
+    JSDRV_LOGI("frontend_thread exit: done");
+    JSDRV_THREAD_RETURN();
 }
 
 void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
@@ -770,14 +807,20 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
     }
     if (msg->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_RSP) {
         struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) msg->value.value.bin;
-        jsdrv_tmap_ref_decr(rsp->info.tmap);
+        jsdrv_tmap_free(rsp->info.tmap);
+        rsp->info.tmap = NULL;
+    } else if (msg->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_INFO) {
+        struct jsdrv_buffer_info_s * info = (struct jsdrv_buffer_info_s *) msg->value.value.bin;
+        jsdrv_tmap_free(info->tmap);
+        info->tmap = NULL;
     }
     if (msg->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
         msg->value.flags &= ~JSDRV_UNION_FLAG_HEAP_MEMORY;
         switch (msg->value.type) {
-            case JSDRV_UNION_STR:   /* intentional fall-through */
-            case JSDRV_UNION_JSON:  /* intentional fall-through */
-            case JSDRV_UNION_BIN:   /* intentional fall-through */
+            case JSDRV_UNION_STR:     /* intentional fall-through */
+            case JSDRV_UNION_JSON:    /* intentional fall-through */
+            case JSDRV_UNION_BIN:     /* intentional fall-through */
+            case JSDRV_UNION_STDMSG:  /* intentional fall-through */
                 if (NULL != msg->value.value.bin) {
                     jsdrv_free((void *) msg->value.value.bin);
                     msg->value.value.bin = NULL;
@@ -895,6 +938,9 @@ static int32_t subscribe_common(struct jsdrv_context_s * p,
 int32_t jsdrv_subscribe(struct jsdrv_context_s * context, const char * name, uint8_t flags,
                         jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,
                         uint32_t timeout_ms) {
+    if (0 == flags) {
+        flags = JSDRV_SFLAG_PUB | JSDRV_SFLAG_RETAIN;
+    }
     return subscribe_common(context, name, flags, JSDRV_PUBSUB_SUBSCRIBE, cbk_fn, cbk_user_data, timeout_ms);
 }
 
@@ -917,9 +963,9 @@ int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
         return JSDRV_ERROR_NOT_ENOUGH_MEMORY;     \
     }
 
-#define MSG_QUEUE_FREE(ptr_)                    \
+#define MSG_QUEUE_FREE(ptr_, ctx_)              \
     if (ptr_) {                                 \
-        msg_queue_finalize(ptr_);               \
+        msg_queue_finalize(ptr_, ctx_);         \
         ptr_ = NULL;                            \
     }
 
@@ -944,6 +990,7 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
     jsdrv_pubsub_publish(c->pubsub, msg);
     jsdrv_pubsub_process(c->pubsub);
     JSDRV_RETURN_ON_ERROR(jsdrv_buffer_initialize(c));
+    JSDRV_RETURN_ON_ERROR(jsdrv_fwup_mgr_initialize(c));
 
     int32_t rv = jsdrv_thread_create(&c->thread, frontend_thread, c, 1);
     if (rv) {
@@ -960,7 +1007,7 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
 }
 
 void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
-    timeout_ms = timeout_ms ? timeout_ms : API_TIMEOUT_MS;
+    timeout_ms = timeout_ms ? timeout_ms : FINALIZE_TIMEOUT_MS;
     JSDRV_LOGI("jsdrv_finalize %p", context);
     struct jsdrv_context_s * c = context;
     if (c && (NULL != context->msg_cmd)) {
@@ -969,15 +1016,23 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(context);
         jsdrv_cstr_copy(msg->topic, JSDRV_MSG_FINALIZE, sizeof(msg->topic));
         msg_queue_push(context->msg_cmd, msg);
-        jsdrv_thread_join(&context->thread, timeout_ms);
+        JSDRV_LOGI("jsdrv_finalize: join frontend_thread timeout=%u", (unsigned) timeout_ms);
+        int32_t jrc = jsdrv_thread_join(&context->thread, timeout_ms);
+        JSDRV_LOGI("jsdrv_finalize: frontend_thread joined rc=%d", (int) jrc);
+        jsdrv_fwup_mgr_finalize();
         jsdrv_buffer_finalize();
         jsdrv_pubsub_finalize(c->pubsub);
         c->pubsub = NULL;
 
-        MSG_QUEUE_FREE(c->msg_cmd);
-        MSG_QUEUE_FREE(c->msg_backend);
-        MSG_QUEUE_FREE(c->msg_free);
-        MSG_QUEUE_FREE(c->msg_free_data);
+        // msg_cmd and msg_backend may hold live (un-dispatched) messages;
+        // pass context so their payloads are properly released.
+        MSG_QUEUE_FREE(c->msg_cmd, c);
+        MSG_QUEUE_FREE(c->msg_backend, c);
+        // msg_free / msg_free_data are free pools: their messages have
+        // already been through jsdrvp_msg_free once and have no live
+        // payloads.  Pass NULL to avoid double-release of stale fields.
+        MSG_QUEUE_FREE(c->msg_free, NULL);
+        MSG_QUEUE_FREE(c->msg_free_data, NULL);
 
         jsdrv_free(c);
         jsdrv_platform_finalize();
@@ -1005,16 +1060,16 @@ void jsdrvp_send_finalize_msg(struct jsdrv_context_s * context, struct msg_queue
     msg_queue_push(q, msg);
 }
 
-int32_t jsdrv_open(struct jsdrv_context_s * context, const char * device_prefix, int32_t mode) {
+int32_t jsdrv_open(struct jsdrv_context_s * context, const char * device_prefix, int32_t mode, uint32_t timeout_ms) {
     struct jsdrv_topic_s t;
     jsdrv_topic_set(&t, device_prefix);
     jsdrv_topic_append(&t, JSDRV_MSG_OPEN);
-    return jsdrv_publish(context, t.topic, &jsdrv_union_i32(mode), JSDRV_TIMEOUT_MS_DEFAULT);
+    return jsdrv_publish(context, t.topic, &jsdrv_union_i32(mode), timeout_ms);
 }
 
-int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix) {
+int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix, uint32_t timeout_ms) {
     struct jsdrv_topic_s t;
     jsdrv_topic_set(&t, device_prefix);
     jsdrv_topic_append(&t, JSDRV_MSG_CLOSE);
-    return jsdrv_publish(context, t.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT);
+    return jsdrv_publish(context, t.topic, &jsdrv_union_i32(0), timeout_ms);
 }

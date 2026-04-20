@@ -38,23 +38,31 @@ typedef struct _GUID {
 } GUID;
 #endif
 
-enum jsdrv_device_type_e {
-    JSDRV_DEVICE_TYPE_INVALID,
-    JSDRV_DEVICE_TYPE_JS110_APP,
-    JSDRV_DEVICE_TYPE_JS110_BL,
-    JSDRV_DEVICE_TYPE_JS220_APP,
-    JSDRV_DEVICE_TYPE_JS220_BL,
-};
+struct jsdrvp_ul_device_s;
+struct jsdrv_context_s;
+struct jsdrvp_ll_device_s;
 
 struct device_type_s {
-    enum jsdrv_device_type_e device_type;
     const char * model;
     GUID const guid;      // The GUID for the Microsoft WinUSB descriptor.
     uint16_t vendor_id;   // The 2-byte USB vendor identifier integer.
     uint16_t product_id;  // The 2-byte USB product identifier integer.
+
+    /// Device factory. NULL for devices with no upper-level driver (e.g. bootloaders).
+    int32_t (*device_factory)(struct jsdrvp_ul_device_s ** device,
+                              struct jsdrv_context_s * context,
+                              struct jsdrvp_ll_device_s * ll);
 };
 
 extern const struct device_type_s device_types[];
+
+/**
+ * @brief Look up a device type by model string.
+ *
+ * @param model The model string (e.g., "js320", "mb").
+ * @return The device type entry, or NULL if not found.
+ */
+const struct device_type_s * device_type_lookup(const char * model);
 
 /** @} */
 

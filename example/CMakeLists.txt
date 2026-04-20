@@ -34,7 +34,65 @@ add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
+add_definitions(
+        -DTRACY_ENABLE=1
+        -DTRACY_ON_DEMAND=1
+        -DTRACY_NO_CALLSTACK=1
+        -DTRACY_NO_CODE_TRANSFER=1
+        -DTRACY_NO_CONTEXT_SWITCH=1
+        -DTRACY_NO_EXIT=1
+        -DTRACY_NO_SAMPLING=1
+        -DTRACY_NO_VERIFY=1
+        -DTRACY_NO_VSYNC_CAPTURE=1
+        -DTRACY_NO_FRAME_IMAGE=1
+        -DTRACY_NO_SYSTEM_TRACING=1
+        -DTRACY_DELAYED_INIT=out.dat
+        -DTRACY_MANUAL_LIFETIME=1
+        -DTRACY_NO_CRASH_HANDLER=1
+        -DTRACY_VERBOSE=1
+)
+add_executable(minibitty_exe
+        minibitty/main.cpp
+        minibitty/adapter.c
+        minibitty/firmware.c
+        minibitty/force_remove.c
+        minibitty/fpga_mem.c
+        minibitty/fwup.c
+        minibitty/hotplug.c
+        minibitty/info.c
+        minibitty/pubsub_info.c
+        minibitty/state_get.c
+        minibitty/pubsub_sniffer.c
+        minibitty/pubsub_test.c
+        minibitty/loopback.c
+        minibitty/mem.c
+        minibitty/power_cycle.c
+        minibitty/stream.c
+        minibitty/stream_test.c
+        minibitty/throughput.c
+        minibitty/timesync.c
+        minibitty/version.c
+        minibitty/adapter_tracy.cpp
+        minibitty/tracy/common/tracy_lz4.cpp
+        minibitty/tracy/common/TracySocket.cpp
+)
+target_compile_features(minibitty_exe PUBLIC cxx_std_11)
+#set_target_properties(minibitty_exe PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
+add_dependencies(minibitty_exe jsdrv)
+if (WIN32)
+    target_link_libraries(minibitty_exe jsdrv ws2_32 dbghelp advapi32 user32)
+else()
+    target_link_libraries(minibitty_exe jsdrv)
+endif()
+set_target_properties(minibitty_exe PROPERTIES OUTPUT_NAME minibitty)
 
 add_executable(fuzz fuzz.c)
 add_dependencies(fuzz jsdrv)
 target_link_libraries(fuzz jsdrv)
+# Export dynamic symbols so the POSIX crash handler's backtrace_symbols()
+# can resolve names instead of only printing module+offset.  No-op on
+# Windows (/DEBUG already emits PDB symbols consumed by DbgHelp) and on
+# macOS (default behavior).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(fuzz PROPERTIES ENABLE_EXPORTS ON)
+endif()

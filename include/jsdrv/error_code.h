@@ -24,6 +24,7 @@
 #define JSDRV_ERROR_CODE_H_
 
 #include "jsdrv/cmacro_inc.h"
+#include <stdint.h>
 
 /**
  * @ingroup jsdrv
@@ -51,7 +52,7 @@ DEF_ERROR_CODE_START
 5    PARAMETER_INVALID         "The parameter value is invalid"
 6    INVALID_RETURN_CONDITION  "The function return condition is invalid"
 7    INVALID_CONTEXT           "The context is invalid"
-8    INVALID_MESSAGE_LENGTH    "The message length in invalid"
+8    INVALID_MESSAGE_LENGTH    "The message length is invalid"
 9    MESSAGE_INTEGRITY         "The message integrity check failed"
 10   SYNTAX_ERROR              "A syntax error was detected"
 11   TIMED_OUT                 "The operation did not complete in time"
@@ -85,7 +86,7 @@ enum jsdrv_error_code_e {
     JSDRV_ERROR_PARAMETER_INVALID = 5,  ///< The parameter value is invalid
     JSDRV_ERROR_INVALID_RETURN_CONDITION = 6,  ///< The function return condition is invalid
     JSDRV_ERROR_INVALID_CONTEXT = 7,  ///< The context is invalid
-    JSDRV_ERROR_INVALID_MESSAGE_LENGTH = 8,  ///< The message length in invalid
+    JSDRV_ERROR_INVALID_MESSAGE_LENGTH = 8,  ///< The message length is invalid
     JSDRV_ERROR_MESSAGE_INTEGRITY = 9,  ///< The message integrity check failed
     JSDRV_ERROR_SYNTAX_ERROR = 10,  ///< A syntax error was detected
     JSDRV_ERROR_TIMED_OUT = 11,  ///< The operation did not complete in time
@@ -117,7 +118,7 @@ JSDRV_CPP_GUARD_START
  * @param[in] ec The error code (jsdrv_error_code_e).
  * @return The short string name for the error code.
  */
-JSDRV_API const char * jsdrv_error_code_name(int ec);
+JSDRV_API const char * jsdrv_error_code_name(int32_t ec);
 
 /**
  * @brief Convert an error code into its description.
@@ -125,7 +126,7 @@ JSDRV_API const char * jsdrv_error_code_name(int ec);
  * @param[in] ec The error code (jsdrv_error_code_e).
  * @return The user-meaningful description of the error.
  */
-JSDRV_API const char * jsdrv_error_code_description(int ec);
+JSDRV_API const char * jsdrv_error_code_description(int32_t ec);
 
 JSDRV_CPP_GUARD_END
 
