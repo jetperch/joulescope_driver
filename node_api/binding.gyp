@@ -87,7 +87,7 @@
                 '../third-party/libusb/libusb',
                 '../third-party/libusb/include/linux'
               ],
-              'libraries': []
+              'libraries': ['-ludev']
             }]
           ]
         }]
