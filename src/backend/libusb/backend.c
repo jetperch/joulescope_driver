@@ -208,6 +208,27 @@ static void device_close(struct dev_s * d) {
 static int32_t device_open(struct dev_s * d) {
     int rc;
     device_close(d);
+
+    // Finish any in-progress close before reopening.  device_handle_msg
+    // acks JSDRV_MSG_CLOSE as soon as device_close() marks the device
+    // CLOSING, but the prior libusb handle is not closed until
+    // handle_device_close() runs after process_devices().  A fast
+    // close/open (e.g. the fuzz test) queues OPEN before that point,
+    // so without this drain libusb_open() below would overwrite
+    // d->handle while the old handle still holds interface 0, and
+    // libusb_claim_interface() would fail with LIBUSB_ERROR_BUSY (-6).
+    if (d->mode == DEVICE_MODE_CLOSING) {
+        struct timeval tv = {.tv_sec=1, .tv_usec=0};
+        while (!jsdrv_list_is_empty(&d->transfers_pending)) {
+            libusb_handle_events_timeout_completed(d->backend->ctx, &tv, NULL);
+        }
+        if (d->handle) {
+            libusb_close(d->handle);
+            d->handle = NULL;
+        }
+        d->mode = DEVICE_MODE_CLOSED;
+    }
+
     JSDRV_LOGI("device_open(%s)", d->ll_device.prefix);
     rc = libusb_open(d->usb_device, &d->handle);
     if (rc) {
