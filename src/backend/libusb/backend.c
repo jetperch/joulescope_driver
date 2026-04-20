@@ -48,6 +48,7 @@
 #define BULK_IN_TRANSFER_SIZE           (64U * BULK_IN_FRAME_LENGTH)
 #define BULK_IN_TRANSFER_OUTSTANDING    (4U)
 #define ENDPOINT_COUNT                  (256U)
+#define CLOSE_TIMEOUT_MS                (2000U)
 
 
 enum device_mark_e {
@@ -96,6 +97,12 @@ struct dev_s {
     // barrier emitted and the device retired.
     bool removing;
     uint8_t endpoint_mode[ENDPOINT_COUNT];
+
+    // CLOSE ack deferred until libusb_close completes (or timeout).  NULL
+    // when no CLOSE is pending.  close_pending_ms is set to jsdrv_time_ms_u32()
+    // when the CLOSE arrives, so handle_close_timeout() can bound the wait.
+    struct jsdrvp_msg_s * close_pending_msg;
+    uint32_t close_pending_ms;
 
     struct jsdrv_list_s transfers_pending;
     struct jsdrv_list_s transfers_free;
@@ -183,6 +190,17 @@ static void device_add_announce(struct backend_s * s, struct dev_s * d) {
     msg->value.value.bin = (const uint8_t *) &msg->payload.device;
     msg->payload.device = d->ll_device;
     jsdrvp_backend_send(s->context, msg);
+}
+
+// Responds to a pending CLOSE message, if any.  Called once the libusb
+// handle has actually been closed (or is being force-abandoned), so that
+// jsdrv_close() returns exactly when the backend is done with the handle.
+static void device_close_respond(struct dev_s * d, int32_t rc) {
+    if (NULL != d->close_pending_msg) {
+        d->close_pending_msg->value = jsdrv_union_i32(rc);
+        msg_queue_push(d->ll_device.rsp_q, d->close_pending_msg);
+        d->close_pending_msg = NULL;
+    }
 }
 
 static void device_close(struct dev_s * d) {
@@ -542,9 +560,18 @@ static bool device_handle_msg(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             msg_queue_push(d->ll_device.rsp_q, msg);
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, msg->topic)) {
             JSDRV_LOGI("device_close(%s)", d->ll_device.prefix);
+            // Flush any prior unfinished CLOSE ack so we never leak the msg.
+            device_close_respond(d, 0);
             device_close(d);
-            msg->value = jsdrv_union_i32(0);
-            msg_queue_push(d->ll_device.rsp_q, msg);
+            if ((d->mode == DEVICE_MODE_CLOSING) && (NULL != d->handle)) {
+                // Defer ack until handle_device_close (or close timeout /
+                // forced removal) actually closes the libusb handle.
+                d->close_pending_msg = msg;
+                d->close_pending_ms = jsdrv_time_ms_u32();
+            } else {
+                msg->value = jsdrv_union_i32(0);
+                msg_queue_push(d->ll_device.rsp_q, msg);
+            }
         } else if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
             device_close(d);
             msg->value = jsdrv_union_i32(0);
@@ -696,6 +723,7 @@ static void process_removing(struct backend_s * s) {
             libusb_close(d->handle);
             d->handle = NULL;
         }
+        device_close_respond(d, 0);
 
         JSDRV_LOGI("process_removing(%s): LL_TERMINATED", d->ll_device.prefix);
         struct jsdrvp_msg_s * sentinel = jsdrvp_msg_alloc(s->context);
@@ -790,7 +818,33 @@ static void handle_device_close(struct backend_s * s) {
                 d->handle = NULL;
             }
             d->mode = DEVICE_MODE_CLOSED;
+            device_close_respond(d, 0);
         }
+    }
+}
+
+// Bound the deferred-CLOSE wait: if a pending close has not completed
+// within CLOSE_TIMEOUT_MS, force libusb_close and return TIMED_OUT to
+// the API caller rather than leaving jsdrv_close() blocked.  Runs once
+// per backend loop iteration.
+static void handle_close_timeout(struct backend_s * s) {
+    struct jsdrv_list_s * item;
+    struct dev_s * d;
+    jsdrv_list_foreach(&s->devices_active, item) {
+        d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
+        if (NULL == d->close_pending_msg) {
+            continue;
+        }
+        if ((jsdrv_time_ms_u32() - d->close_pending_ms) < CLOSE_TIMEOUT_MS) {
+            continue;
+        }
+        JSDRV_LOGW("%s: close timeout, forcing libusb_close", d->ll_device.prefix);
+        if (d->handle) {
+            libusb_close(d->handle);
+            d->handle = NULL;
+        }
+        d->mode = DEVICE_MODE_CLOSED;
+        device_close_respond(d, JSDRV_ERROR_TIMED_OUT);
     }
 }
 
@@ -818,6 +872,7 @@ static void device_close_all(struct backend_s * s) {
             libusb_unref_device(d->usb_device);
             d->usb_device = NULL;
         }
+        device_close_respond(d, 0);
     }
 }
 
@@ -896,6 +951,7 @@ void * backend_thread(void * arg) {
             handle_hotplug(s);
         }
         handle_device_close(s);
+        handle_close_timeout(s);
         process_removing(s);
     }
 
