@@ -73,6 +73,11 @@ static const char *darwin_device_class = "IOUSBDevice";
 
 /* async event thread */
 static pthread_t libusb_darwin_at;
+/* Set while the async event thread is running; guarded by
+ * libusb_darwin_at_mutex.  Used so darwin_exit() does not pthread_join()
+ * a thread that was never started (e.g. darwin_first_time_init() failed
+ * before pthread_create), which previously crashed on macOS. */
+static bool libusb_darwin_at_started = false;
 
 static void darwin_exit(struct libusb_context *ctx);
 static int darwin_get_config_descriptor(struct libusb_device *dev, uint8_t config_index, void *buffer, size_t len);
@@ -607,6 +612,7 @@ static int darwin_first_time_init(void) {
   }
 
   pthread_mutex_lock (&libusb_darwin_at_mutex);
+  libusb_darwin_at_started = true;
   while (NULL == libusb_darwin_acfl) {
     pthread_cond_wait (&libusb_darwin_at_cond, &libusb_darwin_at_mutex);
   }
@@ -654,12 +660,18 @@ static void darwin_exit (struct libusb_context *ctx) {
   if (0 == --init_count) {
     /* stop the event runloop and wait for the thread to terminate. */
     pthread_mutex_lock (&libusb_darwin_at_mutex);
-    CFRunLoopSourceSignal (libusb_darwin_acfls);
-    CFRunLoopWakeUp (libusb_darwin_acfl);
-    while (libusb_darwin_acfl)
-      pthread_cond_wait (&libusb_darwin_at_cond, &libusb_darwin_at_mutex);
+    if (NULL != libusb_darwin_acfls) {
+      CFRunLoopSourceSignal (libusb_darwin_acfls);
+      CFRunLoopWakeUp (libusb_darwin_acfl);
+      while (libusb_darwin_acfl)
+        pthread_cond_wait (&libusb_darwin_at_cond, &libusb_darwin_at_mutex);
+    }
+
+    if (libusb_darwin_at_started) {
+      pthread_join (libusb_darwin_at, NULL);
+      libusb_darwin_at_started = false;
+    }
     pthread_mutex_unlock (&libusb_darwin_at_mutex);
-    pthread_join (libusb_darwin_at, NULL);
 
     darwin_cleanup_devices ();
   }

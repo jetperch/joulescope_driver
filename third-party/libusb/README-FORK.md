@@ -12,6 +12,19 @@ the device.  This feature enables applications to discover
 all connected Joulescopes, even ones that may be in use by 
 other applications.
 
+We also backported the macOS fix from upstream commit
+[d66ffcd](https://github.com/libusb/libusb/commit/d66ffcd)
+("darwin: fix potential crash at darwin_exit") to
+`libusb/os/darwin_usb.c`.  When `darwin_first_time_init()` fails
+before the async event thread starts (for example, when a cached
+device reference is leaked across a `libusb_init`/`libusb_exit`
+cycle), the subsequent `darwin_exit()` cleanup would dereference a
+NULL `CFRunLoopSourceRef` and segfault, and would also
+`pthread_join` a thread that was never created.  The backport adds a
+`libusb_darwin_at_started` flag (set under `libusb_darwin_at_mutex`
+after `pthread_create` succeeds) and guards both the runloop
+shutdown signal and the join against those uninitialized states.
+
 We also added cmake build support:
 * CMakeLists.txt
 * include/*/config.h for platform-specific config
