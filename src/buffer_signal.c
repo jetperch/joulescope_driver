@@ -21,7 +21,7 @@
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv/time.h"
-#include "jsdrv_prv/js220_i128.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
 #include "jsdrv_prv/statistics.h"
 #include "jsdrv/tmap.h"
 #include <inttypes.h>

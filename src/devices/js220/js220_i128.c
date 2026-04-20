@@ -14,7 +14,7 @@
 * limitations under the License.
 */
 
-#include "jsdrv_prv/js220_i128.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
 #if _WIN32
 #include <intrin.h>
 #include <immintrin.h>

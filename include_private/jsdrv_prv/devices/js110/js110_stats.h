@@ -22,7 +22,7 @@
 
 #include "jsdrv.h"
 #include "jsdrv/cmacro_inc.h"
-#include "js220_api.h"
+#include "jsdrv_prv/devices/js220/js220_api.h"
 #include <stdint.h>
 
 #ifndef JSDRV_JS110_STATS_H__

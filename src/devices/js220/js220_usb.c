@@ -16,8 +16,8 @@
 
 #define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
 #include "jsdrv.h"
-#include "js220_api.h"
-#include "jsdrv_prv/js220_stats.h"
+#include "jsdrv_prv/devices/js220/js220_api.h"
+#include "jsdrv_prv/devices/js220/js220_stats.h"
 #include "jsdrv_prv/downsample.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/cdef.h"

@@ -28,7 +28,7 @@
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/buffer.h"
-#include "jsdrv_prv/js320_fwup_mgr.h"
+#include "jsdrv_prv/devices/js320/js320_fwup_mgr.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/devices.h"
 #include "jsdrv_prv/frontend.h"

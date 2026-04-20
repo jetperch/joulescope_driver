@@ -23,7 +23,7 @@
 #include "jsdrv_prv/dbc.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/log.h"
-#include "jsdrv_prv/mb_drv.h"
+#include "jsdrv_prv/devices/mb_device/mb_drv.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/thread.h"
 #include "mb/stdmsg.h"

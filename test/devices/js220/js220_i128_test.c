@@ -20,7 +20,7 @@
 #include <cmocka.h>
 #include <string.h>
 #include <math.h>
-#include "jsdrv_prv/js220_i128.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
 
 
 #define assert_i128_equal(expect, actual) \

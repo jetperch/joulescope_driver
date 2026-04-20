@@ -14,7 +14,7 @@
 * limitations under the License.
 */
 
-#include "jsdrv_prv/js110_cal.h"
+#include "jsdrv_prv/devices/js110/js110_cal.h"
 #include "jsdrv_prv/json.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/log.h"

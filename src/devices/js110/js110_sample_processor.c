@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "jsdrv_prv/js110_sample_processor.h"
+#include "jsdrv_prv/devices/js110/js110_sample_processor.h"
 #include "jsdrv/error_code.h"
 #include <string.h>
 #include <float.h>

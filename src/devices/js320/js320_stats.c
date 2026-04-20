@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include "jsdrv_prv/js320_stats.h"
+#include "jsdrv_prv/devices/js320/js320_stats.h"
 #include "jsdrv.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/log.h"
-#include "jsdrv_prv/js220_i128.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
 #include <math.h>
 #include <string.h>
 

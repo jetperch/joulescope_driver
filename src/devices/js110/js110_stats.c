@@ -14,8 +14,8 @@
 * limitations under the License.
 */
 
-#include "jsdrv_prv/js110_stats.h"
-#include "jsdrv_prv/js220_i128.h"
+#include "jsdrv_prv/devices/js110/js110_stats.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
 #include "jsdrv_prv/platform.h"
 #include <float.h>
 #include <math.h>

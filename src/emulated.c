@@ -20,7 +20,7 @@
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/assert.h"
-#include "js220_api.h"
+#include "jsdrv_prv/devices/js220/js220_api.h"
 #include "jsdrv_prv/frontend.h"
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv/cstr.h"

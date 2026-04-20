@@ -48,11 +48,11 @@ set(SUPPORT_SOURCES
         calibration_hash.c
         cstr.c
         downsample.c
-        js110_cal.c
-        js220_i128.c
-        js110_sample_processor.c
-        js110_stats.c
-        js220_stats.c
+        devices/js110/js110_cal.c
+        devices/js220/js220_i128.c
+        devices/js110/js110_sample_processor.c
+        devices/js110/js110_stats.c
+        devices/js220/js220_stats.c
         json.c
         log.c
         pubsub.c
@@ -74,15 +74,15 @@ set(SOURCES
         devices.c
         #emu.c
         #emulated.c
-        js110_usb.c
-        js220_usb.c
-        js220_params.c
-        js320_drv.c
-        js320_fwup.c
-        js320_fwup_mgr.c
-        js320_jtag.c
-        js320_stats.c
-        mb_device.c
+        devices/js110/js110_usb.c
+        devices/js220/js220_usb.c
+        devices/js220/js220_params.c
+        devices/js320/js320_drv.c
+        devices/js320/js320_fwup.c
+        devices/js320/js320_fwup_mgr.c
+        devices/js320/js320_jtag.c
+        devices/js320/js320_stats.c
+        devices/mb_device/mb_device.c
         jsdrv.c
         ${PLATFORM_SRC}
 )

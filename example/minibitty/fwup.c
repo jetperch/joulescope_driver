@@ -17,7 +17,7 @@
 #include "minibitty_exe_prv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/os_thread.h"
-#include "jsdrv_prv/js320_fwup_mgr.h"
+#include "jsdrv_prv/devices/js320/js320_fwup_mgr.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

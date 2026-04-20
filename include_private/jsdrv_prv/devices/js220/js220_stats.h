@@ -21,7 +21,7 @@
  */
 
 #include "jsdrv/cmacro_inc.h"
-#include "js220_api.h"
+#include "jsdrv_prv/devices/js220/js220_api.h"
 #include <stdint.h>
 
 #ifndef JSDRV_JS220_STATS_H__

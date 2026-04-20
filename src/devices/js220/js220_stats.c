@@ -14,11 +14,11 @@
 * limitations under the License.
 */
 
-#include "jsdrv_prv/js220_stats.h"
+#include "jsdrv_prv/devices/js220/js220_stats.h"
 #include "jsdrv.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/log.h"
-#include "jsdrv_prv/js220_i128.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
 #include <math.h>
 
 int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct jsdrv_statistics_s * dst) {

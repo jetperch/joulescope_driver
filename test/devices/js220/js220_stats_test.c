@@ -20,9 +20,9 @@
 #include <cmocka.h>
 #include <string.h>
 #include <math.h>
-#include "jsdrv_prv/js220_i128.h"
-#include "jsdrv_prv/js220_stats.h"
-#include "js220_api.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
+#include "jsdrv_prv/devices/js220/js220_stats.h"
+#include "jsdrv_prv/devices/js220/js220_api.h"
 #include "jsdrv.h"
 
 

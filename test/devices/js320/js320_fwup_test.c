@@ -25,10 +25,10 @@
 #include "jsdrv.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv/time.h"
-#include "jsdrv_prv/js320_fwup.h"
+#include "jsdrv_prv/devices/js320/js320_fwup.h"
 #include "mb/stdmsg.h"
 #include "jsdrv_prv/log.h"
-#include "jsdrv_prv/mb_drv.h"
+#include "jsdrv_prv/devices/mb_device/mb_drv.h"
 #include "jsdrv_prv/platform.h"
 
 

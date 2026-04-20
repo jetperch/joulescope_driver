@@ -20,7 +20,7 @@
 #include <cmocka.h>
 #include <string.h>
 #include <math.h>
-#include "jsdrv_prv/js110_cal.h"
+#include "jsdrv_prv/devices/js110/js110_cal.h"
 
 
 static const uint8_t JS110_CAL_01[] = {

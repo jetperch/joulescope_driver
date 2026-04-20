@@ -35,10 +35,10 @@
 #include "jsdrv/topic.h"
 #include "jsdrv/union.h"
 #include "jsdrv_prv/frontend.h"
-#include "jsdrv_prv/js320_fwup.h"
-#include "jsdrv_prv/js320_jtag.h"
-#include "jsdrv_prv/js320_stats.h"
-#include "jsdrv_prv/mb_drv.h"
+#include "jsdrv_prv/devices/js320/js320_fwup.h"
+#include "jsdrv_prv/devices/js320/js320_jtag.h"
+#include "jsdrv_prv/devices/js320/js320_stats.h"
+#include "jsdrv_prv/devices/mb_device/mb_drv.h"
 #include "jsdrv_prv/platform.h"
 
 
@@ -260,7 +260,7 @@ int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device,
 // js320_drv.c sets JSDRV_LOG_LEVEL itself; suppress the redefinition warning
 // since the test file may have pulled in log.h transitively already.
 #undef JSDRV_LOG_LEVEL
-#include "../src/js320_drv.c"
+#include "../../../src/devices/js320/js320_drv.c"
 
 
 // --- Test fixtures ---

@@ -15,7 +15,7 @@
  */
 
 #define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
-#include "jsdrv_prv/js320_fwup_mgr.h"
+#include "jsdrv_prv/devices/js320/js320_fwup_mgr.h"
 #include "jsdrv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
