@@ -992,15 +992,23 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
     JSDRV_RETURN_ON_ERROR(jsdrv_buffer_initialize(c));
     JSDRV_RETURN_ON_ERROR(jsdrv_fwup_mgr_initialize(c));
 
+    // Publish the context before spawning the frontend thread so the
+    // backend factory (which runs on that thread) can observe a valid
+    // context via the caller's out-parameter if it reads it.  Without
+    // this, macOS/ARM runners race: the frontend thread calls
+    // BACKEND_INIT before the main thread gets to "*context = c;",
+    // and the unittest backend_factory sees NULL.
+    *context = c;
+
     int32_t rv = jsdrv_thread_create(&c->thread, frontend_thread, c, 1);
     if (rv) {
+        *context = NULL;
         jsdrv_finalize(c, 0);
         return rv;
     }
 
     msg = jsdrvp_msg_alloc_u32(c, JSDRV_MSG_INITIALIZE, 0);
     timeout_ms = timeout_ms ? timeout_ms : JSDRV_TIMEOUT_MS_INIT;
-    *context = c;
     rv = api_cmd(c, msg, timeout_ms);
     JSDRV_LOGI("jsdrv_initialize: return %ld", rv);
     return rv;
