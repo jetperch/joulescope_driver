@@ -126,7 +126,7 @@ typedef void (*jsdrv_log_recv)(void * user_data, struct jsdrv_log_header_s const
  *
  * This function is thread-safe.
  */
-JSDRV_API void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, const char * format, ...);
+JSDRV_API void jsdrv_log_publish(int8_t level, const char * filename, uint32_t line, const char * format, ...);
 
 /**
  * @brief Register a callback for log message dispatch.

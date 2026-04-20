@@ -20,8 +20,8 @@
  * @brief Cross-platform counting semaphore abstraction.
  */
 
-#ifndef JSDRV_OS_SEM_H__
-#define JSDRV_OS_SEM_H__
+#ifndef JSDRV_OS_SEM_H_
+#define JSDRV_OS_SEM_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include <stdint.h>
@@ -80,4 +80,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_OS_SEM_H__ */
+#endif  /* JSDRV_OS_SEM_H_ */

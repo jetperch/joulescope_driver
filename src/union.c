@@ -278,3 +278,41 @@ int32_t jsdrv_union_value_to_str(const struct jsdrv_union_s * value, char * str,
         default: return 0;
     }
 }
+
+int32_t jsdrv_union_copy(struct jsdrv_union_s * dst,
+                         const struct jsdrv_union_s * src,
+                         void * buffer, size_t buffer_size) {
+    if ((NULL == dst) || (NULL == src)) {
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    *dst = *src;
+    dst->flags = (uint8_t) (src->flags & ~JSDRV_UNION_FLAG_HEAP_MEMORY);
+    if (jsdrv_union_is_type_ptr(src) || (src->type == JSDRV_UNION_STDMSG) || (src->type == JSDRV_UNION_FRAME)) {
+        uint32_t sz = src->size;
+        const void * payload = NULL;
+        switch (src->type) {
+            case JSDRV_UNION_STR:
+            case JSDRV_UNION_JSON:
+                payload = src->value.str;
+                if (sz == 0 && src->value.str != NULL) {
+                    sz = (uint32_t) (strlen(src->value.str) + 1);
+                }
+                break;
+            default:
+                payload = src->value.bin;
+                break;
+        }
+        if (sz == 0 || payload == NULL) {
+            dst->value.bin = NULL;
+            dst->size = 0;
+            return 0;
+        }
+        if ((buffer == NULL) || (buffer_size < sz)) {
+            return JSDRV_ERROR_TOO_SMALL;
+        }
+        memcpy(buffer, payload, sz);
+        dst->value.bin = (const uint8_t *) buffer;
+        dst->size = sz;
+    }
+    return 0;
+}

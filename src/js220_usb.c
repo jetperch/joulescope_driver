@@ -1851,7 +1851,7 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
-static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
+static JSDRV_THREAD_RETURN_TYPE driver_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     struct jsdrvp_msg_s * msg;
     struct dev_s *d = (struct dev_s *) lpParam;
     JSDRV_LOGI("JS220 USB upper-level thread started for %s", d->ll.prefix);
@@ -1911,7 +1911,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
     }
 
     JSDRV_LOGI("JS220 USB upper-level thread done %s", d->ll.prefix);
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void join(struct jsdrvp_ul_device_s * device) {

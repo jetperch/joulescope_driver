@@ -48,8 +48,32 @@ const struct dtype_map_s dtype_map[] = {
 };
 
 
+struct syntax_check_s {
+    uint8_t first_seen;
+    uint8_t root_is_obj;
+};
+
+static int32_t on_syntax_token(void * user_data, const struct jsdrv_union_s * token) {
+    struct syntax_check_s * s = (struct syntax_check_s *) user_data;
+    if (!s->first_seen) {
+        s->first_seen = 1;
+        s->root_is_obj = (token->op == JSDRV_JSON_OBJ_START) ? 1 : 0;
+    }
+    return 0;
+}
+
 int32_t jsdrv_meta_syntax_check(const char * meta) {
-    (void) meta; // todo
+    if (NULL == meta) {
+        return JSDRV_ERROR_PARAMETER_INVALID;
+    }
+    struct syntax_check_s s = {0, 0};
+    int32_t rc = jsdrv_json_parse(meta, on_syntax_token, &s);
+    if (rc) {
+        return rc;
+    }
+    if (!s.first_seen || !s.root_is_obj) {
+        return JSDRV_ERROR_SYNTAX_ERROR;
+    }
     return 0;
 }
 

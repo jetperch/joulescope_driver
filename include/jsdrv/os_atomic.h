@@ -20,8 +20,8 @@
  * @brief Cross-platform atomic operations.
  */
 
-#ifndef JSDRV_OS_ATOMIC_H__
-#define JSDRV_OS_ATOMIC_H__
+#ifndef JSDRV_OS_ATOMIC_H_
+#define JSDRV_OS_ATOMIC_H_
 
 #include <stdint.h>
 
@@ -83,4 +83,4 @@
 
 /** @} */
 
-#endif  /* JSDRV_OS_ATOMIC_H__ */
+#endif  /* JSDRV_OS_ATOMIC_H_ */

@@ -728,10 +728,10 @@ static int32_t backend_init(struct jsdrv_context_s * c, jsdrv_backend_factory fa
     if (backend_init(context_, factory_)) {                 \
         JSDRV_LOGE("backend failed to initialize");         \
         jsdrv_finalize(context_, 0);                        \
-        THREAD_RETURN();                                    \
+        JSDRV_THREAD_RETURN();                                    \
     }                                                       \
 
-static THREAD_RETURN_TYPE frontend_thread(THREAD_ARG_TYPE lpParam) {
+static JSDRV_THREAD_RETURN_TYPE frontend_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     struct jsdrv_context_s * c = (struct jsdrv_context_s *) lpParam;
     int32_t timeout_ms;
     JSDRV_LOGI("USB frontend thread started");
@@ -784,7 +784,7 @@ static THREAD_RETURN_TYPE frontend_thread(THREAD_ARG_TYPE lpParam) {
     JSDRV_LOGI("frontend_thread exit: timeouts_finalize start");
     timeouts_finalize(c);
     JSDRV_LOGI("frontend_thread exit: done");
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {

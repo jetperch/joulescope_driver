@@ -119,11 +119,13 @@
  * @brief Convert a u32 encoded version as a string.
  *
  * @param[in] u32 The u32 encoded version.
- * @param[out] str The output string, which should have at least 14
- *      bytes available to avoid truncation.
+ * @param[out] str The output string, which should have at least
+ *      #JSDRV_VERSION_STR_LENGTH_MAX bytes available to avoid truncation.
  * @param[in] size The number of bytes available in str.
  */
+JSDRV_CPP_GUARD_START
 JSDRV_API void jsdrv_version_u32_to_str(uint32_t u32, char * str, size_t size);
+JSDRV_CPP_GUARD_END
 
 /** @} */
 

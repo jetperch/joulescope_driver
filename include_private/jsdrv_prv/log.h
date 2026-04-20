@@ -90,7 +90,7 @@ JSDRV_CPP_GUARD_START
  *
  * This implementation is thread safe.
  */
-void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, const char * format, ...);
+void jsdrv_log_publish(int8_t level, const char * filename, uint32_t line, const char * format, ...);
 
 /**
  * @brief The printf-style variadic arguments define to handle log messages.

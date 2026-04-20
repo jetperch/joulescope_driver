@@ -146,7 +146,7 @@ int32_t jsdrv_os_event_wait(jsdrv_os_event_t ev, uint32_t timeout_ms) {
 
 // --- Thread ---
 
-int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, THREAD_ARG_TYPE fn_arg, int priority) {
+int32_t jsdrv_thread_create(jsdrv_thread_t * thread, jsdrv_thread_fn fn, JSDRV_THREAD_ARG_TYPE fn_arg, int32_t priority) {
     thread->thread = CreateThread(NULL, 0, fn, fn_arg, 0, &thread->thread_id);
     if (thread->thread == NULL) {
         JSDRV_LOGE("CreateThread failed");

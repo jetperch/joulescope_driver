@@ -20,8 +20,8 @@
  * @brief Cross-platform event (manual-reset) abstraction.
  */
 
-#ifndef JSDRV_OS_EVENT_H__
-#define JSDRV_OS_EVENT_H__
+#ifndef JSDRV_OS_EVENT_H_
+#define JSDRV_OS_EVENT_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include <stdint.h>
@@ -59,14 +59,14 @@ typedef struct jsdrv_os_event_s * jsdrv_os_event_t;
  *
  * @return The event or NULL on failure.
  */
-JSDRV_COMPILER_ALLOC(jsdrv_os_event_free) jsdrv_os_event_t jsdrv_os_event_alloc(void);
+JSDRV_COMPILER_ALLOC(jsdrv_os_event_free) JSDRV_API jsdrv_os_event_t jsdrv_os_event_alloc(void);
 
 /**
  * @brief Free an existing event.
  *
  * @param ev The event to free.
  */
-void jsdrv_os_event_free(jsdrv_os_event_t ev);
+JSDRV_API void jsdrv_os_event_free(jsdrv_os_event_t ev);
 
 /**
  * @brief Signal an event.
@@ -75,14 +75,14 @@ void jsdrv_os_event_free(jsdrv_os_event_t ev);
  *
  * The event remains signaled until jsdrv_os_event_reset() is called.
  */
-void jsdrv_os_event_signal(jsdrv_os_event_t ev);
+JSDRV_API void jsdrv_os_event_signal(jsdrv_os_event_t ev);
 
 /**
  * @brief Reset an event to the unsignaled state.
  *
  * @param ev The event to reset.
  */
-void jsdrv_os_event_reset(jsdrv_os_event_t ev);
+JSDRV_API void jsdrv_os_event_reset(jsdrv_os_event_t ev);
 
 /**
  * @brief Wait for an event to become signaled.
@@ -104,4 +104,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_OS_EVENT_H__ */
+#endif  /* JSDRV_OS_EVENT_H_ */

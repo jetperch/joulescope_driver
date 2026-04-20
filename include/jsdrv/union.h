@@ -25,6 +25,7 @@
 #define JSDRV_UNION_H_
 
 #include "jsdrv/cmacro_inc.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -165,8 +166,8 @@ struct jsdrv_union_s {
  * @return True if equal, false if not equal.
  *
  * This check only compares the type and value.  The types and values must match
- * exactly.  However, if ignores the additional fields
- * [flags, op, app].  Use jsdrv_union_eq_strict() to also compare these fields.
+ * exactly.  However, it ignores the additional fields
+ * [flags, op, app].  Use jsdrv_union_eq_exact() to also compare these fields.
  * Use jsdrv_union_equiv() to more loosely check the value.
  */
 JSDRV_API bool jsdrv_union_eq(const struct jsdrv_union_s * v1, const struct jsdrv_union_s * v2);
@@ -201,8 +202,8 @@ JSDRV_API bool jsdrv_union_equiv(const struct jsdrv_union_s * v1, const struct j
  * @see jsdrv_union_as_type()
  *
  * This widening conversion preserves float, signed, and unsigned characteristics.
- * This check performs type up-conversions to attempt to match the
- * two fields.
+ * Float types are widened to f64, signed integer types to i64, and unsigned
+ * integer types to u64.  Pointer types (string, JSON, binary) are unchanged.
  */
 JSDRV_API void jsdrv_union_widen(struct jsdrv_union_s * x);
 
@@ -263,6 +264,32 @@ JSDRV_API const char * jsdrv_union_type_to_str(uint8_t type);
  * @return 0 or error code.
  */
 JSDRV_API int32_t jsdrv_union_value_to_str(const struct jsdrv_union_s * value, char * str, uint32_t str_len, uint32_t opts);
+
+/**
+ * @brief Copy a union value into caller-owned storage.
+ *
+ * @param[out] dst The destination union.  Its fields will be fully
+ *      overwritten; it does not need to be pre-initialized.
+ * @param[in] src The source union.
+ * @param[out] buffer Caller-provided storage used only for pointer
+ *      types (string, JSON, binary, stdmsg, frame).  May be NULL when
+ *      buffer_size is 0 and the caller knows src is a scalar type.
+ * @param[in] buffer_size The size of buffer in bytes.
+ * @return 0 on success, or
+ *      #JSDRV_ERROR_PARAMETER_INVALID if dst or src is NULL, or
+ *      #JSDRV_ERROR_TOO_SMALL if buffer is too small for a pointer payload.
+ *
+ * This helper makes it safe to retain a jsdrv_union_s past a
+ * jsdrv_subscribe_fn callback invocation (the callback documents that
+ * value and any referenced memory are only valid for the duration of
+ * the call).  For scalar types the struct is copied verbatim.  For
+ * pointer types, the payload is copied into buffer and dst is updated
+ * to reference buffer.  The JSDRV_UNION_FLAG_HEAP_MEMORY flag is
+ * cleared on dst since the caller owns buffer.
+ */
+JSDRV_API int32_t jsdrv_union_copy(struct jsdrv_union_s * dst,
+                                   const struct jsdrv_union_s * src,
+                                   void * buffer, size_t buffer_size);
 
 JSDRV_CPP_GUARD_END
 

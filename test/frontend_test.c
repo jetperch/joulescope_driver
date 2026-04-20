@@ -475,7 +475,7 @@ static void test_stream_raw_0(void ** state) {
     TEARDOWN();
 }
 
-static THREAD_RETURN_TYPE dev_pubsub_echo_task(THREAD_ARG_TYPE lpParam) {
+static JSDRV_THREAD_RETURN_TYPE dev_pubsub_echo_task(JSDRV_THREAD_ARG_TYPE lpParam) {
     struct test_s * self = (struct test_s *) lpParam;
     struct jsdrvp_msg_s * msg;
     struct jsdrvp_msg_s * rsp;
@@ -511,7 +511,7 @@ static THREAD_RETURN_TYPE dev_pubsub_echo_task(THREAD_ARG_TYPE lpParam) {
             assert_true(false);
         }
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void dev_pubsub_echo_start(struct test_s * self) {

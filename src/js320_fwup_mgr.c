@@ -633,7 +633,7 @@ static void worker_free_data(struct worker_s * w) {
     }
 }
 
-static THREAD_RETURN_TYPE worker_thread(THREAD_ARG_TYPE lpParam) {
+static JSDRV_THREAD_RETURN_TYPE worker_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     struct worker_s * w = (struct worker_s *) lpParam;
     int32_t rc;
     bool device_opened = false;
@@ -735,7 +735,7 @@ done:
     worker_free_data(w);
     JSDRV_LOGI("fwup/%03u: done rc=%d", w->id, (int) w->result);
     w->done = true;
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 

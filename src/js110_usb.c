@@ -622,7 +622,7 @@ static void statistics_fwd(struct js110_dev_s * d, struct js110_host_status_s co
     dst->decimate_factor = 1;
     dst->block_sample_count = s->samples_this;
     dst->sample_freq = s->samples_per_second;
-    dst->rsv3_u8 = 0;
+    dst->rsv3_u32 = 0;
     dst->block_sample_id = s->samples_total;
     dst->accum_sample_id = 0;
 
@@ -1514,7 +1514,7 @@ static bool handle_rsp(struct js110_dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
-static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
+static JSDRV_THREAD_RETURN_TYPE driver_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     uint32_t time_now_ms = jsdrv_time_ms_u32();
     uint32_t time_prev_ms = time_now_ms;
     uint32_t duration_ms = 0;
@@ -1573,7 +1573,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
     }
 
     JSDRV_LOGI("JS110 USB upper-level thread done %s", d->ll.prefix);
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void join(struct jsdrvp_ul_device_s * device) {

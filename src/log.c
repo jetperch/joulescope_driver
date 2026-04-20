@@ -167,7 +167,7 @@ static struct msg_s * msg_alloc() {
     return msg;
 }
 
-void jsdrv_log_publish(uint8_t level, const char * filename, uint32_t line, const char * format, ...) {
+void jsdrv_log_publish(int8_t level, const char * filename, uint32_t line, const char * format, ...) {
     va_list args;
     if (0 == log_instance_.active_count) {
         dprintf("jsdrv_log_publish but not active");

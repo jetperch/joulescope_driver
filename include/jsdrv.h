@@ -24,6 +24,7 @@
 #define JSDRV_INCLUDE_H_
 
 #include "jsdrv/cmacro_inc.h"
+#include "jsdrv/error_code.h"
 #include "jsdrv/union.h"
 #include "jsdrv/time.h"
 #include "jsdrv/tmap.h"
@@ -191,6 +192,20 @@
 
 /** @} */
 
+/**
+ * @brief Timeout value requesting asynchronous (non-blocking) operation.
+ *
+ * For jsdrv_publish(), jsdrv_subscribe(), jsdrv_unsubscribe(),
+ * jsdrv_unsubscribe_all(), jsdrv_open(), and jsdrv_close(), passing
+ * timeout_ms == #JSDRV_TIMEOUT_MS_ASYNC (0) makes the call return
+ * immediately without waiting for the operation to complete.
+ *
+ * jsdrv_initialize(), jsdrv_finalize(), and jsdrv_query() are
+ * always synchronous and interpret timeout_ms == 0 as a request
+ * to use the default timeout (#JSDRV_TIMEOUT_MS_DEFAULT or
+ * #JSDRV_TIMEOUT_MS_INIT as appropriate).
+ */
+#define JSDRV_TIMEOUT_MS_ASYNC         0
 #define JSDRV_TIMEOUT_MS_DEFAULT       1000             ///< The recommended default timeout
 #define JSDRV_TIMEOUT_MS_INIT          5000             ///< The recommended default jsdrv_initialize() timeout.
 
@@ -279,10 +294,10 @@ struct jsdrv_statistics_s {
     uint8_t version;             ///< The version, only 1 currently supported
     uint8_t rsv1_u8;             ///< Reserved = 0
     uint8_t rsv2_u8;             ///< Reserved = 0
-    uint8_t decimate_factor;     ///< The decimate factor from sample_id to calculated samples = 2.
+    uint8_t decimate_factor;     ///< The decimate factor from sample_id to calculated samples.
     uint32_t block_sample_count; ///< Samples used to compute this block, in decimated samples.
     uint32_t sample_freq;        ///< The samples per second for *_sample_id (undecimated)
-    uint32_t rsv3_u8;            ///< Reserved = 0
+    uint32_t rsv3_u32;           ///< Reserved = 0
     uint64_t block_sample_id;    ///< First sample in this block's statistics computation.
     uint64_t accum_sample_id;    ///< First sample in the integration statistics computation.
     double i_avg;                ///< The average current over the block.
@@ -356,7 +371,7 @@ struct jsdrv_buffer_info_s {
     char topic[JSDRV_TOPIC_LENGTH_MAX];     ///< The source topic that provides jsdrv_stream_signal_s.
     int64_t size_in_utc;                    ///< The total buffer size in UTC time based on nominal sample rate.
     uint64_t size_in_samples;               ///< The total buffer size in samples.
-    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time based on tmap (not deprecated time_map).
+    struct jsdrv_time_range_utc_s time_range_utc;          ///< In UTC time, derived from the invariant tmap.
     struct jsdrv_time_range_samples_s time_range_samples;  ///< In sample time.
 
     /**
@@ -652,6 +667,11 @@ JSDRV_API int32_t jsdrv_subscribe(struct jsdrv_context_s * context, const char *
  * function returns.  With asynchronous unsubscribe, cbk_fn() may be called
  * for some indefinite number of times and duration until the unsubscribe
  * request is handled internally.
+ *
+ * Both cbk_fn AND cbk_user_data must match the values passed to
+ * jsdrv_subscribe().  A mismatch is not an error; the operation
+ * succeeds but the subscription remains active.  Use the identical
+ * pointer values used at subscribe time.
  */
 JSDRV_API int32_t jsdrv_unsubscribe(struct jsdrv_context_s * context, const char * topic,
         jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,

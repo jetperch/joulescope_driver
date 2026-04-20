@@ -171,6 +171,34 @@ static void test_flags_null_params(void **state) {
     assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_meta_flags("{}", NULL));
 }
 
+static void test_syntax_check_null(void **state) {
+    (void) state;
+    assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_meta_syntax_check(NULL));
+}
+
+static void test_syntax_check_valid(void **state) {
+    (void) state;
+    assert_int_equal(0, jsdrv_meta_syntax_check("{\"dtype\": \"u8\"}"));
+    assert_int_equal(0, jsdrv_meta_syntax_check("{}"));
+    assert_int_equal(0, jsdrv_meta_syntax_check(META1));
+    assert_int_equal(0, jsdrv_meta_syntax_check(META_NO_DEFAULT));
+}
+
+static void test_syntax_check_non_object_root(void **state) {
+    (void) state;
+    // Valid JSON but not a top-level object: must be rejected.
+    assert_int_not_equal(0, jsdrv_meta_syntax_check("[\"a\", \"b\"]"));
+    assert_int_not_equal(0, jsdrv_meta_syntax_check("\"hello\""));
+    assert_int_not_equal(0, jsdrv_meta_syntax_check("42"));
+}
+
+static void test_syntax_check_malformed(void **state) {
+    (void) state;
+    assert_int_not_equal(0, jsdrv_meta_syntax_check("{\"dtype\":"));
+    assert_int_not_equal(0, jsdrv_meta_syntax_check("{"));
+    assert_int_not_equal(0, jsdrv_meta_syntax_check("not json"));
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_basic),
@@ -186,6 +214,10 @@ int main(void) {
             cmocka_unit_test(test_flags_array_all),
             cmocka_unit_test(test_flags_unknown_ignored),
             cmocka_unit_test(test_flags_null_params),
+            cmocka_unit_test(test_syntax_check_null),
+            cmocka_unit_test(test_syntax_check_valid),
+            cmocka_unit_test(test_syntax_check_non_object_root),
+            cmocka_unit_test(test_syntax_check_malformed),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

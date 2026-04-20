@@ -214,6 +214,71 @@ static void test_value_to_str(void ** state) {
     assert_str("bin.C  size=4", &jsdrv_union_cbin((const uint8_t *) "one", 4), 1);
 }
 
+static void test_copy_scalar(void ** state) {
+    (void) state;
+    struct jsdrv_union_s src = jsdrv_union_u32(0xDEADBEEFu);
+    struct jsdrv_union_s dst;
+    assert_int_equal(0, jsdrv_union_copy(&dst, &src, NULL, 0));
+    assert_true(jsdrv_union_eq(&src, &dst));
+    assert_int_equal(JSDRV_UNION_U32, dst.type);
+    assert_int_equal(0xDEADBEEFu, dst.value.u32);
+}
+
+static void test_copy_str(void ** state) {
+    (void) state;
+    const char * original = "hello world";
+    struct jsdrv_union_s src = jsdrv_union_cstr(original);
+    src.size = (uint32_t) (strlen(original) + 1);
+    char buf[64];
+    struct jsdrv_union_s dst;
+    assert_int_equal(0, jsdrv_union_copy(&dst, &src, buf, sizeof(buf)));
+    assert_int_equal(JSDRV_UNION_STR, dst.type);
+    assert_ptr_equal(buf, dst.value.str);
+    assert_string_equal(original, dst.value.str);
+    assert_int_equal(src.size, dst.size);
+}
+
+static void test_copy_bin(void ** state) {
+    (void) state;
+    const uint8_t payload[] = {1, 2, 3, 4, 5, 6, 7, 8};
+    struct jsdrv_union_s src = jsdrv_union_cbin(payload, sizeof(payload));
+    uint8_t buf[16];
+    struct jsdrv_union_s dst;
+    assert_int_equal(0, jsdrv_union_copy(&dst, &src, buf, sizeof(buf)));
+    assert_int_equal(JSDRV_UNION_BIN, dst.type);
+    assert_ptr_equal(buf, dst.value.bin);
+    assert_int_equal(sizeof(payload), dst.size);
+    assert_memory_equal(payload, dst.value.bin, sizeof(payload));
+}
+
+static void test_copy_too_small(void ** state) {
+    (void) state;
+    const uint8_t payload[] = {1, 2, 3, 4, 5, 6, 7, 8};
+    struct jsdrv_union_s src = jsdrv_union_cbin(payload, sizeof(payload));
+    uint8_t buf[4];
+    struct jsdrv_union_s dst;
+    assert_int_equal(JSDRV_ERROR_TOO_SMALL, jsdrv_union_copy(&dst, &src, buf, sizeof(buf)));
+}
+
+static void test_copy_null_params(void ** state) {
+    (void) state;
+    struct jsdrv_union_s src = jsdrv_union_u8(0);
+    struct jsdrv_union_s dst;
+    assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_union_copy(NULL, &src, NULL, 0));
+    assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_union_copy(&dst, NULL, NULL, 0));
+}
+
+static void test_copy_clears_heap_flag(void ** state) {
+    (void) state;
+    uint8_t payload[] = {0xAA, 0xBB, 0xCC};
+    struct jsdrv_union_s src = jsdrv_union_bin(payload, sizeof(payload));
+    src.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
+    uint8_t buf[8];
+    struct jsdrv_union_s dst;
+    assert_int_equal(0, jsdrv_union_copy(&dst, &src, buf, sizeof(buf)));
+    assert_int_equal(0, dst.flags & JSDRV_UNION_FLAG_HEAP_MEMORY);
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_numeric_eq),
@@ -227,6 +292,12 @@ int main(void) {
             cmocka_unit_test(test_as_type),
             cmocka_unit_test(test_type_to_str),
             cmocka_unit_test(test_value_to_str),
+            cmocka_unit_test(test_copy_scalar),
+            cmocka_unit_test(test_copy_str),
+            cmocka_unit_test(test_copy_bin),
+            cmocka_unit_test(test_copy_too_small),
+            cmocka_unit_test(test_copy_null_params),
+            cmocka_unit_test(test_copy_clears_heap_flag),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

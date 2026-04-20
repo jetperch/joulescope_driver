@@ -1631,7 +1631,7 @@ static uint32_t thread_timeout_duration_ms(struct jsdrvp_mb_dev_s * d) {
 }
 
 
-static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
+static JSDRV_THREAD_RETURN_TYPE driver_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     struct jsdrvp_mb_dev_s *d = (struct jsdrvp_mb_dev_s *) lpParam;
     JSDRV_LOGI("MB USB upper-level thread started for %s d=%p", d->ll.prefix, (void *) d);
     state_machine_process(d, EV_RESET);
@@ -1705,7 +1705,7 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
     }
 
     JSDRV_LOGI("MB USB upper-level thread done %s d=%p", d->ll.prefix, (void *) d);
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void join(struct jsdrvp_ul_device_s * device) {

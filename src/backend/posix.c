@@ -194,8 +194,8 @@ int32_t jsdrv_os_event_wait(jsdrv_os_event_t ev, uint32_t timeout_ms) {
 
 int32_t jsdrv_thread_create(jsdrv_thread_t * thread,
                             jsdrv_thread_fn fn,
-                            THREAD_ARG_TYPE fn_arg,
-                            int priority) {
+                            JSDRV_THREAD_ARG_TYPE fn_arg,
+                            int32_t priority) {
     int rc;
     pthread_attr_t attr;
     pthread_attr_init(&attr);

@@ -51,7 +51,7 @@ JSDRV_CPP_GUARD_START
  * @param tgt_size The total number of total_bytes available in tgt.
  * @return 0 on success, 1 if truncated, -1 on tgt NULL or tgt_size <= 0.
  */
-JSDRV_API int jsdrv_cstr_copy(char * tgt, char const * src, size_t tgt_size);
+JSDRV_API int32_t jsdrv_cstr_copy(char * tgt, const char * src, size_t tgt_size);
 
 /**
  * @brief Safely copy src to tgt.
@@ -62,7 +62,7 @@ JSDRV_API int jsdrv_cstr_copy(char * tgt, char const * src, size_t tgt_size);
  * @param tgt_size The total number of total_bytes available in tgt.
  * @return 0 on success, 1 if truncated, -1 on tgt NULL or tgt_size <= 0.
  */
-JSDRV_API int jsdrv_cstr_join(char * tgt, char const * src1, char const * src2, size_t tgt_size);
+JSDRV_API int32_t jsdrv_cstr_join(char * tgt, const char * src1, const char * src2, size_t tgt_size);
 
 /**
  * @brief Safely copy src to tgt.
@@ -72,7 +72,7 @@ JSDRV_API int jsdrv_cstr_join(char * tgt, char const * src1, char const * src2, 
  * @return 0 on success, 1 if truncated, -1 on other errors.
  */
 #define jsdrv_cstr_array_copy(tgt, src) \
-    jsdrv_cstr_copy(tgt, src, (sizeof(tgt) / sizeof(tgt[0])))
+    jsdrv_cstr_copy((tgt), (src), (sizeof(tgt) / sizeof(tgt[0])))
 
 /**
  * @brief Compare strings ignoring case.
@@ -81,7 +81,7 @@ JSDRV_API int jsdrv_cstr_join(char * tgt, char const * src1, char const * src2, 
  * @param s2 The second null-terminated string.
  * @return 0 if s1 and s2 are comparable, -1 if s1 < s2, 1 if s2 > s1.
  */
-JSDRV_API int jsdrv_cstr_casecmp(const char * s1, const char * s2);
+JSDRV_API int32_t jsdrv_cstr_casecmp(const char * s1, const char * s2);
 
 /**
  * @brief Determine if a string starts with another string.
@@ -113,7 +113,7 @@ JSDRV_API const char * jsdrv_cstr_ends_with(const char * s, const char * suffix)
  *      modified.  To allow default values on parsing errors, set value
  *      before calling this function.
  */
-JSDRV_API int jsdrv_cstr_to_u32(const char * src, uint32_t * value);
+JSDRV_API int32_t jsdrv_cstr_to_u32(const char * src, uint32_t * value);
 
 /**
  * @brief Convert a string to an signed 32-bit integer.
@@ -124,7 +124,7 @@ JSDRV_API int jsdrv_cstr_to_u32(const char * src, uint32_t * value);
  *      modified.  To allow default values on parsing errors, set value
  *      before calling this function.
  */
-JSDRV_API int jsdrv_cstr_to_i32(const char * src, int32_t * value);
+JSDRV_API int32_t jsdrv_cstr_to_i32(const char * src, int32_t * value);
 
 /**
  * @brief Convert a fractional value into a scaled 32-bit integer.
@@ -147,7 +147,7 @@ JSDRV_API int jsdrv_cstr_to_i32(const char * src, int32_t * value);
  *     jsdrv_cstr_to_i32s("-1.01", 2, &x) => -101
  *     jsdrv_cstr_to_i32s("1.019", 2, &x) => 101
  */
-JSDRV_API int jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * value);
+JSDRV_API int32_t jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * value);
 
 /**
  * @brief Convert a string to an unsigned 64-bit integer.
@@ -159,7 +159,7 @@ JSDRV_API int jsdrv_cstr_to_i32s(const char * src, int32_t exponent, int32_t * v
  *      modified.  To allow default values on parsing errors, set value
  *      before calling this function.
  */
-JSDRV_API int jsdrv_cstr_to_u64(const char * src, uint64_t * value);
+JSDRV_API int32_t jsdrv_cstr_to_u64(const char * src, uint64_t * value);
 
 /**
  * @brief Convert a string to an signed 64-bit integer.
@@ -170,7 +170,7 @@ JSDRV_API int jsdrv_cstr_to_u64(const char * src, uint64_t * value);
  *      modified.  To allow default values on parsing errors, set value
  *      before calling this function.
  */
-JSDRV_API int jsdrv_cstr_to_i64(const char * src, int64_t * value);
+JSDRV_API int32_t jsdrv_cstr_to_i64(const char * src, int64_t * value);
 
 /**
  * @brief Convert a string to a floating point number.
@@ -181,7 +181,7 @@ JSDRV_API int jsdrv_cstr_to_i64(const char * src, int64_t * value);
  *      modified.  To allow default values on parsing errors, set value
  *      before calling this function.
  */
-JSDRV_API int jsdrv_cstr_to_f32(const char * src, float * value);
+JSDRV_API int32_t jsdrv_cstr_to_f32(const char * src, float * value);
 
 /**
  * @brief Convert an unsigned 32-bit integer to a string.
@@ -193,7 +193,7 @@ JSDRV_API int jsdrv_cstr_to_f32(const char * src, float * value);
  * @return 0 on success or error code.  On error, return str[0] = 0
  *      unless size is <= 0.
  */
-JSDRV_API int jsdrv_u32_to_cstr(uint32_t u32, char * str, size_t str_size);
+JSDRV_API int32_t jsdrv_u32_to_cstr(uint32_t u32, char * str, size_t str_size);
 
 /**
  * @brief Convert a string to upper case.  Equivalent to nonstandard strupr().
@@ -204,7 +204,7 @@ JSDRV_API int jsdrv_u32_to_cstr(uint32_t u32, char * str, size_t str_size);
  *      success.
  * @return 0 on success or error code.
  */
-JSDRV_API int jsdrv_cstr_toupper(char * s);
+JSDRV_API int32_t jsdrv_cstr_toupper(char * s);
 
 /**
  * @brief Convert a string value into an index into table.
@@ -216,7 +216,7 @@ JSDRV_API int jsdrv_cstr_toupper(char * s);
  *      conversion, a default value can be set before calling this function.
  * @return 0 or error code.
  */
-JSDRV_API int jsdrv_cstr_to_index(char const * s, char const * const * table, int * index);
+JSDRV_API int32_t jsdrv_cstr_to_index(const char * s, const char * const * table, int32_t * index);
 
 /**
  * @brief Convert a string value into a boolean.
@@ -230,7 +230,7 @@ JSDRV_API int jsdrv_cstr_to_index(char const * s, char const * const * table, in
  *      this function.
  * @return SUCCESS or error code.
  */
-JSDRV_API int jsdrv_cstr_to_bool(char const * s, bool * value);
+JSDRV_API int32_t jsdrv_cstr_to_bool(const char * s, bool * value);
 
 /**
  * @brief Convert a hex character to a 4-bit nibble.

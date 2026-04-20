@@ -113,12 +113,12 @@ struct event_thread_data_s {
     volatile int ready;
 };
 
-static THREAD_RETURN_TYPE event_signaler_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE event_signaler_fn(JSDRV_THREAD_ARG_TYPE arg) {
     struct event_thread_data_s * d = (struct event_thread_data_s *) arg;
     jsdrv_thread_sleep_ms(20);
     d->ready = 1;
     jsdrv_os_event_signal(d->ev);
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void event_cross_thread_signal(void **state) {
@@ -169,14 +169,14 @@ struct mutex_thread_data_s {
     int counter;
 };
 
-static THREAD_RETURN_TYPE mutex_increment_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE mutex_increment_fn(JSDRV_THREAD_ARG_TYPE arg) {
     struct mutex_thread_data_s * d = (struct mutex_thread_data_s *) arg;
     for (int i = 0; i < ITERATIONS; i++) {
         jsdrv_os_mutex_lock(d->mutex);
         d->counter++;
         jsdrv_os_mutex_unlock(d->mutex);
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void mutex_contention(void **state) {
@@ -201,10 +201,10 @@ static void mutex_contention(void **state) {
 // Thread tests
 // ============================================================
 
-static THREAD_RETURN_TYPE simple_thread_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE simple_thread_fn(JSDRV_THREAD_ARG_TYPE arg) {
     int * value = (int *) arg;
     *value = 42;
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void thread_create_join(void **state) {
@@ -218,10 +218,10 @@ static void thread_create_join(void **state) {
     assert_int_equal(42, value);
 }
 
-static THREAD_RETURN_TYPE slow_thread_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE slow_thread_fn(JSDRV_THREAD_ARG_TYPE arg) {
     (void) arg;
     jsdrv_thread_sleep_ms(500);
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void thread_join_timeout(void **state) {
@@ -234,10 +234,10 @@ static void thread_join_timeout(void **state) {
     jsdrv_thread_sleep_ms(600);
 }
 
-static THREAD_RETURN_TYPE is_current_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE is_current_fn(JSDRV_THREAD_ARG_TYPE arg) {
     jsdrv_thread_t * self = (jsdrv_thread_t *) arg;
     assert_true(jsdrv_thread_is_current(self));
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void thread_is_current(void **state) {
@@ -339,16 +339,16 @@ struct sem_thread_data_s {
     jsdrv_os_atomic_t consumed;
 };
 
-static THREAD_RETURN_TYPE sem_producer_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE sem_producer_fn(JSDRV_THREAD_ARG_TYPE arg) {
     struct sem_thread_data_s * d = (struct sem_thread_data_s *) arg;
     for (int i = 0; i < ITERATIONS; i++) {
         JSDRV_OS_ATOMIC_INC(&d->produced);
         jsdrv_os_sem_release(d->sem);
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
-static THREAD_RETURN_TYPE sem_consumer_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE sem_consumer_fn(JSDRV_THREAD_ARG_TYPE arg) {
     struct sem_thread_data_s * d = (struct sem_thread_data_s *) arg;
     for (int i = 0; i < ITERATIONS * THREAD_COUNT; i++) {
         int32_t rc = jsdrv_os_sem_wait(d->sem, 5000);
@@ -356,7 +356,7 @@ static THREAD_RETURN_TYPE sem_consumer_fn(THREAD_ARG_TYPE arg) {
             JSDRV_OS_ATOMIC_INC(&d->consumed);
         }
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void sem_producer_consumer(void **state) {
@@ -394,14 +394,14 @@ struct pipeline_data_s {
     jsdrv_os_atomic_t completed;
 };
 
-static THREAD_RETURN_TYPE pipeline_worker_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE pipeline_worker_fn(JSDRV_THREAD_ARG_TYPE arg) {
     struct pipeline_data_s * d = (struct pipeline_data_s *) arg;
     for (int i = 0; i < 100; i++) {
         jsdrv_os_sem_wait(d->sem, 5000);
         JSDRV_OS_ATOMIC_DEC(&d->outstanding);
         JSDRV_OS_ATOMIC_INC(&d->completed);
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void sem_pipeline_pattern(void **state) {
@@ -468,12 +468,12 @@ struct atomic_thread_data_s {
     jsdrv_os_atomic_t counter;
 };
 
-static THREAD_RETURN_TYPE atomic_inc_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE atomic_inc_fn(JSDRV_THREAD_ARG_TYPE arg) {
     struct atomic_thread_data_s * d = (struct atomic_thread_data_s *) arg;
     for (int i = 0; i < ITERATIONS; i++) {
         JSDRV_OS_ATOMIC_INC(&d->counter);
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void atomic_concurrent_increment(void **state) {
@@ -493,12 +493,12 @@ static void atomic_concurrent_increment(void **state) {
                      JSDRV_OS_ATOMIC_GET(&data.counter));
 }
 
-static THREAD_RETURN_TYPE atomic_dec_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE atomic_dec_fn(JSDRV_THREAD_ARG_TYPE arg) {
     struct atomic_thread_data_s * d = (struct atomic_thread_data_s *) arg;
     for (int i = 0; i < ITERATIONS; i++) {
         JSDRV_OS_ATOMIC_DEC(&d->counter);
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void atomic_concurrent_decrement(void **state) {
@@ -517,12 +517,12 @@ static void atomic_concurrent_decrement(void **state) {
     assert_int_equal(0, JSDRV_OS_ATOMIC_GET(&data.counter));
 }
 
-static THREAD_RETURN_TYPE atomic_set_fn(THREAD_ARG_TYPE arg) {
+static JSDRV_THREAD_RETURN_TYPE atomic_set_fn(JSDRV_THREAD_ARG_TYPE arg) {
     struct atomic_thread_data_s * d = (struct atomic_thread_data_s *) arg;
     for (int i = 0; i < ITERATIONS; i++) {
         JSDRV_OS_ATOMIC_SET(&d->counter, i);
     }
-    THREAD_RETURN();
+    JSDRV_THREAD_RETURN();
 }
 
 static void atomic_concurrent_set_get(void **state) {

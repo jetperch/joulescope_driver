@@ -16,7 +16,7 @@
 
 #include "jsdrv/error_code.h"
 
-const char * jsdrv_error_code_name(int ec) {
+const char * jsdrv_error_code_name(int32_t ec) {
     switch (ec) {
         // CASE_NAME_START
         case JSDRV_ERROR_SUCCESS: return "SUCCESS";
@@ -50,7 +50,7 @@ const char * jsdrv_error_code_name(int ec) {
     }
 }
 
-const char * jsdrv_error_code_description(int ec) {
+const char * jsdrv_error_code_description(int32_t ec) {
     switch (ec) {
         // CASE_DESCRIPTION_START
         case JSDRV_ERROR_SUCCESS: return "Success (no error)";
@@ -61,7 +61,7 @@ const char * jsdrv_error_code_description(int ec) {
         case JSDRV_ERROR_PARAMETER_INVALID: return "The parameter value is invalid";
         case JSDRV_ERROR_INVALID_RETURN_CONDITION: return "The function return condition is invalid";
         case JSDRV_ERROR_INVALID_CONTEXT: return "The context is invalid";
-        case JSDRV_ERROR_INVALID_MESSAGE_LENGTH: return "The message length in invalid";
+        case JSDRV_ERROR_INVALID_MESSAGE_LENGTH: return "The message length is invalid";
         case JSDRV_ERROR_MESSAGE_INTEGRITY: return "The message integrity check failed";
         case JSDRV_ERROR_SYNTAX_ERROR: return "A syntax error was detected";
         case JSDRV_ERROR_TIMED_OUT: return "The operation did not complete in time";

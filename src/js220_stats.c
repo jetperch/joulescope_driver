@@ -33,7 +33,7 @@ int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct js
     dst->decimate_factor = (src->header >> 24) & 0x0f;
     dst->block_sample_count = src->header & 0x00ffffff;
     dst->sample_freq = src->sample_freq;
-    dst->rsv3_u8 = 0;
+    dst->rsv3_u32 = 0;
     dst->block_sample_id = src->block_sample_id;
     dst->accum_sample_id = src->accum_sample_id;
     uint32_t sample_freq = dst->sample_freq / dst->decimate_factor;

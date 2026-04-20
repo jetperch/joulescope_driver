@@ -20,8 +20,8 @@
  * @brief Cross-platform thread abstraction.
  */
 
-#ifndef JSDRV_OS_THREAD_H__
-#define JSDRV_OS_THREAD_H__
+#ifndef JSDRV_OS_THREAD_H_
+#define JSDRV_OS_THREAD_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include <stdint.h>
@@ -45,9 +45,9 @@
 JSDRV_CPP_GUARD_START
 
 #if _WIN32
-#define THREAD_RETURN_TYPE DWORD WINAPI
-#define THREAD_ARG_TYPE LPVOID
-#define THREAD_RETURN() return 0
+#define JSDRV_THREAD_RETURN_TYPE DWORD WINAPI
+#define JSDRV_THREAD_ARG_TYPE LPVOID
+#define JSDRV_THREAD_RETURN() return 0
 typedef DWORD (__stdcall *jsdrv_thread_fn)(LPVOID arg);
 struct jsdrv_thread_s {
     HANDLE thread;
@@ -55,10 +55,10 @@ struct jsdrv_thread_s {
 };
 typedef struct jsdrv_thread_s jsdrv_thread_t;
 #else  /* presume POSIX */
-#define THREAD_RETURN_TYPE void *
-#define THREAD_ARG_TYPE void *
+#define JSDRV_THREAD_RETURN_TYPE void *
+#define JSDRV_THREAD_ARG_TYPE void *
 typedef void * (*jsdrv_thread_fn)(void * arg);
-#define THREAD_RETURN() return NULL
+#define JSDRV_THREAD_RETURN() return NULL
 typedef pthread_t jsdrv_thread_t;
 #endif
 
@@ -75,8 +75,8 @@ typedef pthread_t jsdrv_thread_t;
  */
 JSDRV_API int32_t jsdrv_thread_create(jsdrv_thread_t * thread,
                                        jsdrv_thread_fn fn,
-                                       THREAD_ARG_TYPE fn_arg,
-                                       int priority);
+                                       JSDRV_THREAD_ARG_TYPE fn_arg,
+                                       int32_t priority);
 
 /**
  * @brief Wait for a thread to finish and release resources.
@@ -98,7 +98,7 @@ JSDRV_API int32_t jsdrv_thread_join(jsdrv_thread_t * thread,
  * @param thread The thread instance to compare.
  * @return true if the calling thread is the specified thread.
  */
-JSDRV_API bool jsdrv_thread_is_current(jsdrv_thread_t const * thread);
+JSDRV_API bool jsdrv_thread_is_current(const jsdrv_thread_t * thread);
 
 /**
  * @brief Sleep the calling thread.
@@ -111,4 +111,4 @@ JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_OS_THREAD_H__ */
+#endif  /* JSDRV_OS_THREAD_H_ */

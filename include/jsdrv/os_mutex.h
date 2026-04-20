@@ -20,8 +20,8 @@
  * @brief Cross-platform mutex abstraction.
  */
 
-#ifndef JSDRV_OS_MUTEX_H__
-#define JSDRV_OS_MUTEX_H__
+#ifndef JSDRV_OS_MUTEX_H_
+#define JSDRV_OS_MUTEX_H_
 
 #include "jsdrv/cmacro_inc.h"
 #include <stdint.h>
@@ -65,14 +65,14 @@ typedef struct jsdrv_os_mutex_s * jsdrv_os_mutex_t;
  * @param name The mutex name for debug information.
  * @return The mutex or NULL on failure.
  */
-JSDRV_COMPILER_ALLOC(jsdrv_os_mutex_free) jsdrv_os_mutex_t jsdrv_os_mutex_alloc(const char * name);
+JSDRV_COMPILER_ALLOC(jsdrv_os_mutex_free) JSDRV_API jsdrv_os_mutex_t jsdrv_os_mutex_alloc(const char * name);
 
 /**
  * @brief Free an existing mutex.
  *
  * @param mutex The mutex to free.
  */
-void jsdrv_os_mutex_free(jsdrv_os_mutex_t mutex);
+JSDRV_API void jsdrv_os_mutex_free(jsdrv_os_mutex_t mutex);
 
 /**
  * @brief Lock a mutex with the default timeout.
@@ -82,17 +82,17 @@ void jsdrv_os_mutex_free(jsdrv_os_mutex_t mutex);
  * Uses JSDRV_CONFIG_OS_MUTEX_LOCK_TIMEOUT_MS.  A timeout
  * indicates a system failure and calls JSDRV_FATAL.
  */
-void jsdrv_os_mutex_lock(jsdrv_os_mutex_t mutex);
+JSDRV_API void jsdrv_os_mutex_lock(jsdrv_os_mutex_t mutex);
 
 /**
  * @brief Unlock a mutex.
  *
  * @param mutex The mutex to unlock.  If NULL, skip.
  */
-void jsdrv_os_mutex_unlock(jsdrv_os_mutex_t mutex);
+JSDRV_API void jsdrv_os_mutex_unlock(jsdrv_os_mutex_t mutex);
 
 JSDRV_CPP_GUARD_END
 
 /** @} */
 
-#endif  /* JSDRV_OS_MUTEX_H__ */
+#endif  /* JSDRV_OS_MUTEX_H_ */
