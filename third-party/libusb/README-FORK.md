@@ -25,6 +25,24 @@ NULL `CFRunLoopSourceRef` and segfault, and would also
 after `pthread_create` succeeds) and guards both the runloop
 shutdown signal and the join against those uninitialized states.
 
+We also made `darwin_cleanup_devices()` in `libusb/os/darwin_usb.c`
+resilient to leaked cached-device references.  A
+`libusb_init`/`libusb_exit` cycle on macOS with a device still
+physically attached leaves a residual reference on the
+`darwin_cached_devices` list (libusb's `usbi_hotplug_exit()` does not
+drop the `usb_devs` list reference for devices whose refcount is
+greater than one, and `libusb_exit()` deliberately warns but does not
+force-free such `libusb_device` instances).  The upstream cleanup
+decrements once and leaves the entry on the list; the next
+`libusb_init()` then fails with `LIBUSB_ERROR_OTHER` because
+`darwin_first_time_init()` rejects a non-empty cache.  We now
+force-remove such leaked entries from the cache list (and reinitialize
+their list link as self-referential so the eventual `list_del` from
+`darwin_deref_cached_device()` is a safe no-op if the lingering
+`libusb_device` is later destroyed).  This lets re-initialization
+succeed across the finalize/initialize cycles that the Joulescope
+driver fuzz test exercises.
+
 We also added cmake build support:
 * CMakeLists.txt
 * include/*/config.h for platform-specific config

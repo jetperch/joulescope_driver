@@ -588,7 +588,21 @@ static void darwin_cleanup_devices(void) {
 
   list_for_each_entry_safe(dev, next, &darwin_cached_devices, list, struct darwin_cached_device) {
     if (dev->refcount > 1) {
+      /* A libusb_device still references this cached device (commonly
+       * from libusb's own usb_devs list when the device is still
+       * physically present at libusb_exit, or from an application that
+       * forgot to libusb_unref_device() one it got from
+       * libusb_get_device_list()).  Upstream leaves the entry on the
+       * cache list with refcount decremented by one; the next
+       * libusb_init() then sees a non-empty cache and refuses to
+       * initialize with LIBUSB_ERROR_OTHER.  Force-remove the entry so
+       * the next init starts clean.  The struct stays allocated so any
+       * lingering libusb_device->priv->dev pointer can still safely
+       * call darwin_deref_cached_device(); the eventual list_del there
+       * is a no-op because we reinitialize the link as self-referential. */
       usbi_err(NULL, "device still referenced at libusb_exit");
+      list_del(&dev->list);
+      list_init(&dev->list);
     }
     darwin_deref_cached_device(dev);
   }
