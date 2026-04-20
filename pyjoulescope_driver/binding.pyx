@@ -125,6 +125,15 @@ cdef class TimeMap:
     def __deepcopy__(self, memo):
         return TimeMap.factory(c_jsdrv.jsdrv_tmap_copy(self.this))
 
+    def __enter__(self):
+        # Kept as a no-op for backward compatibility with the previous
+        # reader-locked API.  The instance is already an owned snapshot,
+        # so no synchronization is required to query it.
+        return self
+
+    def __exit__(self, type, value, traceback):
+        return None
+
     def sample_id_to_timestamp(self, sample_id):
         cdef int64_t r
         if isinstance(sample_id, Iterable):
