@@ -1,5 +1,5 @@
 /*
-* Copyright 2023-2025 Jetperch LLC
+* Copyright 2023-2026 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@
 #include "jsdrv_prv/assert.h"
 #include "jsdrv/tmap.h"
 #include "jsdrv_prv/log.h"
-#include "jsdrv_prv/mutex.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 #include <inttypes.h>
 #include <math.h>
 
@@ -32,16 +32,6 @@ struct jsdrv_tmap_s {
     size_t alloc_size;  // always a power of 2
     size_t head;
     size_t tail;
-    volatile size_t ref_count;
-    volatile size_t reader_count;
-    jsdrv_os_mutex_t mutex;
-
-    bool time_map_update_pending;
-    struct jsdrv_time_map_s time_map_update;
-
-    bool tail_update_pending;
-    size_t tail_update;
-
     struct jsdrv_time_map_s * entry;
 };
 
@@ -96,55 +86,68 @@ struct jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size) {
         JSDRV_ASSERT_ALLOC(self->entry);
     }
     self->alloc_size = initial_size;
-    self->mutex = jsdrv_os_mutex_alloc("tmap");
-    self->ref_count = 1;
     return self;
 }
 
-void jsdrv_tmap_ref_incr(struct jsdrv_tmap_s * self) {
-    jsdrv_os_mutex_lock(self->mutex);
-    ++self->ref_count;
-    jsdrv_os_mutex_unlock(self->mutex);
-}
-
-static void tmap_free(struct jsdrv_tmap_s * self) {
+void jsdrv_tmap_free(struct jsdrv_tmap_s * self) {
+    if (NULL == self) {
+        return;
+    }
     free(self->entry);
     self->entry = NULL;
-    jsdrv_os_mutex_free(self->mutex);
-    self->mutex = NULL;
-    self->ref_count = 0;
     free(self);
 }
 
-void jsdrv_tmap_ref_decr(struct jsdrv_tmap_s * self) {
-    if (self == NULL) {
-        return;
+struct jsdrv_tmap_s * jsdrv_tmap_copy(const struct jsdrv_tmap_s * src) {
+    if (NULL == src) {
+        return NULL;
     }
-    if (0 == self->ref_count) {
-        JSDRV_LOGW("tmap_ref_decr called with ref_count == 0");
-        return;
+    size_t sz = tmap_size(src);
+    struct jsdrv_tmap_s * self = jsdrv_tmap_alloc(sz);
+    if (sz == 0) {
+        return self;
     }
-    jsdrv_os_mutex_lock(self->mutex);
-    if (1 == self->ref_count) {
-        jsdrv_os_mutex_unlock(self->mutex);
-        tmap_free(self);
+    if (src->head > src->tail) {
+        memcpy(self->entry, &src->entry[src->tail], sz * sizeof(struct jsdrv_time_map_s));
     } else {
-        --self->ref_count;
-        jsdrv_os_mutex_unlock(self->mutex);
+        size_t head_count = src->alloc_size - src->tail;
+        memcpy(self->entry, &src->entry[src->tail],
+               head_count * sizeof(struct jsdrv_time_map_s));
+        memcpy(&self->entry[head_count], &src->entry[0],
+               src->head * sizeof(struct jsdrv_time_map_s));
     }
+    self->tail = 0;
+    self->head = sz;
+    return self;
 }
 
 void jsdrv_tmap_clear(struct jsdrv_tmap_s * self) {
     if (NULL != self) {
-        jsdrv_os_mutex_lock(self->mutex);
         self->head = 0;
         self->tail = 0;
-        jsdrv_os_mutex_unlock(self->mutex);
     }
 }
 
-static void defer_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s * time_map) {
+void jsdrv_tmap_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s * time_map) {
+    if ((NULL == self) || (NULL == time_map)) {
+        return;
+    }
     size_t sz = tmap_size(self);
+    if (time_map->counter_rate <= 0) {
+        JSDRV_LOGW("Invalid counter rate: %" PRIu64, time_map->counter_rate);
+        return;
+    }
+
+    if (sz) {
+        size_t head_prev = ptr_decr(self->head, self->alloc_size);
+        struct jsdrv_time_map_s * e = &self->entry[head_prev];
+        if ((time_map->offset_time == e->offset_time)
+                && (time_map->offset_counter == e->offset_counter)
+                && (time_map->counter_rate == e->counter_rate)) {
+            return;  // deduplicate
+        }
+    }
+
     if ((sz + 1) >= self->alloc_size) {
         size_t alloc_size = self->alloc_size * 2;
         self->entry = realloc(self->entry, alloc_size * sizeof(struct jsdrv_time_map_s));
@@ -174,34 +177,10 @@ static void defer_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s 
     self->head = ptr_incr(self->head, self->alloc_size);
 }
 
-void jsdrv_tmap_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s * time_map) {
-    size_t sz = tmap_size(self);
-    if (time_map->counter_rate <= 0) {
-        JSDRV_LOGW("Invalid counter rate: %" PRIu64, time_map->counter_rate);
+void jsdrv_tmap_expire_by_sample_id(struct jsdrv_tmap_s * self, uint64_t sample_id) {
+    if (NULL == self) {
         return;
     }
-
-    if (sz) {
-        size_t head_prev = ptr_decr(self->head, self->alloc_size);
-        struct jsdrv_time_map_s * e = &self->entry[head_prev];
-        if ((time_map->offset_time == e->offset_time)
-                && (time_map->offset_counter == e->offset_counter)
-                && (time_map->counter_rate == e->counter_rate)) {
-            return;  // deduplicate
-        }
-    }
-
-    jsdrv_os_mutex_lock(self->mutex);
-    if (0 == self->reader_count) {
-        defer_add(self, time_map);
-    } else {
-        self->time_map_update = *time_map;
-        self->time_map_update_pending = true;
-    }
-    jsdrv_os_mutex_unlock(self->mutex);
-}
-
-void jsdrv_tmap_expire_by_sample_id(struct jsdrv_tmap_s * self, uint64_t sample_id) {
     if (self->head == self->tail) {
         return;  // nothing to expire
     }
@@ -219,39 +198,7 @@ void jsdrv_tmap_expire_by_sample_id(struct jsdrv_tmap_s * self, uint64_t sample_
         }
         tail = tail_next;
     }
-
-    if (tail != self->tail) {
-        jsdrv_os_mutex_lock(self->mutex);
-        if (0 == self->reader_count) {
-            self->tail = tail;
-        } else {
-            self->tail_update = tail;
-            self->tail_update_pending = true;
-        }
-        jsdrv_os_mutex_unlock(self->mutex);
-    }
-}
-
-void jsdrv_tmap_reader_enter(struct jsdrv_tmap_s * self) {
-    jsdrv_os_mutex_lock(self->mutex);
-    self->reader_count++;
-    jsdrv_os_mutex_unlock(self->mutex);
-}
-
-void jsdrv_tmap_reader_exit(struct jsdrv_tmap_s * self) {
-    jsdrv_os_mutex_lock(self->mutex);
-    self->reader_count--;
-    if (self->reader_count == 0) {
-        if (self->tail_update_pending) {
-            self->tail_update_pending = false;
-            self->tail = self->tail_update;
-        }
-        if (self->time_map_update_pending) {
-            self->time_map_update_pending = false;
-            defer_add(self, &self->time_map_update);
-        }
-    }
-    jsdrv_os_mutex_unlock(self->mutex);
+    self->tail = tail;
 }
 
 static struct jsdrv_time_map_s * find_entry_by_sample_id(struct jsdrv_tmap_s * self, uint64_t sample_id) {

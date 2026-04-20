@@ -11,6 +11,10 @@ This file contains the list of changes made to the Joulescope driver.
 * Added Minibitty support for 3rd generation Joulescope products.
 * Fixed latent issues with segfaults on force disconnects. 
 * Added externally available OS abstraction. 
+* Switched tmap to copy-on-publish.  Removed jsdrv_tmap_ref_incr,
+  jsdrv_tmap_ref_decr, jsdrv_tmap_reader_enter, and
+  jsdrv_tmap_reader_exit.  Added jsdrv_tmap_free and jsdrv_tmap_copy.
+  jsdrv_buffer_info_s.tmap is now a consumer-owned snapshot.
 
 
 ## 1.12.0

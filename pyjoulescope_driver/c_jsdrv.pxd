@@ -39,14 +39,12 @@ cdef extern from "jsdrv/time.h":
 cdef extern from "jsdrv/tmap.h":
     struct jsdrv_tmap_s
     jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size)
-    void jsdrv_tmap_ref_incr(jsdrv_tmap_s * self)
-    void jsdrv_tmap_ref_decr(jsdrv_tmap_s * self)
+    void jsdrv_tmap_free(jsdrv_tmap_s * self)
+    jsdrv_tmap_s * jsdrv_tmap_copy(const jsdrv_tmap_s * src)
     void jsdrv_tmap_clear(jsdrv_tmap_s * self)
     size_t jsdrv_tmap_length(jsdrv_tmap_s * self)
     void jsdrv_tmap_add(jsdrv_tmap_s * self, const jsdrv_time_map_s * time_map)
     void jsdrv_tmap_expire_by_sample_id(jsdrv_tmap_s * self, uint64_t sample_id)
-    void jsdrv_tmap_reader_enter(jsdrv_tmap_s * self)
-    void jsdrv_tmap_reader_exit(jsdrv_tmap_s * self)
     int32_t jsdrv_tmap_sample_id_to_timestamp(jsdrv_tmap_s * self, uint64_t sample_id, int64_t * timestamp)
     int32_t jsdrv_tmap_timestamp_to_sample_id(jsdrv_tmap_s * self, int64_t timestamp, uint64_t * sample_id)
     int32_t jsdrv_tmap_get(jsdrv_tmap_s * self, size_t index, jsdrv_time_map_s * time_map)

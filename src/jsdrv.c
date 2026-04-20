@@ -162,6 +162,17 @@ struct jsdrvp_msg_s * jsdrvp_msg_clone(struct jsdrv_context_s * context, const s
                 break;
         }
     }
+    // Payloads that embed an owned jsdrv_tmap_s pointer must deep-copy it
+    // so both the original and the clone own independent instances.
+    if (m->value.type == JSDRV_UNION_BIN) {
+        if (m->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_RSP) {
+            struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) m->value.value.bin;
+            rsp->info.tmap = jsdrv_tmap_copy(rsp->info.tmap);
+        } else if (m->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_INFO) {
+            struct jsdrv_buffer_info_s * info = (struct jsdrv_buffer_info_s *) m->value.value.bin;
+            info->tmap = jsdrv_tmap_copy(info->tmap);
+        }
+    }
     jsdrv_list_initialize(&m->item);
     return m;
 }
@@ -796,7 +807,12 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
     }
     if (msg->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_RSP) {
         struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) msg->value.value.bin;
-        jsdrv_tmap_ref_decr(rsp->info.tmap);
+        jsdrv_tmap_free(rsp->info.tmap);
+        rsp->info.tmap = NULL;
+    } else if (msg->value.app == JSDRV_PAYLOAD_TYPE_BUFFER_INFO) {
+        struct jsdrv_buffer_info_s * info = (struct jsdrv_buffer_info_s *) msg->value.value.bin;
+        jsdrv_tmap_free(info->tmap);
+        info->tmap = NULL;
     }
     if (msg->value.flags & JSDRV_UNION_FLAG_HEAP_MEMORY) {
         msg->value.flags &= ~JSDRV_UNION_FLAG_HEAP_MEMORY;

@@ -36,7 +36,7 @@ static void test_empty(void **state) {
     assert_int_equal(0, jsdrv_tmap_length(s));
     assert_int_equal(JSDRV_ERROR_UNAVAILABLE, jsdrv_tmap_sample_id_to_timestamp(s, 1000, &v));
     assert_int_equal(JSDRV_ERROR_UNAVAILABLE, jsdrv_tmap_timestamp_to_sample_id(s, YEAR, &k));
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
 }
 
 static void test_single(void **state) {
@@ -56,7 +56,7 @@ static void test_single(void **state) {
     assert_int_equal(0, jsdrv_tmap_sample_id_to_timestamp(s, 2000, &t)); assert_int_equal(YEAR + SECOND, t);
     assert_int_equal(0, jsdrv_tmap_timestamp_to_sample_id(s, YEAR, &k)); assert_int_equal(1000, k);
     assert_int_equal(0, jsdrv_tmap_timestamp_to_sample_id(s, YEAR + SECOND, &k)); assert_int_equal(2000, k);
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
 }
 
 static void test_add_duplicate(void **state) {
@@ -71,7 +71,7 @@ static void test_add_duplicate(void **state) {
     jsdrv_tmap_add(s, &entry);
     jsdrv_tmap_add(s, &entry);
     assert_int_equal(1, jsdrv_tmap_length(s));
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
 }
 
 static void test_multiple(void **state) {
@@ -127,7 +127,7 @@ static void test_multiple(void **state) {
     assert_int_equal(0, jsdrv_tmap_sample_id_to_timestamp(s, 2505, &t)); assert_int_equal(YEAR + 3 * SECOND / 2, t);
     assert_int_equal(0, jsdrv_tmap_timestamp_to_sample_id(s, YEAR + 3 * SECOND / 2, &k)); assert_int_equal(2505, k);
 
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
 }
 
 static void test_expire(void **state) {
@@ -157,7 +157,7 @@ static void test_expire(void **state) {
     jsdrv_tmap_expire_by_sample_id(s, 4100);
     assert_int_equal(2, jsdrv_tmap_length(s));
 
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
 }
 
 static struct jsdrv_time_map_s * construct(size_t count) {
@@ -193,7 +193,7 @@ static void test_wrap(void **state) {
         assert_int_equal(0, jsdrv_tmap_timestamp_to_sample_id(s, entry[idx].offset_time, &k)); assert_int_equal(entry[idx].offset_counter, k);
     }
 
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
     free(entry);
 }
 
@@ -219,7 +219,7 @@ static void test_grow(void **state) {
     assert_int_equal(12, jsdrv_tmap_length(s));
     assert_int_equal(0, jsdrv_tmap_sample_id_to_timestamp(s, entry[0].offset_counter, &t)); assert_int_not_equal(entry[0].offset_time, t);
 
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
     free(entry);
 }
 
@@ -235,7 +235,7 @@ static void test_clear(void **state) {
     assert_int_equal(1, jsdrv_tmap_length(s));
     jsdrv_tmap_clear(s);
     assert_int_equal(0, jsdrv_tmap_length(s));
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
 }
 
 static void test_get(void **state) {
@@ -255,31 +255,112 @@ static void test_get(void **state) {
         assert_int_equal(entry[idx + 8].offset_counter, e.offset_counter);
         assert_int_equal((int) entry[idx + 8].counter_rate, (int) e.counter_rate);
     }
-    jsdrv_tmap_ref_decr(s);
+    jsdrv_tmap_free(s);
 }
 
-static void test_concurrency(void **state) {
+static void test_free_null(void **state) {
+    (void) state;
+    jsdrv_tmap_free(NULL);  // must not crash
+}
+
+static void test_null_safety(void **state) {
+    (void) state;
+    // Every mutation and query API accepts NULL self without crashing.
+    struct jsdrv_time_map_s entry = {.offset_time = YEAR, .offset_counter = 1000, .counter_rate = 1000.0};
+    int64_t t = 0;
+    uint64_t k = 0;
+    struct jsdrv_time_map_s out;
+
+    jsdrv_tmap_clear(NULL);
+    jsdrv_tmap_add(NULL, &entry);
+    jsdrv_tmap_expire_by_sample_id(NULL, 0);
+    assert_int_equal(0, jsdrv_tmap_length(NULL));
+    assert_int_equal(JSDRV_ERROR_UNAVAILABLE, jsdrv_tmap_sample_id_to_timestamp(NULL, 1000, &t));
+    assert_int_equal(JSDRV_ERROR_UNAVAILABLE, jsdrv_tmap_timestamp_to_sample_id(NULL, YEAR, &k));
+    assert_int_equal(JSDRV_ERROR_UNAVAILABLE, jsdrv_tmap_get(NULL, 0, &out));
+
+    // jsdrv_tmap_add also tolerates NULL time_map.
+    struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(0);
+    jsdrv_tmap_add(s, NULL);
+    assert_int_equal(0, jsdrv_tmap_length(s));
+    jsdrv_tmap_free(s);
+}
+
+static void test_copy_empty(void **state) {
+    (void) state;
+    struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(0);
+    struct jsdrv_tmap_s * c = jsdrv_tmap_copy(s);
+    assert_non_null(c);
+    assert_int_equal(0, jsdrv_tmap_length(c));
+    jsdrv_tmap_free(c);
+    jsdrv_tmap_free(s);
+    assert_null(jsdrv_tmap_copy(NULL));
+}
+
+static void test_copy_independent(void **state) {
     (void) state;
     struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(8);
     struct jsdrv_time_map_s * entry = construct(20);
-
-    for (size_t idx = 0; idx < 20; ++idx) {
-        assert_int_equal(idx, jsdrv_tmap_length(s));
-        jsdrv_tmap_reader_enter(s);
+    for (size_t idx = 0; idx < 5; ++idx) {
         jsdrv_tmap_add(s, &entry[idx]);
-        assert_int_equal(idx, jsdrv_tmap_length(s));
-        jsdrv_tmap_reader_exit(s);
-        assert_int_equal(idx + 1, jsdrv_tmap_length(s));
     }
 
-    jsdrv_tmap_reader_enter(s);
-    jsdrv_tmap_reader_enter(s);
-    jsdrv_tmap_expire_by_sample_id(s, 4100);
-    assert_int_equal(20, jsdrv_tmap_length(s));
-    jsdrv_tmap_reader_exit(s);
-    assert_int_equal(20, jsdrv_tmap_length(s));
-    jsdrv_tmap_reader_exit(s);
-    assert_int_equal(17, jsdrv_tmap_length(s));
+    struct jsdrv_tmap_s * c = jsdrv_tmap_copy(s);
+    assert_int_equal(5, jsdrv_tmap_length(c));
+
+    int64_t t_src = 0;
+    int64_t t_copy = 0;
+    for (size_t idx = 0; idx < 5; ++idx) {
+        assert_int_equal(0, jsdrv_tmap_sample_id_to_timestamp(s, entry[idx].offset_counter, &t_src));
+        assert_int_equal(0, jsdrv_tmap_sample_id_to_timestamp(c, entry[idx].offset_counter, &t_copy));
+        assert_int_equal(t_src, t_copy);
+    }
+
+    // mutating src does not change the copy
+    for (size_t idx = 5; idx < 10; ++idx) {
+        jsdrv_tmap_add(s, &entry[idx]);
+    }
+    assert_int_equal(10, jsdrv_tmap_length(s));
+    assert_int_equal(5, jsdrv_tmap_length(c));
+
+    // mutating the copy does not change src
+    jsdrv_tmap_clear(c);
+    assert_int_equal(0, jsdrv_tmap_length(c));
+    assert_int_equal(10, jsdrv_tmap_length(s));
+
+    // freeing src does not invalidate the copy's prior data
+    jsdrv_tmap_free(s);
+    jsdrv_tmap_add(c, &entry[0]);
+    assert_int_equal(1, jsdrv_tmap_length(c));
+
+    jsdrv_tmap_free(c);
+    free(entry);
+}
+
+static void test_copy_wrapped(void **state) {
+    (void) state;
+    struct jsdrv_tmap_s * s = jsdrv_tmap_alloc(4);
+    struct jsdrv_time_map_s * entry = construct(20);
+    for (size_t idx = 0; idx < 20; ++idx) {
+        jsdrv_tmap_add(s, &entry[idx]);
+        if (idx >= 4) {
+            jsdrv_tmap_expire_by_sample_id(s, entry[idx].offset_counter - 2500);
+        }
+    }
+    size_t sz = jsdrv_tmap_length(s);
+    struct jsdrv_tmap_s * c = jsdrv_tmap_copy(s);
+    assert_int_equal(sz, jsdrv_tmap_length(c));
+
+    struct jsdrv_time_map_s a = {0}, b = {0};
+    for (size_t idx = 0; idx < sz; ++idx) {
+        assert_int_equal(0, jsdrv_tmap_get(s, idx, &a));
+        assert_int_equal(0, jsdrv_tmap_get(c, idx, &b));
+        assert_int_equal(a.offset_counter, b.offset_counter);
+        assert_int_equal(a.offset_time, b.offset_time);
+    }
+    jsdrv_tmap_free(c);
+    jsdrv_tmap_free(s);
+    free(entry);
 }
 
 
@@ -294,7 +375,11 @@ int main(void) {
             cmocka_unit_test(test_grow),
             cmocka_unit_test(test_clear),
             cmocka_unit_test(test_get),
-            cmocka_unit_test(test_concurrency),
+            cmocka_unit_test(test_free_null),
+            cmocka_unit_test(test_null_safety),
+            cmocka_unit_test(test_copy_empty),
+            cmocka_unit_test(test_copy_independent),
+            cmocka_unit_test(test_copy_wrapped),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

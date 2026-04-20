@@ -91,21 +91,22 @@ _TIME_MAP_GET_DTYPE = np.dtype({
 
 
 cdef class TimeMap:
-    """Python wrapper for jsdrv_tmap_s instance."""
+    """Python wrapper for jsdrv_tmap_s instance.
+
+    Each instance owns its underlying jsdrv_tmap_s.  TimeMap values
+    returned from driver responses are independent snapshots; copy()
+    and deepcopy() produce further independent instances.
+    """
 
     cdef c_jsdrv.jsdrv_tmap_s * this
-    cdef uint64_t _reader_active
-
-    def __init__(self):
-        self._reader_active = 0
 
     def __len__(self):
         return c_jsdrv.jsdrv_tmap_length(self.this)
 
     @staticmethod
     cdef factory(c_jsdrv.jsdrv_tmap_s * this):
+        """Wrap an existing jsdrv_tmap_s, taking ownership of it."""
         cdef TimeMap instance = TimeMap.__new__(TimeMap)
-        c_jsdrv.jsdrv_tmap_ref_incr(this)
         instance.this = this
         return instance
 
@@ -114,30 +115,18 @@ cdef class TimeMap:
         cdef c_jsdrv.jsdrv_tmap_s * this = c_jsdrv.jsdrv_tmap_alloc(initial_size)
         return TimeMap.factory(this)
 
-    def __del__(self):
-        c_jsdrv.jsdrv_tmap_ref_decr(self.this)
+    def __dealloc__(self):
+        c_jsdrv.jsdrv_tmap_free(self.this)
         self.this = NULL
 
     def __copy__(self):
-        return TimeMap.factory(self.this)
+        return TimeMap.factory(c_jsdrv.jsdrv_tmap_copy(self.this))
 
     def __deepcopy__(self, memo):
-        return TimeMap.factory(self.this)
-
-    def __enter__(self):
-        c_jsdrv.jsdrv_tmap_reader_enter(self.this)
-        self._reader_active += 1
-        return self
-
-    def __exit__(self, type, value, traceback):
-        c_jsdrv.jsdrv_tmap_reader_exit(self.this)
-        self._reader_active -= 1
+        return TimeMap.factory(c_jsdrv.jsdrv_tmap_copy(self.this))
 
     def sample_id_to_timestamp(self, sample_id):
         cdef int64_t r
-        if 0 == self._reader_active:
-            with self:
-                return self.sample_id_to_timestamp(sample_id)
         if isinstance(sample_id, Iterable):
             sz = len(sample_id)
             result = np.empty(sz, dtype=np.int64)
@@ -152,9 +141,6 @@ cdef class TimeMap:
 
     def timestamp_to_sample_id(self, timestamp):
         cdef uint64_t r
-        if 0 == self._reader_active:
-            with self:
-                return self.timestamp_to_sample_id(timestamp)
         if isinstance(timestamp, Iterable):
             sz = len(timestamp)
             result = np.empty(sz, dtype=np.uint64)
@@ -181,9 +167,6 @@ cdef class TimeMap:
             Access as either a[0]['offset_counter'] or a[0][1].
         """
         cdef c_jsdrv.jsdrv_time_map_s time_map
-        if 0 == self._reader_active:
-            with self:
-                return self.get(index)
         n = len(self)
         if index is None:
             index = 0, n
@@ -263,7 +246,9 @@ cdef object _parse_buffer_info(c_jsdrv.jsdrv_buffer_info_s * info):
         'tmap': None,
     }
     if (info[0].tmap):
-        v['tmap'] = TimeMap.factory(info[0].tmap)
+        # C owns info[0].tmap and frees it when the message is torn down.
+        # Copy so the Python TimeMap has an independent instance.
+        v['tmap'] = TimeMap.factory(c_jsdrv.jsdrv_tmap_copy(info[0].tmap))
     return v
 
 

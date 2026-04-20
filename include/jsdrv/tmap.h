@@ -1,5 +1,5 @@
 /*
-* Copyright 2023-2025 Jetperch LLC
+* Copyright 2023-2026 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,6 +44,21 @@
  * a simple jsdrv_time_map_s of the most recent data causes
  * older samples to "jump around" with respect to UTC.
  *
+ * Each tmap instance is single-owner.  The writer holds one instance
+ * and mutates it freely.  To publish a stable view to a consumer, the
+ * writer uses jsdrv_tmap_copy() to produce an independent snapshot.
+ * The consumer owns that snapshot and must call jsdrv_tmap_free()
+ * when finished.  There is no sharing and no locking.
+ *
+ * Writers use: jsdrv_tmap_alloc(), jsdrv_tmap_add(),
+ * jsdrv_tmap_expire_by_sample_id(), jsdrv_tmap_clear(),
+ * jsdrv_tmap_copy() (to produce a snapshot to publish), and
+ * jsdrv_tmap_free().
+ *
+ * Consumers use: jsdrv_tmap_length(), jsdrv_tmap_get(),
+ * jsdrv_tmap_sample_id_to_timestamp(),
+ * jsdrv_tmap_timestamp_to_sample_id(), and jsdrv_tmap_free().
+ *
  *
  * References:
  *   - https://github.com/jetperch/jls/blob/main/include_prv/jls/tmap.h
@@ -56,124 +71,87 @@ JSDRV_CPP_GUARD_START
 /// The opaque instance.
 struct jsdrv_tmap_s;
 
+// --- Lifecycle ---
+
 /**
  * @brief Allocate a new tmap instance.
  *
  * @param initial_size The initial allocation size.  0 to use default.
  * @return The new tmap instance.
  *
- * tmap instances are designed for thread safety with a single writer
- * and multiple readers.  Each time the writer shares this instance
- * with a reader, the writer must call jsdrv_tmap_ref_incr().
- * The reader then calls jsdrv_tmap_reader_enter() and jsdrv_tmap_reader_exit()
- * whenever it wants to use the reader methods.  When the reader is done
- * with the instance, it must call jsdrv_tmap_ref_decr.
- * When the writer finalizes, it also must call jsdrv_tmap_ref_decr().
+ * The returned instance is single-owner.  Free with jsdrv_tmap_free().
  */
 JSDRV_API struct jsdrv_tmap_s * jsdrv_tmap_alloc(size_t initial_size);
 
 /**
- * @brief Increment the reference count on this instance.
+ * @brief Free a tmap instance.
  *
- * @param self The instance.
- * @see jsdrv_tmap_ref_decr()
+ * @param self The instance.  May be NULL.
  *
- * Whenever the writer shares this instance with a reader or
- * a reader shares this instance with a reader in another thread,
- * call this function.
- *
- * The receiving reader must call jsdrv_tmap_ref_decr() when
- * it is done with the instance.
+ * After this call, the caller must not use the instance pointer.
  */
-JSDRV_API void jsdrv_tmap_ref_incr(struct jsdrv_tmap_s * self);
+JSDRV_API void jsdrv_tmap_free(struct jsdrv_tmap_s * self);
 
 /**
- * @brief Decrement the reference count on this instance.
- * @param self The instance.
+ * @brief Allocate an independent copy of a tmap instance.
  *
- * When the reference count reaches zero, the underlying instance
- * is freed.  The caller must not hold on to the instance pointer
- * after calling jsdrv_tmap_ref_decr().
+ * @param src The source instance to copy.  May be NULL, in which case
+ *      NULL is returned.
+ * @return A new tmap instance with the same entries as src, or NULL if
+ *      src is NULL.  The caller owns the returned instance and must
+ *      free it with jsdrv_tmap_free().
+ *
+ * The copy is independent: subsequent mutations to src do not affect
+ * the copy, and mutations to the copy do not affect src.
  */
-JSDRV_API void jsdrv_tmap_ref_decr(struct jsdrv_tmap_s * self);
+JSDRV_API struct jsdrv_tmap_s * jsdrv_tmap_copy(const struct jsdrv_tmap_s * src);
 
-/**
- * @brief Clear all data from this instance.
- *
- * @param self The instance.
- * @note Unlike other writer functions, this function blocks on the reader mutex.
- */
-JSDRV_API void jsdrv_tmap_clear(struct jsdrv_tmap_s * self);
-
-/**
- * @brief Get the current number of entries in the time map.
- *
- * @param self The instance
- * @return The number of entries in this instance.
- * @note Readers should call this from within jsdrv_tmap_reader_enter().
- */
-JSDRV_API size_t jsdrv_tmap_length(struct jsdrv_tmap_s * self);
+// --- Mutation (writer path) ---
 
 /**
  * @brief Add a new time map entry to this instance.
  *
- * @param self The instance.
- * @param time_map The new time map.
- *
- * This function does not block, but the update will be deferred
- * until no readers are actively using this instance.
+ * @param self The instance.  May be NULL (no-op).
+ * @param time_map The new time map.  May be NULL (no-op).
  */
 JSDRV_API void jsdrv_tmap_add(struct jsdrv_tmap_s * self, const struct jsdrv_time_map_s * time_map);
 
 /**
  * @brief Expire old time map entries.
  *
- * @param self The instance.
+ * @param self The instance.  May be NULL (no-op).
  * @param sample_id The oldest sample_id that this instance needs to represent.
- *
- * This function does not block, but the update will be deferred
- * until no readers are actively using this instance.
  */
 JSDRV_API void jsdrv_tmap_expire_by_sample_id(struct jsdrv_tmap_s * self, uint64_t sample_id);
 
 /**
- * @brief Indicate that a reader is actively using this instance.
+ * @brief Clear all data from this instance.
  *
- * @param self The instance.
- * @see jsdrv_tmap_reader_exit
- *
- * This implementation provides for a single writer (updater) and
- * multiple concurrent readers.  Readers indicate that they are
- * active by calling this function before calling any of the
- * following functions:
- * - jsdrv_tmap_length()
- * - jsdrv_tmap_sample_id_to_timestamp()
- * - jsdrv_tmap_timestamp_to_sample_id()
- * - jsdrv_tmap_get()
- *
- * To prevent blocking the writer, updates are posted and deferred
- * when any reader is active.  Readers should keep their blocking
- * sections as short as possible.
- * Call jsdrv_tmap_reader_exit() when done.
+ * @param self The instance.  May be NULL (no-op).
  */
-JSDRV_API void jsdrv_tmap_reader_enter(struct jsdrv_tmap_s * self);
+JSDRV_API void jsdrv_tmap_clear(struct jsdrv_tmap_s * self);
+
+// --- Query (consumer path) ---
 
 /**
- * @brief Indicate that a reader is done using this instance.
+ * @brief Get the current number of entries in the time map.
  *
- * @param self The instance.
- * @see jsdrv_tmap_reader_enter
+ * @param self The instance.  May be NULL (returns 0).
+ * @return The number of entries in this instance.
  */
-JSDRV_API void jsdrv_tmap_reader_exit(struct jsdrv_tmap_s * self);
+JSDRV_API size_t jsdrv_tmap_length(struct jsdrv_tmap_s * self);
 
 /**
  * @brief Map sample id to a UTC timestamp.
  *
  * @param self The instance.
- * @param sample_id The sample id to map
+ * @param sample_id The sample id to map.
  * @param[out] timestamp The timestamp corresponding to sample id.
- * @return 0 or JSDRV_ERROR_UNAVAILABLE.
- * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
+ * @return 0 on success or JSDRV_ERROR_UNAVAILABLE if the instance is empty.
+ *
+ * For sample_id values outside the range of stored entries, the result
+ * is clamped to the nearest endpoint (oldest or newest) entry.  Only an
+ * empty instance produces an error.
  */
 JSDRV_API int32_t jsdrv_tmap_sample_id_to_timestamp(struct jsdrv_tmap_s * self, uint64_t sample_id, int64_t * timestamp);
 
@@ -183,19 +161,21 @@ JSDRV_API int32_t jsdrv_tmap_sample_id_to_timestamp(struct jsdrv_tmap_s * self, 
  * @param self The instance.
  * @param timestamp The timestamp to map.
  * @param[out] sample_id The sample id corresponding to timestamp.
- * @return 0 or JSDRV_ERROR_UNAVAILABLE.
- * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
+ * @return 0 on success or JSDRV_ERROR_UNAVAILABLE if the instance is empty.
+ *
+ * For timestamp values outside the range of stored entries, the result
+ * is clamped to the nearest endpoint (oldest or newest) entry.  Only an
+ * empty instance produces an error.
  */
 JSDRV_API int32_t jsdrv_tmap_timestamp_to_sample_id(struct jsdrv_tmap_s * self, int64_t timestamp, uint64_t * sample_id);
 
 /**
  * @brief Get an entry from the tmap instance.
  *
- * @param self The instance.
+ * @param self The instance.  May be NULL (returns JSDRV_ERROR_UNAVAILABLE).
  * @param index The entry index. 0 is oldest.  jsdrv_tmap_length() - 1 is newest.
  * @param[out] time_map The entry for the corresponding index.
  * @return 0 or JSDRV_ERROR_UNAVAILABLE.
- * @note Must be in a reader section initiated by jsdrv_tmap_reader_enter()
  */
 JSDRV_API int32_t jsdrv_tmap_get(struct jsdrv_tmap_s * self, size_t index, struct jsdrv_time_map_s * time_map);
 

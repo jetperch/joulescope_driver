@@ -399,10 +399,9 @@ struct jsdrv_buffer_info_s {
      * @brief The time map for the response.
      * @see time_map
      *
-     * This instance is reference counted.  Call jsdrv_tmap_ref_incr()
-     * to hold onto this instance and jsdrv_tmap_ref_decr() to release it.
-     * Use jsdrv_tmap_reader_enter() and jsdrv_tmap_reader_exit()
-     * to actively access the time map functions.
+     * This instance is a snapshot owned by the consumer.  Call
+     * jsdrv_tmap_free() when done.  No locking is required; the
+     * snapshot is independent of the writer's tmap.
      */
     struct jsdrv_tmap_s * tmap;             ///< The time map for the response.
 };
