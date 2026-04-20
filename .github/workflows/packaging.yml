@@ -182,7 +182,7 @@ jobs:
           # skip musllinux: build takes too long with default os images.
           CIBW_SKIP: 'pp* *musllinux*'
           CIBW_BUILD: '${{ matrix.python_version }}-*'
-          CIBW_BEFORE_BUILD_LINUX: yum install -y libudev-devel
+          CIBW_BEFORE_BUILD_LINUX: for i in 1 2 3 4 5; do yum install -y --setopt=retries=10 --setopt=timeout=60 --setopt=fastestmirror=1 libudev-devel && break || sleep 5; done
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest --pyargs pyjoulescope_driver
           CIBW_TEST_SKIP: "*-macosx_universal2:arm64"  # cannot test arm64 on x86_64
