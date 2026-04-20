@@ -4,17 +4,102 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
-## 2.0.2
+## 2.0.3
 
-2026 Apr 16 [in progress]
+2026 Apr 20
 
-* Added Minibitty support for 3rd generation Joulescope products.
-* Fixed latent issues with segfaults on force disconnects. 
-* Added externally available OS abstraction. 
+### Breaking API changes
+
+* jsdrv_stream_signal_s: added 8-byte preamble (version + reserved)
+  so sample_id stays 8-byte aligned.  JSDRV_STREAM_HEADER_SIZE changed
+  from 48 to 56.  All consumers that depend on the struct layout must
+  be rebuilt.
 * Switched tmap to copy-on-publish.  Removed jsdrv_tmap_ref_incr,
   jsdrv_tmap_ref_decr, jsdrv_tmap_reader_enter, and
   jsdrv_tmap_reader_exit.  Added jsdrv_tmap_free and jsdrv_tmap_copy.
-  jsdrv_buffer_info_s.tmap is now a consumer-owned snapshot.
+  jsdrv_buffer_info_s.tmap is now a consumer-owned snapshot that the
+  consumer must free with jsdrv_tmap_free().
+* jsdrv_calibration_hash now returns int32_t (was void).  Returns
+  JSDRV_ERROR_PARAMETER_INVALID when msg or hash is NULL, or when
+  length is 0 or not a multiple of 32 bytes.
+* jsdrv_subscribe: flags == 0 is now treated as the common default
+  (JSDRV_SFLAG_PUB | JSDRV_SFLAG_RETAIN) instead of subscribing
+  silently to nothing.  Callers who want no callbacks (rare) must
+  pass a non-zero mask that excludes JSDRV_SFLAG_PUB.
+* jsdrv_log_publish: level parameter type changed uint8_t -> int8_t
+  to match the rest of the log API and preserve the signed
+  JSDRV_LOG_LEVEL_OFF = -1 value.
+* jsdrv_thread_create: priority parameter type changed int -> int32_t.
+* jsdrv_thread_is_current: parameter type changed
+  jsdrv_thread_t const * -> const jsdrv_thread_t *.
+* error_code.h: jsdrv_error_code_name and jsdrv_error_code_description
+  parameter type changed int -> int32_t.
+* cstr.h: every return type changed int -> int32_t; every
+  char const * parameter changed to const char *.
+* jsdrv_statistics_s.rsv3_u8 field renamed to rsv3_u32 to match its
+  uint32_t type.
+* Header guard macros JSDRV_OS_*_H__ renamed to JSDRV_OS_*_H_ to
+  avoid ISO C §7.1.3 reserved identifiers.
+* os_thread.h macros THREAD_RETURN_TYPE / THREAD_ARG_TYPE /
+  THREAD_RETURN() renamed to JSDRV_THREAD_RETURN_TYPE /
+  JSDRV_THREAD_ARG_TYPE / JSDRV_THREAD_RETURN() to remove
+  global-namespace pollution.
+
+### New APIs
+
+* jsdrv_union_copy() — copy a jsdrv_union_s into caller-owned storage;
+  safe replacement for aliasing callback pointers.
+* jsdrv_tmap_free(), jsdrv_tmap_copy() — replace the ref-counted
+  lifetime and reader/writer sections.
+* JSDRV_TIMEOUT_MS_ASYNC constant (value 0) for self-documenting
+  asynchronous calls.
+
+### New features
+
+* Added MiniBitty support for 3rd generation Joulescope products.
+* Added externally available OS abstraction in include/jsdrv/os_*.h
+  (sem, event, mutex, thread, atomic).
+* Implemented jsdrv_meta_syntax_check() (previously a stub).
+
+### File layout
+
+* Moved device-specific files into src/devices/{js110,js220,js320,
+  mb_device}/ (similarly in include_private/jsdrv_prv/devices/ and
+  test/devices/).  No code logic changed.
+
+### Fixed
+
+* Latent segfaults on force disconnects.
+* jsdrvp_msg_free now also frees info.tmap for BUFFER_INFO payloads
+  (previously only BUFFER_RSP, which leaked one tmap per info publish).
+* jsdrvp_msg_clone now deep-copies info.tmap for BUFFER_INFO /
+  BUFFER_RSP payloads so clones and originals each own an
+  independent instance.
+* Missing JSDRV_API qualifier on os_event.h and os_mutex.h public
+  functions; on Windows DLL builds, those symbols were not exported.
+* Documentation rot: jsdrv_union_eq reference to non-existent
+  eq_strict; jsdrv_union_widen copy-pasted description; stale
+  "deprecated time_map" comment; "length in invalid" typo in
+  error codes.
+* jsdrv.h now includes jsdrv/error_code.h.
+
+### Contract documentation (no code change)
+
+* jsdrv_subscribe_fn: callback payload and every pointer reachable
+  through it (including jsdrv_buffer_info_s.tmap) are valid only for
+  the duration of the callback.  Copy before returning.
+* jsdrv_statistics_s / jsdrv_stream_signal_s / jsdrv_buffer_info_s /
+  jsdrv_buffer_request_s / jsdrv_buffer_response_s: consumers MUST
+  check the version field; future versions only repurpose reserved
+  fields or append.
+* jsdrv_publish / subscribe / unsubscribe / open / close timeouts:
+  JSDRV_TIMEOUT_MS_ASYNC (0) is asynchronous; timeout > 0 is
+  synchronous and guaranteed complete on return.  The return code
+  reflects synchronous processing only.
+* jsdrv_finalize: the context is no longer usable after return,
+  regardless of status.  Nonzero status may indicate leaked resources.
+* jsdrv_unsubscribe: cbk_fn AND cbk_user_data must both match the
+  values passed to jsdrv_subscribe; silent success on mismatch.
 
 
 ## 1.12.0

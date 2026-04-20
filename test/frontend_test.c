@@ -430,6 +430,11 @@ static void test_stream_raw_0(void ** state) {
     uint32_t payload[80][512 / 4];
     uint32_t expected_u32[(JSDRV_STREAM_HEADER_SIZE + 80 * 504) / 4];
     struct jsdrv_stream_signal_s * s = (struct jsdrv_stream_signal_s *) expected_u32;
+    s->version = 1;
+    s->rsv1_u8 = 0;
+    s->rsv2_u8 = 0;
+    s->rsv3_u8 = 0;
+    s->rsv4_u32 = 0;
     s->sample_id = 0;
     s->field_id = JSDRV_FIELD_RAW;
     s->index = 0;

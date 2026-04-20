@@ -1315,6 +1315,11 @@ static struct jsdrvp_msg_s * field_message_get(struct js110_dev_s * d, uint8_t f
         m = jsdrvp_msg_alloc_data(d->context, "");
         tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s", d->ll.prefix, field_def->data_topic);
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+        s->version = 1;
+        s->rsv1_u8 = 0;
+        s->rsv2_u8 = 0;
+        s->rsv3_u8 = 0;
+        s->rsv4_u32 = 0;
         s->sample_id = d->sample_id;
         s->index = field_def->index;
         s->field_id = field_def->field_id;

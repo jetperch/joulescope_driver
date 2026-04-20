@@ -269,6 +269,11 @@ static void js320_signal_init(struct jsdrv_stream_signal_s * signal,
                               uint8_t index,
                               uint64_t sample_id,
                               uint32_t decimate_runtime) {
+    signal->version = 1;
+    signal->rsv1_u8 = 0;
+    signal->rsv2_u8 = 0;
+    signal->rsv3_u8 = 0;
+    signal->rsv4_u32 = 0;
     signal->sample_id = sample_id;
     signal->field_id = def->field_id;
     signal->index = index;

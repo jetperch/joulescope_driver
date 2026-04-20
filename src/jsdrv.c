@@ -938,6 +938,9 @@ static int32_t subscribe_common(struct jsdrv_context_s * p,
 int32_t jsdrv_subscribe(struct jsdrv_context_s * context, const char * name, uint8_t flags,
                         jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,
                         uint32_t timeout_ms) {
+    if (0 == flags) {
+        flags = JSDRV_SFLAG_PUB | JSDRV_SFLAG_RETAIN;
+    }
     return subscribe_common(context, name, flags, JSDRV_PUBSUB_SUBSCRIBE, cbk_fn, cbk_user_data, timeout_ms);
 }
 

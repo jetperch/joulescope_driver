@@ -1143,5 +1143,7 @@ def calibration_hash(msg):
 
     hash = np.zeros(16, dtype=np.uint32)
     hash_u32 = hash
-    c_jsdrv.jsdrv_calibration_hash(&msg_u32[0], len(msg), &hash_u32[0])
+    rc = c_jsdrv.jsdrv_calibration_hash(&msg_u32[0], len(msg), &hash_u32[0])
+    if rc:
+        raise ValueError(f'jsdrv_calibration_hash failed: {rc}')
     return hash

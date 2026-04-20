@@ -1361,6 +1361,11 @@ static void handle_stream_in_port(struct dev_s * d, uint8_t port_id, uint32_t * 
         m = jsdrvp_msg_alloc_data(d->context, "");
         tfp_snprintf(m->topic, sizeof(m->topic), "%s/%s", d->ll.prefix, field_def->data_topic);
         s = (struct jsdrv_stream_signal_s *) m->value.value.bin;
+        s->version = 1;
+        s->rsv1_u8 = 0;
+        s->rsv2_u8 = 0;
+        s->rsv3_u8 = 0;
+        s->rsv4_u32 = 0;
         s->sample_id = port->sample_id_next;
         s->sample_rate = SAMPLING_FREQUENCY;
         s->decimate_factor = downsample_factor;
