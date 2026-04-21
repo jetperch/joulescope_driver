@@ -1733,6 +1733,10 @@ static void join(struct jsdrvp_ul_device_s * device) {
     if (d->drv && d->drv->finalize) {
         d->drv->finalize(d->drv);
     }
+    if (d->ul.cmd_q) {
+        msg_queue_finalize(d->ul.cmd_q, d->context);
+        d->ul.cmd_q = NULL;
+    }
     jsdrv_free(d);
 }
 

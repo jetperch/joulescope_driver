@@ -151,5 +151,5 @@ int32_t msg_queue_pop(struct msg_queue_s* queue, struct jsdrvp_msg_s ** msg, uin
 }
 
 msg_handle msg_queue_handle_get(struct msg_queue_s* queue) {
-    return queue->event->fd_poll;
+    return (NULL == queue) ? -1 : queue->event->fd_poll;
 }

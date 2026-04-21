@@ -994,6 +994,10 @@ static void finalize(struct jsdrvbk_s * backend) {
             d->ll_device.rsp_q = NULL;
         }
     }
+    if (s->hotplug_event) {
+        jsdrv_os_event_free(s->hotplug_event);
+        s->hotplug_event = NULL;
+    }
     jsdrv_free(s);
 }
 

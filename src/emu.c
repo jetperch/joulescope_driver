@@ -148,6 +148,10 @@ static void join(struct jsdrvp_ul_device_s * device) {
         }
 
                 JSDRV_LOGD3("js220 free %p", d);
+        if (d->ul.cmd_q) {
+            msg_queue_finalize(d->ul.cmd_q, d->context);
+            d->ul.cmd_q = NULL;
+        }
         jsdrv_free(d);
     }
 }
