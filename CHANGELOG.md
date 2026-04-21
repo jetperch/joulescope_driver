@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.0.4
+
+2026 Apr 21
+
+* Fixed SEGFAULT on macOS and crash on Linux detected by fuzz test.
+
+
 ## 2.0.3
 
 2026 Apr 20
