@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.0.5
+
+2026 Apr 22 [in progress]
+
+* Added latest stable JS320 firmware to image on release.
+
+
 ## 2.0.4
 
 2026 Apr 21
