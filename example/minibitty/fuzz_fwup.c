@@ -91,6 +91,7 @@ struct cfg_s {
     uint32_t fwup_timeout_ms;
     uint64_t max_duration_s;
     uint32_t repeat;
+    int do_reset;           ///< --reset: soft reset between iterations
     int stop_on_fail;
     int dry_run;
     int verbose;
@@ -415,7 +416,7 @@ static int wait_for_presence(bool desired, uint32_t timeout_ms) {
 }
 
 
-// --- Power cycle ---------------------------------------------------
+// --- Reset (soft and power-cycle) ---------------------------------
 
 static int publish_str(struct app_s * self, const char * device,
                        const char * subtopic, const char * value) {
@@ -425,6 +426,49 @@ static int publish_str(struct app_s * self, const char * device,
     return jsdrv_publish(self->context, topic.topic,
                          &jsdrv_union_cstr_r(value),
                          JSDRV_TIMEOUT_MS_DEFAULT);
+}
+
+// Soft reset via `h/fwup/ctrl/!cmd` LAUNCH op.  The device-side fwup
+// task treats LAUNCH as "set boot cmd, send response, reset" (see
+// minibitty/src/tasks/fwup.c MB_FWUP_OP_LAUNCH).  Target slot 0 asks
+// the bootloader to launch the primary image after reset; if that
+// slot is empty/invalid the bootloader's fallback path still runs,
+// which is a valid scenario for this test.
+static int soft_reset(struct app_s * self) {
+    // fwup_ctrl_cmd_s: transaction_id(u32), op(u8), image_slot(u8),
+    // pipeline_depth(u8), rsv(u8).
+    uint8_t cmd[8];
+    static uint32_t txn_id = 0;
+    ++txn_id;
+    memcpy(cmd, &txn_id, 4);
+    cmd[4] = 2;       // FWUP_CTRL_OP_LAUNCH
+    cmd[5] = 0;       // image_slot
+    cmd[6] = 0;       // pipeline_depth
+    cmd[7] = 0;       // rsv
+
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/fwup/ctrl/!cmd");
+    // Fire-and-forget: the device replies to !rsp and then resets
+    // ~100 ms later, so the publish's own ACK path can race with
+    // the reset and return TIMED_OUT.  We verify the reset landed
+    // by watching device add/remove events instead.
+    int32_t rc = jsdrv_publish(self->context, topic.topic,
+                               &jsdrv_union_bin(cmd, sizeof(cmd)),
+                               0);
+    if (rc) {
+        printf("  WARN: soft reset publish failed: %d\n", rc);
+    }
+    if (wait_for_presence(false, 2500)) {
+        printf("  ERROR: target did not disappear after soft reset\n");
+        return 1;
+    }
+    if (wait_for_presence(true, 5000)) {
+        printf("  ERROR: target did not re-enumerate after soft reset\n");
+        return 1;
+    }
+    jsdrv_thread_sleep_ms(500);
+    return 0;
 }
 
 static int power_cycle(struct app_s * self, const char * ps_topic) {
@@ -446,6 +490,7 @@ static int power_cycle(struct app_s * self, const char * ps_topic) {
     jsdrv_thread_sleep_ms(500);
     return 0;
 }
+
 
 
 // --- Fwup ----------------------------------------------------------
@@ -592,10 +637,15 @@ static int iterate_once(struct sweep_ctx_s * ctx, uint32_t mask,
     }
 
     // Phase 1: open prior-state device, erase selected blocks.
+    int use_power_cycle = (ctx->power_topic && ctx->power_topic[0]);
+    int use_soft_reset = (!use_power_cycle && cfg->do_reset);
+    int do_reset = use_power_cycle || use_soft_reset;
+
     int64_t t0 = jsdrv_time_utc();
     int erase_rc = jsdrv_open(self->context, self->device.topic,
                               JSDRV_DEVICE_OPEN_MODE_RESUME,
                               cfg->open_timeout_ms);
+    int device_open = (erase_rc == 0);
     if (erase_rc) {
         printf("  WARN: pre-erase open failed (%d); skipping erase\n",
                erase_rc);
@@ -605,41 +655,67 @@ static int iterate_once(struct sweep_ctx_s * ctx, uint32_t mask,
             erase_rc = erase_subset(self, mask);
         }
         mem_teardown(self);
+    }
+    // For power cycle we need the device closed before cutting power.
+    // For soft reset we leave it open so LAUNCH can be delivered.
+    if (device_open && use_power_cycle) {
         jsdrv_close(self->context, self->device.topic, 5000);
+        device_open = 0;
     }
     r->erase_ms = ms_since(t0);
     if (erase_rc) {
         // Keep going — the whole point is to test recovery from
-        // broken states, so proceed to power-cycle+fwup even if
-        // erase was incomplete.
+        // broken states, so proceed even if erase was incomplete.
         printf("  WARN: erase returned %d; continuing\n", erase_rc);
     }
 
-    // Phase 2: power-cycle.
-    int64_t t_pc = jsdrv_time_utc();
-    rc = power_cycle(self, ctx->power_topic);
-    r->power_cycle_ms = ms_since(t_pc);
-    if (rc) {
-        r->open_rc = rc;
-        return 1;
-    }
+    // Phase 2 (optional): reset between erase and fwup.
+    // Without --reset or --power, the device keeps running with its
+    // in-RAM metadata while flash is erased; fwup will re-read the
+    // flash during its own open and restore.  With a reset, we force
+    // a cold boot so fwup sees a freshly-booted broken device.
+    if (do_reset) {
+        int64_t t_pc = jsdrv_time_utc();
+        if (use_power_cycle) {
+            rc = power_cycle(self, ctx->power_topic);
+        } else if (device_open) {
+            rc = soft_reset(self);
+            jsdrv_close(self->context, self->device.topic, 5000);
+            device_open = 0;
+        } else {
+            // No soft-reset path available; device is closed.  Wait
+            // briefly in case something else brings it back.
+            printf("  WARN: cannot soft-reset (device not open); "
+                   "waiting on re-enum\n");
+            rc = wait_for_presence(true, 5000);
+        }
+        r->power_cycle_ms = ms_since(t_pc);
+        if (rc) {
+            r->open_rc = rc;
+            return 1;
+        }
 
-    // Rematch after re-enumeration.
-    rc = app_match(self, cfg->target_filter);
-    if (rc) {
-        printf("  ERROR: target did not re-enumerate after power cycle\n");
-        r->open_rc = rc;
-        return 1;
-    }
+        // Rematch after re-enumeration.
+        rc = app_match(self, cfg->target_filter);
+        if (rc) {
+            printf("  ERROR: target did not re-enumerate after reset\n");
+            r->open_rc = rc;
+            return 1;
+        }
 
-    // Phase 3: measure device open (system-under-test).
-    int64_t t_open = jsdrv_time_utc();
-    r->open_rc = jsdrv_open(self->context, self->device.topic,
-                            JSDRV_DEVICE_OPEN_MODE_RESUME,
-                            cfg->open_timeout_ms);
-    r->open_ms = ms_since(t_open);
-    // Close regardless — fwup will open again.
-    jsdrv_close(self->context, self->device.topic, 5000);
+        // Phase 3: measure device open (system-under-test on a
+        // freshly-booted broken device).
+        int64_t t_open = jsdrv_time_utc();
+        r->open_rc = jsdrv_open(self->context, self->device.topic,
+                                JSDRV_DEVICE_OPEN_MODE_RESUME,
+                                cfg->open_timeout_ms);
+        r->open_ms = ms_since(t_open);
+        jsdrv_close(self->context, self->device.topic, 5000);
+    } else if (device_open) {
+        // No reset requested: just close cleanly so fwup can open.
+        jsdrv_close(self->context, self->device.topic, 5000);
+        device_open = 0;
+    }
 
     // Phase 4: fwup (restore + under-test path).
     int64_t t_fw = jsdrv_time_utc();
@@ -761,8 +837,21 @@ static int usage(void) {
         "\n"
         "Verify JS320 open+fwup recovery for broken data-block subsets.\n"
         "\n"
+        "By default, each iteration erases the selected blocks and then\n"
+        "invokes fwup to recover; fwup handles its own opens internally.\n"
+        "--reset inserts a soft reset (h/fwup/ctrl/!cmd LAUNCH) between\n"
+        "erase and fwup so the open path is measured against a freshly\n"
+        "booted broken device.  --power <filter> uses a JS220 power\n"
+        "cycle instead (overrides --reset) for deeper recovery.\n"
+        "\n"
         "Options:\n"
-        "  --power <filter>        JS220 power device filter (required).\n"
+        "  --reset                 Soft-reset target between erase and\n"
+        "                            fwup; also measures open time on\n"
+        "                            the freshly-booted broken device.\n"
+        "  --power <filter>        JS220 power supply filter.  When set,\n"
+        "                            each iteration hard power-cycles\n"
+        "                            the target via the JS220 instead\n"
+        "                            of a soft reset.  Optional.\n"
         "  --depth <N>             Subset Hamming max (default: 1):\n"
         "                            1=singles (6),  2=pairs (21),\n"
         "                            3..6=up through that weight,\n"
@@ -835,6 +924,9 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
                 return usage();
             }
             ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--reset")) {
+            cfg.do_reset = 1;
+            ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--stop-on-fail")) {
             cfg.stop_on_fail = 1;
             ARG_CONSUME();
@@ -882,10 +974,6 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
         printf("missing release zip\n");
         return usage();
     }
-    if (!cfg.power_filter) {
-        printf("missing --power\n");
-        return usage();
-    }
 
     // Build the subset list.
     uint32_t masks[64];
@@ -899,7 +987,14 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
 
     printf("fuzz_fwup:\n");
     printf("  release: %s\n", cfg.release_zip);
-    printf("  power:   %s\n", cfg.power_filter);
+    const char * reset_mode =
+        cfg.power_filter ? "JS220 power cycle" :
+        cfg.do_reset     ? "soft reset (LAUNCH)" :
+                           "none";
+    printf("  reset:   %s\n", reset_mode);
+    if (cfg.power_filter) {
+        printf("  power:   %s\n", cfg.power_filter);
+    }
     printf("  target:  %s\n", cfg.target_filter ? cfg.target_filter : "(first)");
     printf("  depth=%u repeat=%u stop_on_fail=%d\n",
            cfg.depth, cfg.repeat, cfg.stop_on_fail);
@@ -925,11 +1020,13 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
         return 1;
     }
 
-    // Match power supply and open it.
-    ROE(app_match(self, cfg.power_filter));
     struct jsdrv_topic_s power_topic;
-    jsdrv_topic_set(&power_topic, self->device.topic);
-    printf("Power device: %s\n", power_topic.topic);
+    jsdrv_topic_clear(&power_topic);
+    if (cfg.power_filter) {
+        ROE(app_match(self, cfg.power_filter));
+        jsdrv_topic_set(&power_topic, self->device.topic);
+        printf("Power device: %s\n", power_topic.topic);
+    }
 
     // Target prefix for add/remove tracking:
     target_prefix_ = cfg.target_filter ? cfg.target_filter : "u/js320/";
@@ -943,16 +1040,18 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
     ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_REMOVE,
                         JSDRV_SFLAG_PUB, on_device_remove, self, 0));
 
-    // Open power supply.
-    int32_t rc = jsdrv_open(self->context, power_topic.topic,
-                            JSDRV_DEVICE_OPEN_MODE_RESUME,
-                            JSDRV_TIMEOUT_MS_DEFAULT);
-    if (rc) {
-        printf("ERROR: power open failed: %d\n", rc);
-        free(zip_data);
-        return rc;
+    int32_t rc = 0;
+    if (cfg.power_filter) {
+        rc = jsdrv_open(self->context, power_topic.topic,
+                        JSDRV_DEVICE_OPEN_MODE_RESUME,
+                        JSDRV_TIMEOUT_MS_DEFAULT);
+        if (rc) {
+            printf("ERROR: power open failed: %d\n", rc);
+            free(zip_data);
+            return rc;
+        }
+        publish_str(self, power_topic.topic, "s/i/range/select", "10 A");
     }
-    publish_str(self, power_topic.topic, "s/i/range/select", "10 A");
 
     // Subscribe to fwup status updates (once).
     fwup_subscribe(self);
@@ -969,7 +1068,7 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
     struct sweep_ctx_s ctx = {
         .self = self,
         .cfg = &cfg,
-        .power_topic = power_topic.topic,
+        .power_topic = cfg.power_filter ? power_topic.topic : NULL,
         .zip_data = zip_data,
         .zip_size = zip_size,
     };
@@ -985,8 +1084,10 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
                       on_device_add, self, 0);
     jsdrv_unsubscribe(self->context, JSDRV_MSG_DEVICE_REMOVE,
                       on_device_remove, self, 0);
-    jsdrv_close(self->context, power_topic.topic,
-                JSDRV_TIMEOUT_MS_DEFAULT);
+    if (cfg.power_filter) {
+        jsdrv_close(self->context, power_topic.topic,
+                    JSDRV_TIMEOUT_MS_DEFAULT);
+    }
     if (mem_.sem) {
         jsdrv_os_sem_free(mem_.sem);
         mem_.sem = NULL;
@@ -1003,8 +1104,13 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
         for (uint32_t i = 0; i < failed_count; ++i) {
             printf(" 0x%02X", failed[i]);
         }
-        printf("\n  rerun: minibitty fuzz_fwup --power %s --subsets ",
-               cfg.power_filter);
+        printf("\n  rerun: minibitty fuzz_fwup ");
+        if (cfg.power_filter) {
+            printf("--power %s ", cfg.power_filter);
+        } else if (cfg.do_reset) {
+            printf("--reset ");
+        }
+        printf("--subsets ");
         for (uint32_t i = 0; i < failed_count; ++i) {
             printf("%s0x%02X", (i ? "," : ""), failed[i]);
         }
