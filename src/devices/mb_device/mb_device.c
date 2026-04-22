@@ -1002,7 +1002,18 @@ static bool transitions_evaluate(struct jsdrvp_mb_dev_s * self, uint8_t state, u
 
 static void state_machine_process(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     if (!transitions_evaluate(self, 0, event)) {
-        transitions_evaluate(self, self->state, event);
+        if (!transitions_evaluate(self, self->state, event)) {
+            // API-level events (OPEN/CLOSE) should never be silently
+            // dropped — a dropped OPEN leaves the caller's jsdrv_open
+            // waiting for a completion signal that will never arrive.
+            // Log so races are visible; the caller will still time out,
+            // but at least the root cause is traceable in the log.
+            if (event == EV_API_OPEN_REQUEST || event == EV_API_CLOSE_REQUEST) {
+                JSDRV_LOGW("state_machine: dropped API event %u in state %u (%s)",
+                           (unsigned) event, (unsigned) self->state,
+                           state_machine_states[self->state].name);
+            }
+        }
     }
 }
 
