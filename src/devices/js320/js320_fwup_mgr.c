@@ -720,11 +720,21 @@ static JSDRV_THREAD_RETURN_TYPE worker_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
 
     w->state = WST_DONE;
     w->result = 0;
-    worker_publish_status(w, "complete");
 
 close_done:
     if (device_opened) {
         worker_close(w);
+        device_opened = false;
+    }
+    // Publish the terminal "complete" status *after* worker_close has
+    // torn the device down.  The mb_device state machine silently drops
+    // EV_API_OPEN_REQUEST outside of ST_CLOSED, so a consumer that
+    // reopens as soon as it sees DONE would otherwise race with the
+    // close path and hang for jsdrv_open's full timeout.  Error paths
+    // already publish their status via worker_fail before jumping here,
+    // so this only fires on the happy path.
+    if (w->state == WST_DONE) {
+        worker_publish_status(w, "complete");
     }
 
 done:
