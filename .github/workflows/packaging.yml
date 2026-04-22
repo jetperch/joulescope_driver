@@ -139,6 +139,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --upgrade wheel setuptools build
 
+      - name: Embed JS320 firmware
+        run: python tools/embed_js320_firmware.py
+
       - name: Build sdist
         run: python -m build --sdist
 
