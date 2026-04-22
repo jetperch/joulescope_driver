@@ -234,6 +234,74 @@ class TestMainEndToEnd(unittest.TestCase):
             self.assertIn('#define JS320_FIRMWARE_SIZE          5', h)
             self.assertIn('0x01, 0x02, 0x03, 0x04, 0x05,', c)
 
+    def test_zip_arg_uses_local_file(self):
+        data = b'\x10\x20\x30\x40'
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = os.path.join(tmp, 'local.zip')
+            with open(zpath, 'wb') as f:
+                f.write(data)
+            hpath = os.path.join(tmp, 'firmware.h')
+            cpath = os.path.join(tmp, 'firmware.c')
+            argv = ['embed', '--zip', zpath, '--version', '7.8.9',
+                    '--output-h', hpath, '--output-c', cpath]
+            # urlopen should never be called when --zip is used.
+            with mock.patch('urllib.request.urlopen',
+                            side_effect=AssertionError('no network allowed')), \
+                 mock.patch.object(sys, 'argv', argv):
+                rc = embed.main()
+            self.assertEqual(rc, 0)
+            with open(hpath, 'r', encoding='utf-8') as f:
+                h = f.read()
+            with open(cpath, 'r', encoding='utf-8') as f:
+                c = f.read()
+            self.assertIn('#define JS320_FIRMWARE_VERSION_MAJOR 7', h)
+            self.assertIn('#define JS320_FIRMWARE_VERSION_MINOR 8', h)
+            self.assertIn('#define JS320_FIRMWARE_VERSION_PATCH 9', h)
+            self.assertIn('#define JS320_FIRMWARE_SIZE          4', h)
+            self.assertIn('0x10, 0x20, 0x30, 0x40,', c)
+
+    def test_zip_without_version_defaults_to_zero(self):
+        data = b'\x01'
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = os.path.join(tmp, 'local.zip')
+            with open(zpath, 'wb') as f:
+                f.write(data)
+            hpath = os.path.join(tmp, 'firmware.h')
+            cpath = os.path.join(tmp, 'firmware.c')
+            argv = ['embed', '--zip', zpath,
+                    '--output-h', hpath, '--output-c', cpath]
+            with mock.patch('urllib.request.urlopen',
+                            side_effect=AssertionError('no network allowed')), \
+                 mock.patch.object(sys, 'argv', argv):
+                rc = embed.main()
+            self.assertEqual(rc, 0)
+            with open(hpath, 'r', encoding='utf-8') as f:
+                h = f.read()
+            self.assertIn('#define JS320_FIRMWARE_VERSION_MAJOR 0', h)
+            self.assertIn('#define JS320_FIRMWARE_VERSION_MINOR 0', h)
+            self.assertIn('#define JS320_FIRMWARE_VERSION_PATCH 0', h)
+
+    def test_zip_nonexistent_raises(self):
+        argv = ['embed', '--zip', '/nonexistent/path.zip',
+                '--version', '1.0.0']
+        with mock.patch.object(sys, 'argv', argv):
+            with self.assertRaisesRegex(RuntimeError, 'not found'):
+                embed.main()
+
+    def test_version_without_zip_rejected(self):
+        argv = ['embed', '--version', '1.0.0']
+        with mock.patch.object(sys, 'argv', argv):
+            with self.assertRaises(SystemExit):
+                embed.main()
+
+    def test_parse_version_rejects_bad_input(self):
+        with self.assertRaises(ValueError):
+            embed.parse_version('1.2')
+        with self.assertRaises(ValueError):
+            embed.parse_version('1.2.3.4')
+        with self.assertRaises(ValueError):
+            embed.parse_version('v1.2.3')
+
     def test_missing_stable_entry_raises(self):
         http = _FakeHttp({
             INDEX_URL: json.dumps({'js320': {}}).encode('utf-8'),

@@ -28,9 +28,11 @@ static volatile int32_t fwup_rc_ = 0;
 
 static int usage(void) {
     printf(
-        "usage: minibitty fwup <package.zip> [device_filter]\n"
+        "usage: minibitty fwup <package.zip|-> [device_filter]\n"
         "\n"
         "Perform full JS320 firmware update from manufacturing package.\n"
+        "Pass `-` instead of a path to use the firmware image embedded\n"
+        "in this driver build.\n"
         "\n"
         "Options:\n"
         "  --skip-ctrl       Skip ctrl firmware update\n"
@@ -104,6 +106,10 @@ int on_fwup(struct app_s * self, int argc, char * argv[]) {
         } else if (0 == strcmp(argv[0], "--skip-resources")) {
             flags |= JSDRV_FWUP_FLAG_SKIP_RESOURCES;
             ARG_CONSUME();
+        } else if (!zip_path && 0 == strcmp(argv[0], "-")) {
+            // "-" means "use the firmware embedded in the driver".
+            zip_path = argv[0];
+            ARG_CONSUME();
         } else if (argv[0][0] == '-') {
             printf("Unknown option: %s\n", argv[0]);
             return usage();
@@ -117,32 +123,43 @@ int on_fwup(struct app_s * self, int argc, char * argv[]) {
     }
 
     if (!zip_path) {
-        printf("ERROR: package.zip path is required.\n");
+        printf("ERROR: package.zip path is required (use `-` for embedded).\n");
         return usage();
     }
 
     ROE(app_match(self, device_filter));
     printf("Target device: %s\n", self->device.topic);
 
-    // Read ZIP
+    // Read ZIP (or signal "use embedded" by leaving zip_data NULL and zip_size 0).
     uint32_t zip_size = 0;
-    uint8_t * zip_data = file_read(zip_path, &zip_size);
-    if (!zip_data) {
-        printf("ERROR: could not read %s\n", zip_path);
-        return 1;
+    uint8_t * zip_data = NULL;
+    bool use_embedded = (0 == strcmp(zip_path, "-"));
+    if (use_embedded) {
+        printf("Package: (embedded firmware)\n");
+    } else {
+        zip_data = file_read(zip_path, &zip_size);
+        if (!zip_data) {
+            printf("ERROR: could not read %s\n", zip_path);
+            return 1;
+        }
+        printf("Package: %s (%u bytes)\n", zip_path, zip_size);
     }
-    printf("Package: %s (%u bytes)\n", zip_path, zip_size);
 
     // Subscribe to status updates from all fwup instances
     jsdrv_subscribe(self->context, "fwup/", JSDRV_SFLAG_PUB,
                     on_status, self, 0);
 
-    // Build payload: header + ZIP data
+    // Build payload: header + optional ZIP data.
+    // When zip_size is 0 (embedded path), the manager uses the driver's
+    // built-in js320_firmware[] and returns JSDRV_ERROR_UNAVAILABLE on
+    // stub builds that have no embedded firmware.
     uint32_t hdr_size = sizeof(struct jsdrv_fwup_add_header_s);
     uint32_t payload_size = hdr_size + zip_size;
     uint8_t * payload = (uint8_t *) malloc(payload_size);
     if (!payload) {
-        free(zip_data);
+        if (zip_data) {
+            free(zip_data);
+        }
         printf("ERROR: malloc failed\n");
         return 1;
     }
@@ -154,8 +171,12 @@ int on_fwup(struct app_s * self, int argc, char * argv[]) {
                     sizeof(hdr->device_prefix));
     hdr->flags = flags;
     hdr->zip_size = zip_size;
-    memcpy(payload + hdr_size, zip_data, zip_size);
-    free(zip_data);
+    if (zip_size) {
+        memcpy(payload + hdr_size, zip_data, zip_size);
+    }
+    if (zip_data) {
+        free(zip_data);
+    }
 
     // Publish to fwup/@/!add — the manager handles it
     fwup_done_ = false;

@@ -349,6 +349,29 @@ static void test_add_header_payload_layout(void ** state) {
 
 
 // =====================================================================
+// Tests: add command response
+// =====================================================================
+
+static void test_add_rsp_size(void ** state) {
+    (void) state;
+    // Compile-time assert is in js320_fwup_mgr.c; runtime check here
+    assert_int_equal(8, sizeof(struct jsdrv_fwup_add_rsp_s));
+}
+
+static void test_add_rsp_fields(void ** state) {
+    (void) state;
+    struct jsdrv_fwup_add_rsp_s rsp = { .rc = 0, .worker_id = 42 };
+    assert_int_equal(0, rsp.rc);
+    assert_int_equal(42, rsp.worker_id);
+
+    struct jsdrv_fwup_add_rsp_s err_rsp = {
+        .rc = JSDRV_ERROR_UNAVAILABLE, .worker_id = 0 };
+    assert_int_equal(JSDRV_ERROR_UNAVAILABLE, err_rsp.rc);
+    assert_int_equal(0, err_rsp.worker_id);
+}
+
+
+// =====================================================================
 // Tests: flags enum values
 // =====================================================================
 
@@ -400,6 +423,8 @@ int main(void) {
 
         // Add header
         cmocka_unit_test(test_add_header_size),
+        cmocka_unit_test(test_add_rsp_size),
+        cmocka_unit_test(test_add_rsp_fields),
         cmocka_unit_test(test_add_header_fields),
         cmocka_unit_test(test_add_header_prefix_max_length),
         cmocka_unit_test(test_add_header_payload_layout),

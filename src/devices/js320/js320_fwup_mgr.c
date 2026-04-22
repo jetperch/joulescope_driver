@@ -16,6 +16,7 @@
 
 #define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
 #include "jsdrv_prv/devices/js320/js320_fwup_mgr.h"
+#include "jsdrv_prv/devices/js320/firmware.h"
 #include "jsdrv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
@@ -33,6 +34,7 @@
 #include <string.h>
 
 JSDRV_STATIC_ASSERT(sizeof(struct jsdrv_fwup_add_header_s) == 40, fwup_add_hdr_size);
+JSDRV_STATIC_ASSERT(sizeof(struct jsdrv_fwup_add_rsp_s) == 8, fwup_add_rsp_size);
 
 
 // =====================================================================
@@ -790,11 +792,13 @@ static void mgr_publish_list(void) {
                          &jsdrv_union_cstr_r(buf));
 }
 
-static int32_t mgr_send_return_code(const char * topic, int32_t rc) {
-    struct jsdrvp_msg_s * m;
-    m = jsdrvp_msg_alloc_value(mgr_.context, "", &jsdrv_union_i32(rc));
+static int32_t mgr_send_add_rsp(int32_t rc, uint32_t worker_id) {
+    struct jsdrv_fwup_add_rsp_s rsp = { .rc = rc, .worker_id = worker_id };
+    // cbin_r: pubsub layer retains (copies) the bytes, so stack storage is safe.
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(mgr_.context, "",
+        &jsdrv_union_cbin_r((const uint8_t *) &rsp, sizeof(rsp)));
     tfp_snprintf(m->topic, sizeof(m->topic), "%s%c",
-                 topic, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
+                 JSDRV_FWUP_MGR_TOPIC_ADD, JSDRV_TOPIC_SUFFIX_RETURN_CODE);
     m->extra.frontend.subscriber.internal_fn = mgr_on_add;
     m->extra.frontend.subscriber.user_data = NULL;
     m->extra.frontend.subscriber.is_internal = 1;
@@ -820,7 +824,8 @@ static void mgr_cleanup_done(void) {
 }
 
 static int32_t mgr_start_worker(const char * device_prefix, uint32_t flags,
-                                const uint8_t * zip_data, uint32_t zip_size) {
+                                const uint8_t * zip_data, uint32_t zip_size,
+                                uint32_t * out_worker_id) {
     mgr_cleanup_done();
 
     struct worker_s * w = NULL;
@@ -860,6 +865,9 @@ static int32_t mgr_start_worker(const char * device_prefix, uint32_t flags,
 
     mgr_publish_list();
     JSDRV_LOGI("fwup: started %03u for %s", w->id, device_prefix);
+    if (out_worker_id) {
+        *out_worker_id = w->id;
+    }
     return 0;
 }
 
@@ -868,8 +876,7 @@ static uint8_t mgr_on_add(void * user_data, struct jsdrvp_msg_s * msg) {
     if (msg->value.type != JSDRV_UNION_BIN
             || msg->value.size < sizeof(struct jsdrv_fwup_add_header_s)) {
         JSDRV_LOGW("fwup: invalid add payload");
-        return mgr_send_return_code(JSDRV_FWUP_MGR_TOPIC_ADD,
-                                    JSDRV_ERROR_PARAMETER_INVALID);
+        return (uint8_t) mgr_send_add_rsp(JSDRV_ERROR_PARAMETER_INVALID, 0);
     }
 
     const struct jsdrv_fwup_add_header_s * hdr =
@@ -880,13 +887,29 @@ static uint8_t mgr_on_add(void * user_data, struct jsdrvp_msg_s * msg) {
 
     if (msg->value.size < sizeof(struct jsdrv_fwup_add_header_s) + zip_size) {
         JSDRV_LOGW("fwup: payload too small for zip_size");
-        return mgr_send_return_code(JSDRV_FWUP_MGR_TOPIC_ADD,
-                                    JSDRV_ERROR_PARAMETER_INVALID);
+        return (uint8_t) mgr_send_add_rsp(JSDRV_ERROR_PARAMETER_INVALID, 0);
     }
 
+    // Empty zip => use the firmware embedded in this driver build.
+    if (zip_size == 0) {
+        if (JS320_FIRMWARE_SIZE == 0) {
+            JSDRV_LOGW("fwup: empty zip requested but no embedded firmware "
+                       "(stub build)");
+            return (uint8_t) mgr_send_add_rsp(JSDRV_ERROR_UNAVAILABLE, 0);
+        }
+        zip_data = js320_firmware;
+        zip_size = JS320_FIRMWARE_SIZE;
+        JSDRV_LOGI("fwup: using embedded firmware (%u bytes, v%u.%u.%u)",
+                   (unsigned) JS320_FIRMWARE_SIZE,
+                   (unsigned) JS320_FIRMWARE_VERSION_MAJOR,
+                   (unsigned) JS320_FIRMWARE_VERSION_MINOR,
+                   (unsigned) JS320_FIRMWARE_VERSION_PATCH);
+    }
+
+    uint32_t worker_id = 0;
     int32_t rc = mgr_start_worker(hdr->device_prefix, hdr->flags,
-                                  zip_data, zip_size);
-    return mgr_send_return_code(JSDRV_FWUP_MGR_TOPIC_ADD, rc);
+                                  zip_data, zip_size, &worker_id);
+    return (uint8_t) mgr_send_add_rsp(rc, (rc == 0) ? worker_id : 0);
 }
 
 // Internal subscribe/unsubscribe helpers (follows buffer.c pattern)

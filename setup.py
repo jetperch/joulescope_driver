@@ -141,6 +141,7 @@ extensions = [
                                      'src/devices/js220/js220_params.c',
                                      'src/devices/js220/js220_usb.c',
                                      'src/devices/js220/js220_stats.c',
+                                     'src/devices/js320/firmware.c',
                                      'src/devices/js320/js320_drv.c',
                                      'src/devices/js320/js320_fwup.c',
                                      'src/devices/js320/js320_fwup_mgr.c',

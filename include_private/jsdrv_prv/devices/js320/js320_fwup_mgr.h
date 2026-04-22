@@ -57,11 +57,30 @@ enum jsdrv_fwup_flags_e {
  * @brief Header for the fwup/@/!add command payload.
  *
  * The payload is: header + ZIP data.
+ *
+ * When @ref zip_size is 0 (no ZIP data follows), the manager uses the
+ * firmware embedded in the driver itself (see
+ * `include_private/jsdrv_prv/devices/js320/firmware.h`).  If the driver
+ * was built with an empty stub (JS320_FIRMWARE_SIZE == 0), the command
+ * returns JSDRV_ERROR_UNAVAILABLE.
  */
 struct jsdrv_fwup_add_header_s {
     char device_prefix[32];     ///< Target device prefix (e.g., "u/js320/8w2a")
     uint32_t flags;             ///< jsdrv_fwup_flags_e
-    uint32_t zip_size;          ///< Size of ZIP data following this header
+    uint32_t zip_size;          ///< Size of ZIP data following this header, or 0 to use embedded firmware
+};
+
+/**
+ * @brief Response published to fwup/@/!add# on each command.
+ *
+ * On success, @ref rc is 0 and @ref worker_id identifies the worker so
+ * the caller can subscribe to `fwup/NNN/status` for progress updates.
+ * On failure, @ref rc is a nonzero JSDRV_ERROR_* code and @ref worker_id
+ * is 0.
+ */
+struct jsdrv_fwup_add_rsp_s {
+    int32_t rc;                 ///< 0 on success, JSDRV_ERROR_* on failure
+    uint32_t worker_id;         ///< Assigned worker id (valid iff rc == 0)
 };
 
 /**

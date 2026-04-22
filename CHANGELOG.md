@@ -9,6 +9,14 @@ This file contains the list of changes made to the Joulescope driver.
 2026 Apr 22 [in progress]
 
 * Added latest stable JS320 firmware to image on release.
+* fwup/@/!add: response payload changed from int32 rc to an 8-byte
+  struct `{int32_t rc, uint32_t worker_id}` so callers can subscribe
+  to the specific `fwup/NNN/status` their request spawned.  zip_size
+  of 0 in the add header now uses the JS320 firmware embedded in the
+  driver instead of caller-supplied bytes; stub builds return
+  JSDRV_ERROR_UNAVAILABLE.
+* example/minibitty fwup: accept `-` as the package path to program
+  with the driver's embedded firmware.
 
 
 ## 2.0.4

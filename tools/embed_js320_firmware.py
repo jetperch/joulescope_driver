@@ -23,12 +23,19 @@ image, verifies size and SHA-256, and regenerates:
 Run from the repository root, before `python -m build --sdist`:
     python tools/embed_js320_firmware.py
     python tools/embed_js320_firmware.py --dry-run   # verify without writing
+
+For development boards whose keys don't match the official release, embed
+a locally-built zip instead:
+    python tools/embed_js320_firmware.py --zip path/to/js320_p1_mfg.zip \\
+        --version 0.4.3
+When --zip is given, --index-url is ignored and no network access happens.
 """
 
 import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -117,6 +124,34 @@ const uint8_t js320_firmware[JS320_FIRMWARE_SIZE] = {{
 """
 
 
+_VERSION_RE = re.compile(r'^(\d+)\.(\d+)\.(\d+)$')
+
+
+def parse_version(s):
+    m = _VERSION_RE.match(s.strip())
+    if not m:
+        raise ValueError(f'expected major.minor.patch, got {s!r}')
+    return tuple(int(p) for p in m.groups())
+
+
+def load_local_zip(path, version_str):
+    if not os.path.isfile(path):
+        raise RuntimeError(f'zip not found: {path}')
+    with open(path, 'rb') as f:
+        data = f.read()
+    if not version_str:
+        # Unknown version when using a local zip — emit zeros and warn.
+        # Nothing in the driver currently reads these macros, but picking
+        # a deliberate sentinel makes it obvious in a header diff that
+        # this build came from a dev image, not a release.
+        print('WARNING: --version not provided with --zip; using 0.0.0. '
+              'Pass --version X.Y.Z to stamp a real version.')
+        version = (0, 0, 0)
+    else:
+        version = parse_version(version_str)
+    return data, version
+
+
 def write_if_changed(path, content):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     # Compare before writing so unchanged regens don't touch mtimes and
@@ -135,6 +170,13 @@ def main():
         description='Embed the latest stable JS320 firmware image.')
     parser.add_argument('--index-url', default=_DEFAULT_INDEX_URL,
                         help=f'index.json URL (default: {_DEFAULT_INDEX_URL})')
+    parser.add_argument('--zip',
+                        help='Path to a local fwup zip to embed instead of '
+                             'fetching from --index-url. Use for dev-signed '
+                             'builds whose keys differ from production.')
+    parser.add_argument('--version',
+                        help='Version "M.m.p" to stamp into firmware.h when '
+                             'using --zip. Defaults to 0.0.0 with a warning.')
     parser.add_argument('--output-h', default=_DEFAULT_H_PATH,
                         help=f'header output path (default: {_DEFAULT_H_PATH})')
     parser.add_argument('--output-c', default=_DEFAULT_C_PATH,
@@ -143,21 +185,31 @@ def main():
                         help='Fetch and verify, but do not write files')
     args = parser.parse_args()
 
-    index = fetch_index(args.index_url)
-    try:
-        entry = index['js320']['stable']
-    except KeyError:
-        raise RuntimeError(
-            f'no js320.stable entry in {args.index_url}')
+    if args.zip:
+        data, version = load_local_zip(args.zip, args.version)
+        print(f'source:   {args.zip} (local, skipping network fetch)')
+        print(f'version:  {".".join(str(v) for v in version)}')
+        print(f'size:     {len(data)} bytes')
+        print(f'sha256:   {hashlib.sha256(data).hexdigest()}')
+    else:
+        if args.version:
+            raise SystemExit('--version is only meaningful with --zip; '
+                             'without --zip the version comes from index.json')
+        index = fetch_index(args.index_url)
+        try:
+            entry = index['js320']['stable']
+        except KeyError:
+            raise RuntimeError(
+                f'no js320.stable entry in {args.index_url}')
 
-    data, image_url = fetch_image(args.index_url, entry)
-    version = tuple(entry['version'])
+        data, image_url = fetch_image(args.index_url, entry)
+        version = tuple(entry['version'])
 
-    print(f'index:    {args.index_url}')
-    print(f'image:    {image_url}')
-    print(f'version:  {".".join(str(v) for v in version)}')
-    print(f'size:     {len(data)} bytes')
-    print(f'sha256:   {entry["sha256"]}')
+        print(f'index:    {args.index_url}')
+        print(f'image:    {image_url}')
+        print(f'version:  {".".join(str(v) for v in version)}')
+        print(f'size:     {len(data)} bytes')
+        print(f'sha256:   {entry["sha256"]}')
 
     h_content = generate_header(version, len(data))
     c_content = generate_source(data)

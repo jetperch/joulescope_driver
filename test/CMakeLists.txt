@@ -104,6 +104,7 @@ add_executable(frontend_test frontend_test.c
         ../src/devices/js110/js110_usb.c
         ../src/devices/js220/js220_usb.c
         ../src/devices/js220/js220_params.c
+        ../src/devices/js320/firmware.c
         ../src/devices/js320/js320_drv.c
         ../src/devices/js320/js320_fwup.c
         ../src/devices/js320/js320_fwup_mgr.c

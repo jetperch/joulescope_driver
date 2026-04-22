@@ -303,12 +303,23 @@ static uint8_t on_return_code(void * user_data, struct jsdrvp_msg_s * msg) {
     char value_str[128];
     jsdrv_union_value_to_str(&msg->value, value_str, sizeof(value_str), 1);
     JSDRV_LOGD1("on_return_code(%s) %s", msg->topic, value_str);
-    if (msg->value.type != JSDRV_UNION_I32) {
+
+    int32_t rc;
+    if (msg->value.type == JSDRV_UNION_I32) {
+        rc = msg->value.value.i32;
+    } else if (msg->value.type == JSDRV_UNION_BIN
+               && msg->value.size >= sizeof(int32_t)) {
+        // Extended response payloads place an int32_t rc in the first 4 bytes
+        // and may carry additional fields (e.g. fwup/@/!add returns
+        // {rc, worker_id}).  Subscribers that only care about rc see the
+        // same synchronous publish semantics as legacy i32 senders.
+        memcpy(&rc, msg->value.value.bin, sizeof(rc));
+    } else {
         JSDRV_LOGW("on_return_code %s unsupported type %d", msg->topic, msg->value.type);
         return 0;
     }
 
-    timeout_complete(c, msg->topic,msg->value.value.i32);
+    timeout_complete(c, msg->topic, rc);
     return 0;
 }
 

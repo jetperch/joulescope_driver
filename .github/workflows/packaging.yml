@@ -29,8 +29,34 @@ env:
 
 jobs:
 
+  firmware_update:
+    name: Embed JS320 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Embed firmware
+        run: python tools/embed_js320_firmware.py
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: joulescope_driver
+          path: |
+            include_private/jsdrv_prv/devices/js320/firmware.h
+            src/devices/js320/firmware.c
+          if-no-files-found: error
+
   build_native_win:
     name: Build native on windows-latest
+    needs:
+      - firmware_update
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -41,6 +67,12 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
+
+      - name: Download JS320 firmware
+        uses: actions/download-artifact@v6
+        with:
+          name: joulescope_driver
+          path: .
 
       - name: Build
         run: |
@@ -75,6 +107,8 @@ jobs:
 
   build_native_posix:
     name: Build native on ${{ matrix.os }}
+    needs:
+      - firmware_update
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -83,6 +117,12 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
+
+      - name: Download JS320 firmware
+        uses: actions/download-artifact@v6
+        with:
+          name: joulescope_driver
+          path: .
 
       - name: Install Ubuntu dependencies
         if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm'
@@ -110,6 +150,8 @@ jobs:
 
   build_python_sdist:
     name: Build python sdist
+    needs:
+      - firmware_update
     runs-on: ubuntu-latest
     steps:
       - name: Display info
@@ -128,6 +170,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v6
 
+      - name: Download JS320 firmware
+        uses: actions/download-artifact@v6
+        with:
+          name: joulescope_driver
+          path: .
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -138,9 +186,6 @@ jobs:
           python -VV
           python -m pip install --upgrade pip
           python -m pip install --upgrade wheel setuptools build
-
-      - name: Embed JS320 firmware
-        run: python tools/embed_js320_firmware.py
 
       - name: Build sdist
         run: python -m build --sdist
@@ -250,6 +295,8 @@ jobs:
 
   build_node_js:
     name: build_node_js_${{ matrix.os }}
+    needs:
+      - firmware_update
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -259,6 +306,12 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
+
+      - name: Download JS320 firmware
+        uses: actions/download-artifact@v6
+        with:
+          name: joulescope_driver
+          path: .
 
       - name: Install Ubuntu dependencies
         if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm'
