@@ -57,6 +57,7 @@ add_executable(minibitty_exe
         minibitty/firmware.c
         minibitty/force_remove.c
         minibitty/fpga_mem.c
+        minibitty/fuzz_fwup.c
         minibitty/fwup.c
         minibitty/hotplug.c
         minibitty/info.c

@@ -92,6 +92,7 @@ int on_firmware(struct app_s * self, int argc, char * argv[]);
 int on_fwup(struct app_s * self, int argc, char * argv[]);
 int on_force_remove(struct app_s * self, int argc, char * argv[]);
 int on_fpga_mem(struct app_s * self, int argc, char * argv[]);
+int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]);
 int on_help(struct app_s * self, int argc, char * argv[]);
 int on_hotplug(struct app_s * self, int argc, char * argv[]);
 int on_info(struct app_s * self, int argc, char * argv[]);

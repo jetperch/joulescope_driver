@@ -131,6 +131,7 @@ const struct command_s COMMANDS[] = {
         {"firmware", on_firmware, "Update device firmware"},
         {"force_remove", on_force_remove, "Stress test: force-remove DUT during streaming"},
         {"fpga_mem", on_fpga_mem, "Program FPGA flash memory"},
+        {"fuzz_fwup", on_fuzz_fwup, "Fuzz device state and verify open+fwup recovery"},
         {"fwup", on_fwup, "Full firmware update from manufacturing package"},
         {"hotplug", on_hotplug, "Monitor device insertion and removal"},
         {"sniff", on_pubsub_sniffer, "Subscribe to topic and print"},
