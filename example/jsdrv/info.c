@@ -62,8 +62,8 @@ static void on_pub(void * user_data, const char * topic, const struct jsdrv_unio
     printf("\n");
 }
 
-static int device_info(struct app_s * self, const char * device) {
-    ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 2000));
+static int device_info(struct app_s * self, const char * device, int32_t open_mode) {
+    ROE(jsdrv_open(self->context, device, open_mode, 2000));
     // printf("device_info start");
     if (self->verbose) {
         printf("device: %s\n", device);
@@ -85,12 +85,33 @@ static int device_info(struct app_s * self, const char * device) {
 }
 
 static int usage(void) {
-    printf("usage: jsdrv_util info [--verbose] device_path\n");
+    printf("usage: jsdrv_util info [--verbose] [--open-mode MODE] device_path\n");
+    printf("  --open-mode MODE   default|resume|raw, or an integer (default: resume)\n");
     return 1;
+}
+
+static int32_t parse_open_mode(const char * s, int32_t * value) {
+    if (0 == strcmp(s, "default") || 0 == strcmp(s, "defaults")) {
+        *value = JSDRV_DEVICE_OPEN_MODE_DEFAULTS;
+        return 0;
+    } else if (0 == strcmp(s, "resume")) {
+        *value = JSDRV_DEVICE_OPEN_MODE_RESUME;
+        return 0;
+    } else if (0 == strcmp(s, "raw")) {
+        *value = JSDRV_DEVICE_OPEN_MODE_RAW;
+        return 0;
+    }
+    uint32_t u = 0;
+    if (jsdrv_cstr_to_u32(s, &u)) {
+        return 1;
+    }
+    *value = (int32_t) u;
+    return 0;
 }
 
 int on_info(struct app_s * self, int argc, char * argv[]) {
     char *device_filter = NULL;
+    int32_t open_mode = JSDRV_DEVICE_OPEN_MODE_RESUME;
 
     while (argc) {
         if (argv[0][0] != '-') {
@@ -99,11 +120,18 @@ int on_info(struct app_s * self, int argc, char * argv[]) {
         } else if ((0 == strcmp(argv[0], "--verbose")) || (0 == strcmp(argv[0], "-v"))) {
             self->verbose++;
             ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--open-mode")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            if (parse_open_mode(argv[0], &open_mode)) {
+                return usage();
+            }
+            ARG_CONSUME();
         } else {
             return usage();
         }
     }
 
     ROE(app_match(self, device_filter));
-    return device_info(self, self->device.topic);
+    return device_info(self, self->device.topic, open_mode);
 }

@@ -91,7 +91,7 @@ jobs:
       - name: Save static
         if: matrix.shared == 'OFF'
         shell: bash
-        run: cp cmake_build/example/Release/jsdrv.exe artifacts/jsdrv.exe
+        run: cp cmake_build/example/Release/*.exe artifacts/
 
       - name: Save dynamic
         if: matrix.shared == 'ON'

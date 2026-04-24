@@ -120,7 +120,7 @@ static int setup(struct app_s * self) {
     fw_.event = jsdrv_os_event_alloc();
 
     ROE(jsdrv_open(self->context, self->device.topic,
-                   JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
+                   JSDRV_DEVICE_OPEN_MODE_RAW, JSDRV_TIMEOUT_MS_DEFAULT));
     jsdrv_thread_sleep_ms(500);
 
     jsdrv_topic_set(&topic, self->device.topic);

@@ -312,7 +312,7 @@ static int setup_common(struct app_s * self) {
     fpga_mem_.semaphore = jsdrv_os_sem_alloc(0, PIPELINE_MAX);
     fpga_mem_.pipeline_depth = 1;  // default synchronous, overridden by callers
 
-    ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
+    ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RAW, JSDRV_TIMEOUT_MS_DEFAULT));
     jsdrv_thread_sleep_ms(500);  // todo replace with controlled interlock when available
 
     // Activate JTAG mode
@@ -464,7 +464,7 @@ static int setup_fwup(struct app_s * self) {
     fwup_.event = jsdrv_os_event_alloc();
 
     ROE(jsdrv_open(self->context, self->device.topic,
-                   JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
+                   JSDRV_DEVICE_OPEN_MODE_RAW, JSDRV_TIMEOUT_MS_DEFAULT));
     jsdrv_thread_sleep_ms(500);
 
     jsdrv_topic_set(&topic, self->device.topic);

@@ -6,7 +6,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.0.5
 
-2026 Apr 22 [in progress]
+2026 Apr 24
 
 * Added latest stable JS320 firmware to image on release.
 * fwup/@/!add: response payload changed from int32 rc to an 8-byte
@@ -17,6 +17,8 @@ This file contains the list of changes made to the Joulescope driver.
   JSDRV_ERROR_UNAVAILABLE.
 * example/minibitty fwup: accept `-` as the package path to program
   with the driver's embedded firmware.
+* Improved RAW open mode support.
+* Fixed example minibitty firmware and fpga_mem to open in RAW mode.
 
 
 ## 2.0.4

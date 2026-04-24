@@ -753,6 +753,16 @@ static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
         self->drv->on_open(self->drv, self, &self->identity);
     }
 
+    // RAW: skip state restore, open_ready, and state_fetch.  The link is
+    // up (ST_LINK_IDENTITY completed); signal OPEN immediately so callers
+    // that only need the raw link (e.g. fwup from recovery) return from
+    // jsdrv_open without waiting for pubsub state_fetch to complete.  The
+    // device-side pubsub may never come up in recovery.
+    if (0xFF == self->open_mode) {  // JSDRV_DEVICE_OPEN_MODE_RAW
+        send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
+        return true;
+    }
+
     // State restore: replay host-cached values
     if (1 == self->open_mode) {  // JSDRV_DEVICE_OPEN_MODE_RESUME
         static const char * const subtrees[] = {"h", "c", "s", NULL};

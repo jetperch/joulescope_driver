@@ -629,8 +629,12 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
     self->identity = identity;
     js320_jtag_on_open(self->jtag, dev);
     js320_fwup_on_open(self->fwup, dev);
-    jsdrvp_mb_dev_send_to_frontend(dev, "h/fp$",
-        &jsdrv_union_cjson_r(js320_publish_rate_meta));
+    // RAW mode is link-only (recovery fwup); skip frontend-facing metadata
+    // publishes that assume the device-side pubsub / streaming will come up.
+    if (0xFF != jsdrvp_mb_dev_open_mode(dev)) {
+        jsdrvp_mb_dev_send_to_frontend(dev, "h/fp$",
+            &jsdrv_union_cjson_r(js320_publish_rate_meta));
+    }
     JSDRV_LOGI("JS320 driver opened: vendor=0x%04x product=0x%04x",
                identity->vendor_id, identity->product_id);
 }
