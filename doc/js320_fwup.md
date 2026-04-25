@@ -155,44 +155,57 @@ resets after accepting this command.
 **ERASE** (`FWUP_CTRL_OP_ERASE = 3`):
 Erase the specified image slot.
 
+### Locked-mode Workaround
+
+The JS320 in locked mode cannot program the internal flash
+(image slot 0). The UPDATE flow erases slot 0 and programs the
+external SPI flash (image slot 1) instead. The caller's
+`image_slot` field is currently ignored for UPDATE.
+
 ### UPDATE State Machine
 
 ```
-IDLE ──cmd──> ALLOCATE ──rsp──> WRITE ──all done──> VERIFY ──all done──>
-UPDATE ──rsp──> respond to app, return to IDLE
+IDLE ──cmd──> ERASE_PRE ──rsp──> ALLOCATE ──rsp──> WRITE ──all done──>
+VERIFY ──all done──> UPDATE ──rsp──> respond to app, return to IDLE
 ```
 
-| State      | Action                                        |
-|------------|-----------------------------------------------|
-| ALLOCATE   | Send `FW_CMD_OP_ALLOCATE` with image size     |
-| WRITE      | Pipelined 256-byte page writes                |
-| VERIFY     | Pipelined 256-byte page reads + compare       |
-| UPDATE     | Send `FW_CMD_OP_UPDATE` with target image slot |
+| State      | Action                                              |
+|------------|-----------------------------------------------------|
+| ERASE_PRE  | Send `FW_CMD_OP_ERASE` for slot 0 (workaround)      |
+| ALLOCATE   | Send `FW_CMD_OP_ALLOCATE` with image size           |
+| WRITE      | Pipelined 256-byte page writes                      |
+| VERIFY     | Pipelined 256-byte page reads + compare             |
+| UPDATE     | Send `FW_CMD_OP_UPDATE` targeting slot 1            |
 
 ### UPDATE Process Detail
 
-1. **ALLOCATE**: The driver sends a single `FW_CMD_OP_ALLOCATE`
+1. **ERASE_PRE**: The driver sends `FW_CMD_OP_ERASE` for slot 0
+   to clear the internal flash. If this fails, the operation
+   aborts with `JSDRV_ERROR_IO` and slot 1 is not programmed.
+
+2. **ALLOCATE**: The driver sends a single `FW_CMD_OP_ALLOCATE`
    command to the device with the total image size. The device
    prepares a staging buffer and responds.
 
-2. **WRITE**: Pages are written using a sliding window pipeline.
+3. **WRITE**: Pages are written using a sliding window pipeline.
    The driver sends up to `pipeline_depth` concurrent write
    commands. Each page is 256 bytes. The last page is padded
    with `0xFF` to a full page boundary. As each response
    arrives, `recv_idx` advances and a new write may be sent
    if the window has room.
 
-3. **VERIFY**: Pages are read back and compared against the
+4. **VERIFY**: Pages are read back and compared against the
    original image using the same pipelining strategy. Each
    response carries 256 bytes of read data which is compared
    byte-for-byte against the expected page content (including
    `0xFF` padding on the last page). A mismatch sets
    `JSDRV_ERROR_IO`.
 
-4. **UPDATE**: After successful verification, the driver sends
-   `FW_CMD_OP_UPDATE` with the target `image_slot`. The device
-   commits the staging buffer to flash and responds. The driver
-   then sends the completion response to the application.
+5. **UPDATE**: After successful verification, the driver sends
+   `FW_CMD_OP_UPDATE` targeting slot 1 (external SPI flash).
+   The device commits the staging buffer to flash and responds.
+   The driver then sends the completion response to the
+   application.
 
 ### LAUNCH and ERASE
 

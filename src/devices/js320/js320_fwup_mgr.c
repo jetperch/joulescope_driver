@@ -444,7 +444,7 @@ static int32_t worker_wait_reconnect(struct worker_s * w) {
 static int32_t worker_open(struct worker_s * w) {
     worker_publish_status(w, "opening device");
     int32_t rc = jsdrv_open(w->context, w->device_prefix,
-                            JSDRV_DEVICE_OPEN_MODE_RESUME, 10000);
+                            JSDRV_DEVICE_OPEN_MODE_RAW, 10000);
     if (rc) {
         worker_fail(w, rc, "device open failed");
         return rc;

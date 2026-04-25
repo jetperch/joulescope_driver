@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-__version__ = "2.0.5"
+__version__ = "2.0.6"
 
 __title__ = "pyjoulescope_driver"
 __description__ = 'Joulescope™ driver'

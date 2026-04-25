@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.0.6
+
+2026 Apr 25
+
+* Fixed firmware update.
+  * Modified JS320 fwup to use image slot 1 in external SPI flash.
+  * Switched to RAW open mode.
+
+
 ## 2.0.5
 
 2026 Apr 24

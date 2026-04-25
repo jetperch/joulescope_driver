@@ -34,6 +34,13 @@
 #define PIPELINE_MAX            16U
 #define FLASH_BLOCK_64K         65536U
 
+// Locked-mode workaround: the JS320 in locked mode cannot program the
+// internal flash (slot 0), so the UPDATE flow erases slot 0 and then
+// programs the external SPI flash (slot 1) instead.  The caller's
+// requested image_slot is ignored for UPDATE.
+#define UPDATE_ERASE_SLOT       0U
+#define UPDATE_TARGET_SLOT      1U
+
 /// Device-side fwup operation codes (mirrors mb_fwup_op_e + mb_stdmsg_mem_op_e).
 enum fwup_dev_op_e {
     FWUP_DEV_OP_READ      = MB_STDMSG_MEM_OP_READ,
@@ -50,6 +57,7 @@ enum fwup_dev_op_e {
 
 enum ctrl_state_e {
     CTRL_IDLE = 0,
+    CTRL_ERASE_PRE,   ///< Pre-update erase of UPDATE_ERASE_SLOT (locked-mode workaround).
     CTRL_ALLOCATE,
     CTRL_WRITE,
     CTRL_VERIFY,
@@ -279,16 +287,19 @@ static void ctrl_on_cmd(struct js320_fwup_s * self,
                 ctrl_send_rsp(self, JSDRV_ERROR_PARAMETER_INVALID);
                 return;
             }
-            JSDRV_LOGI("fwup ctrl: update image_slot=%u size=%u pipeline=%u",
-                       cmd->image_slot, image_size, self->pipeline_depth);
+            JSDRV_LOGI("fwup ctrl: update size=%u pipeline=%u "
+                       "(erase slot %u, program slot %u)",
+                       image_size, self->pipeline_depth,
+                       UPDATE_ERASE_SLOT, UPDATE_TARGET_SLOT);
             self->image = jsdrv_alloc(image_size);
             memcpy(self->image, cmd->data, image_size);
             self->image_size = image_size;
             self->page_count = (image_size + FW_PAGE_SIZE - 1) / FW_PAGE_SIZE;
-            // Start with ALLOCATE
-            self->ctrl_state = CTRL_ALLOCATE;
-            ctrl_send_fw_cmd(self, FWUP_DEV_OP_ALLOCATE, 0, 0,
-                              image_size, NULL, 0);
+            // Locked-mode workaround: erase slot 0 (internal flash) before
+            // programming slot 1 (external SPI flash).
+            self->ctrl_state = CTRL_ERASE_PRE;
+            ctrl_send_fw_cmd(self, FWUP_DEV_OP_ERASE, UPDATE_ERASE_SLOT,
+                              0, 0, NULL, 0);
             break;
 
         case FWUP_CTRL_OP_LAUNCH:
@@ -335,6 +346,16 @@ static void ctrl_on_dev_rsp(struct js320_fwup_s * self,
     }
 
     switch (self->ctrl_state) {
+        case CTRL_ERASE_PRE:
+            if (self->error_count > 0) {
+                ctrl_finish(self, self->error_code);
+            } else {
+                self->ctrl_state = CTRL_ALLOCATE;
+                ctrl_send_fw_cmd(self, FWUP_DEV_OP_ALLOCATE, 0, 0,
+                                  self->image_size, NULL, 0);
+            }
+            break;
+
         case CTRL_ALLOCATE:
             if (self->error_count > 0) {
                 ctrl_finish(self, self->error_code);
@@ -379,12 +400,11 @@ static void ctrl_on_dev_rsp(struct js320_fwup_s * self,
                     ctrl_finish(self, self->error_code);
                 }
             } else if (self->recv_idx >= self->page_count) {
-                // All verified, send UPDATE
-                JSDRV_LOGI("fwup ctrl: update image_slot=%u",
-                           self->ctrl_image_slot);
+                // All verified, commit to slot 1 (locked-mode workaround).
+                JSDRV_LOGI("fwup ctrl: commit to slot %u", UPDATE_TARGET_SLOT);
                 self->ctrl_state = CTRL_UPDATE;
                 ctrl_send_fw_cmd(self, FWUP_DEV_OP_UPDATE,
-                                  self->ctrl_image_slot, 0, 0, NULL, 0);
+                                  UPDATE_TARGET_SLOT, 0, 0, NULL, 0);
             } else {
                 ctrl_send_reads(self);
             }
