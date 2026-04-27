@@ -34,6 +34,11 @@
 #define PIPELINE_MAX            16U
 #define FLASH_BLOCK_64K         65536U
 
+// Granularity for FPGA write/verify progress events: 256 pages == 64 KB,
+// matching the device erase block size.  Also emit at the final ack so the
+// last partial chunk is reported.
+#define FPGA_PROGRESS_PAGE_INTERVAL  256U
+
 // Locked-mode workaround: the JS320 in locked mode cannot program the
 // internal flash (slot 0), so the UPDATE flow erases slot 0 and then
 // programs the external SPI flash (slot 1) instead.  The caller's
@@ -143,6 +148,21 @@ static void fpga_send_rsp(struct js320_fwup_s * self, int32_t status) {
     rsp.status = status;
     jsdrvp_mb_dev_send_to_frontend(self->dev, "h/fwup/fpga/!rsp",
         &jsdrv_union_bin((uint8_t *) &rsp, sizeof(rsp)));
+}
+
+static void fpga_send_progress(struct js320_fwup_s * self,
+                                uint8_t phase,
+                                uint32_t current,
+                                uint32_t total) {
+    struct fwup_fpga_progress_s p;
+    p.phase = phase;
+    p.reserved[0] = 0;
+    p.reserved[1] = 0;
+    p.reserved[2] = 0;
+    p.current = current;
+    p.total = total;
+    jsdrvp_mb_dev_send_to_frontend(self->dev, "h/fwup/fpga/!prog",
+        &jsdrv_union_bin((uint8_t *) &p, sizeof(p)));
 }
 
 static uint32_t pipeline_depth_validate(uint8_t depth) {
@@ -665,6 +685,9 @@ static void fpga_on_dev_rsp(struct js320_fwup_s * self,
                 fpga_enter_error_cleanup(self);
             } else {
                 self->erase_block_idx++;
+                fpga_send_progress(self, FWUP_FPGA_PROGRESS_PHASE_ERASE,
+                                    self->erase_block_idx,
+                                    self->erase_block_count);
                 if (self->erase_block_idx >= self->erase_block_count) {
                     fpga_enter_write(self);
                 } else {
@@ -682,8 +705,14 @@ static void fpga_on_dev_rsp(struct js320_fwup_s * self,
                     fpga_enter_error_cleanup(self);
                 }
             } else if (self->recv_idx >= self->page_count) {
+                fpga_send_progress(self, FWUP_FPGA_PROGRESS_PHASE_WRITE,
+                                    self->recv_idx, self->page_count);
                 fpga_enter_verify(self);
             } else {
+                if ((self->recv_idx % FPGA_PROGRESS_PAGE_INTERVAL) == 0) {
+                    fpga_send_progress(self, FWUP_FPGA_PROGRESS_PHASE_WRITE,
+                                        self->recv_idx, self->page_count);
+                }
                 fpga_send_writes(self);
             }
             break;
@@ -709,8 +738,14 @@ static void fpga_on_dev_rsp(struct js320_fwup_s * self,
                     fpga_enter_error_cleanup(self);
                 }
             } else if (self->recv_idx >= self->page_count) {
+                fpga_send_progress(self, FWUP_FPGA_PROGRESS_PHASE_VERIFY,
+                                    self->recv_idx, self->page_count);
                 fpga_enter_close(self);
             } else {
+                if ((self->recv_idx % FPGA_PROGRESS_PAGE_INTERVAL) == 0) {
+                    fpga_send_progress(self, FWUP_FPGA_PROGRESS_PHASE_VERIFY,
+                                        self->recv_idx, self->page_count);
+                }
                 fpga_send_reads(self);
             }
             break;

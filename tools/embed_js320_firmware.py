@@ -197,7 +197,7 @@ def main():
                              'without --zip the version comes from index.json')
         index = fetch_index(args.index_url)
         try:
-            entry = index['js320']['stable']
+            entry = index[0]
         except KeyError:
             raise RuntimeError(
                 f'no js320.stable entry in {args.index_url}')

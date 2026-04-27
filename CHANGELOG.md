@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.0.7
+
+2026 Apr 27
+
+* Improved firmware update for the JS320.
+  * Added pyjoulescope_driver program support for JS320.
+  * Improved JS320 fwup progress reporting.
+
+
 ## 2.0.6
 
 2026 Apr 25

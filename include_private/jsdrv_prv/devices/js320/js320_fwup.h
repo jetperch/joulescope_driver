@@ -23,10 +23,11 @@
  * pubsub, then drives the page-level device protocol internally.
  *
  * Topics:
- *   h/fwup/ctrl/!cmd  — Ctrl firmware command (fwup_ctrl_cmd_s)
- *   h/fwup/ctrl/!rsp  — Ctrl firmware response (fwup_rsp_s)
- *   h/fwup/fpga/!cmd  — FPGA programming command (fwup_fpga_cmd_s)
- *   h/fwup/fpga/!rsp  — FPGA programming response (fwup_rsp_s)
+ *   h/fwup/ctrl/!cmd       — Ctrl firmware command (fwup_ctrl_cmd_s)
+ *   h/fwup/ctrl/!rsp       — Ctrl firmware response (fwup_rsp_s)
+ *   h/fwup/fpga/!cmd       — FPGA programming command (fwup_fpga_cmd_s)
+ *   h/fwup/fpga/!rsp       — FPGA programming response (fwup_rsp_s)
+ *   h/fwup/fpga/!prog      — FPGA progress events (fwup_fpga_progress_s)
  */
 
 #ifndef JSDRV_PRV_JS320_FWUP_H_
@@ -80,6 +81,21 @@ struct fwup_fpga_cmd_s {
 struct fwup_rsp_s {
     uint32_t transaction_id;
     int32_t status;             ///< 0 = success, JSDRV_ERROR_* on failure
+};
+
+// --- FPGA progress event ---
+
+enum fwup_fpga_progress_phase_e {
+    FWUP_FPGA_PROGRESS_PHASE_ERASE  = 0,
+    FWUP_FPGA_PROGRESS_PHASE_WRITE  = 1,
+    FWUP_FPGA_PROGRESS_PHASE_VERIFY = 2,
+};
+
+struct fwup_fpga_progress_s {
+    uint8_t phase;              ///< fwup_fpga_progress_phase_e
+    uint8_t reserved[3];
+    uint32_t current;           ///< Units completed in this phase
+    uint32_t total;              ///< Total units in this phase
 };
 
 // --- Lifecycle ---

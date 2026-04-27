@@ -17,7 +17,9 @@
 #include "minibitty_exe_prv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/os_thread.h"
+#include "jsdrv/time.h"
 #include "jsdrv_prv/devices/js320/js320_fwup_mgr.h"
+#include "jsdrv_prv/platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +27,7 @@
 
 static volatile bool fwup_done_ = false;
 static volatile int32_t fwup_rc_ = 0;
+static uint32_t fwup_t_start_ = 0;
 
 static int usage(void) {
     printf(
@@ -80,7 +83,8 @@ static void on_status(void * user_data, const char * topic,
     if (!strstr(topic, "/status")) {
         return;
     }
-    printf("  [%s] %s\n", topic, value->value.str);
+    printf("  [%u] [%s] %s\n", jsdrv_time_ms_u32() - fwup_t_start_,
+           topic, value->value.str);
 
     if (strstr(value->value.str, "\"state\":\"DONE\"")) {
         fwup_rc_ = 0;
@@ -177,6 +181,8 @@ int on_fwup(struct app_s * self, int argc, char * argv[]) {
     if (zip_data) {
         free(zip_data);
     }
+
+    fwup_t_start_ = jsdrv_time_ms_u32();
 
     // Publish to fwup/@/!add — the manager handles it
     fwup_done_ = false;

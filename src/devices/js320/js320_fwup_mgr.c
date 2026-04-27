@@ -16,6 +16,7 @@
 
 #define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
 #include "jsdrv_prv/devices/js320/js320_fwup_mgr.h"
+#include "jsdrv_prv/devices/js320/js320_fwup.h"
 #include "jsdrv_prv/devices/js320/firmware.h"
 #include "jsdrv.h"
 #include "jsdrv/cstr.h"
@@ -117,26 +118,46 @@ enum worker_state_e {
     WST_WAIT_REMOVE,
     WST_WAIT_ADD,
     WST_REOPEN,
+    WST_CTRL_RESOURCE,
     WST_FPGA_BITSTREAM,
-    WST_RESOURCE,
+    WST_SENSOR_RESOURCE,
     WST_DONE,
     WST_ERROR,
 };
 
 static const char * worker_state_name(enum worker_state_e st) {
     switch (st) {
-        case WST_INIT:           return "INIT";
-        case WST_CTRL_FW:       return "CTRL_FW";
-        case WST_WAIT_REMOVE:   return "WAIT_REMOVE";
-        case WST_WAIT_ADD:      return "WAIT_ADD";
-        case WST_REOPEN:        return "REOPEN";
-        case WST_FPGA_BITSTREAM: return "FPGA_BITSTREAM";
-        case WST_RESOURCE:      return "RESOURCE";
-        case WST_DONE:          return "DONE";
-        case WST_ERROR:         return "ERROR";
-        default:                 return "?";
+        case WST_INIT:            return "INIT";
+        case WST_CTRL_FW:         return "CTRL_FW";
+        case WST_WAIT_REMOVE:     return "WAIT_REMOVE";
+        case WST_WAIT_ADD:        return "WAIT_ADD";
+        case WST_REOPEN:          return "REOPEN";
+        case WST_CTRL_RESOURCE:   return "CTRL_RESOURCE";
+        case WST_FPGA_BITSTREAM:  return "FPGA_BITSTREAM";
+        case WST_SENSOR_RESOURCE: return "SENSOR_RESOURCE";
+        case WST_DONE:            return "DONE";
+        case WST_ERROR:           return "ERROR";
+        default:                  return "?";
     }
 }
+
+// Overall progress ranges in tenths of a percent (0-1000).  Each entry is
+// the cumulative pct at the END of that phase, so a phase spans from the
+// previous entry to its own value.  Tuned against a measured ~10 s
+// embedded-firmware update: FPGA dominates at ~86% of wall-clock, with
+// erase ~14%, write ~44%, and verify ~42% of the FPGA band.
+#define PCT_INIT_END             10    // 1.0%
+#define PCT_CTRL_FW_END          20    // 2.0%
+#define PCT_WAIT_REMOVE_END      40    // 4.0%
+#define PCT_WAIT_ADD_END         80    // 8.0%
+#define PCT_REOPEN_END           90    // 9.0%
+#define PCT_CTRL_RESOURCE_END    110   // 11.0%
+#define PCT_FPGA_BITSTREAM_BEGIN PCT_CTRL_RESOURCE_END
+#define PCT_FPGA_ERASE_END       230   // 23.0%
+#define PCT_FPGA_WRITE_END       610   // 61.0%
+#define PCT_FPGA_VERIFY_END      970   // 97.0%
+#define PCT_SENSOR_RESOURCE_END  990   // 99.0%
+#define PCT_DONE                 1000  // 100.0%
 
 struct worker_s {
     uint32_t id;
@@ -145,6 +166,7 @@ struct worker_s {
     volatile bool device_present;
     int32_t result;
     enum worker_state_e state;
+    uint16_t pct;                       ///< Overall progress in tenths (0-1000).
     uint32_t resource_idx;
 
     struct jsdrv_context_s * context;
@@ -178,13 +200,19 @@ static bool worker_cancelled(struct worker_s * w) {
 // =====================================================================
 
 static void worker_publish_status(struct worker_s * w, const char * msg) {
-    char escaped[192];
+    char escaped[160];
     char buf[256];
     json_escape(escaped, sizeof(escaped), msg);
+    uint32_t pct_whole = w->pct / 10;
+    uint32_t pct_frac = w->pct % 10;
     tfp_snprintf(buf, sizeof(buf),
-        "{\"state\":\"%s\",\"msg\":\"%s\",\"rc\":%d}",
-        worker_state_name(w->state), escaped, (int) w->result);
-    JSDRV_LOGI("fwup/%03u: %s - %s", w->id, worker_state_name(w->state), msg);
+        "{\"state\":\"%s\",\"pct\":%u.%u,\"msg\":\"%s\",\"rc\":%d}",
+        worker_state_name(w->state),
+        pct_whole, pct_frac,
+        escaped, (int) w->result);
+    JSDRV_LOGI("fwup/%03u: %s %u.%u%% - %s",
+               w->id, worker_state_name(w->state),
+               pct_whole, pct_frac, msg);
     jsdrv_publish(w->context, w->status_topic,
                   &jsdrv_union_cstr_r(buf), 0);
 }
@@ -328,6 +356,7 @@ static int32_t worker_fwup_send_and_wait(struct worker_s * w,
 
 static int32_t worker_extract(struct worker_s * w) {
     w->state = WST_INIT;
+    w->pct = PCT_INIT_END;
     worker_publish_status(w, "extracting");
     int32_t rc;
 
@@ -390,6 +419,7 @@ static int32_t worker_build_fwup_cmd(uint8_t ** out, uint32_t * out_size,
 static int32_t worker_ctrl_fw(struct worker_s * w) {
     if (!w->ctrl_fw) return 0;
     w->state = WST_CTRL_FW;
+    w->pct = PCT_CTRL_FW_END;
     worker_publish_status(w, "updating ctrl firmware");
 
     uint8_t * buf = NULL;
@@ -412,6 +442,7 @@ static int32_t worker_ctrl_fw(struct worker_s * w) {
 
 static int32_t worker_wait_reconnect(struct worker_s * w) {
     w->state = WST_WAIT_REMOVE;
+    w->pct = PCT_WAIT_REMOVE_END;
     worker_publish_status(w, "waiting for device removal");
 
     for (uint32_t i = 0; i < 100 && w->device_present && !worker_cancelled(w); ++i) {
@@ -424,6 +455,7 @@ static int32_t worker_wait_reconnect(struct worker_s * w) {
     if (worker_cancelled(w)) return JSDRV_ERROR_ABORTED;
 
     w->state = WST_WAIT_ADD;
+    w->pct = PCT_WAIT_ADD_END;
     worker_publish_status(w, "waiting for device");
 
     for (uint32_t i = 0; i < 300 && !w->device_present && !worker_cancelled(w); ++i) {
@@ -467,10 +499,62 @@ static void worker_close(struct worker_s * w) {
     jsdrv_close(w->context, w->device_prefix, JSDRV_TIMEOUT_MS_DEFAULT);
 }
 
+static void on_fpga_progress(void * user_data, const char * topic,
+                              const struct jsdrv_union_s * value) {
+    struct worker_s * w = (struct worker_s *) user_data;
+    (void) topic;
+    if (value->type != JSDRV_UNION_BIN
+            || value->size < sizeof(struct fwup_fpga_progress_s)) {
+        return;
+    }
+    const struct fwup_fpga_progress_s * p =
+        (const struct fwup_fpga_progress_s *) value->value.bin;
+    if (p->total == 0) {
+        return;
+    }
+    char msg[80];
+    uint16_t pct;
+    uint32_t span;
+    uint32_t base;
+    const char * label;
+    switch (p->phase) {
+        case FWUP_FPGA_PROGRESS_PHASE_ERASE:
+            base = PCT_FPGA_BITSTREAM_BEGIN;
+            span = PCT_FPGA_ERASE_END - PCT_FPGA_BITSTREAM_BEGIN;
+            label = "erase";
+            break;
+        case FWUP_FPGA_PROGRESS_PHASE_WRITE:
+            base = PCT_FPGA_ERASE_END;
+            span = PCT_FPGA_WRITE_END - PCT_FPGA_ERASE_END;
+            label = "write";
+            break;
+        case FWUP_FPGA_PROGRESS_PHASE_VERIFY:
+            base = PCT_FPGA_WRITE_END;
+            span = PCT_FPGA_VERIFY_END - PCT_FPGA_WRITE_END;
+            label = "verify";
+            break;
+        default:
+            return;
+    }
+    pct = (uint16_t)(base + (span * p->current) / p->total);
+    if (pct > PCT_FPGA_VERIFY_END) pct = PCT_FPGA_VERIFY_END;
+    w->pct = pct;
+    tfp_snprintf(msg, sizeof(msg), "FPGA %s %u/%u",
+                 label, (unsigned) p->current, (unsigned) p->total);
+    worker_publish_status(w, msg);
+}
+
 static int32_t worker_fpga_bitstream(struct worker_s * w) {
     if (!w->fpga_bit) return 0;
     w->state = WST_FPGA_BITSTREAM;
+    w->pct = PCT_FPGA_BITSTREAM_BEGIN;
     worker_publish_status(w, "programming FPGA");
+
+    struct jsdrv_topic_s prog_topic;
+    jsdrv_topic_set(&prog_topic, w->device_prefix);
+    jsdrv_topic_append(&prog_topic, "h/fwup/fpga/!prog");
+    jsdrv_subscribe(w->context, prog_topic.topic, JSDRV_SFLAG_PUB,
+                    on_fpga_progress, w, JSDRV_TIMEOUT_MS_DEFAULT);
 
     uint8_t * buf = NULL;
     uint32_t buf_size = 0;
@@ -478,6 +562,8 @@ static int32_t worker_fpga_bitstream(struct worker_s * w) {
         2, 1 /*PROGRAM*/, 0, 4 /*pipeline*/,
         w->fpga_bit, w->fpga_bit_size);
     if (rc) {
+        jsdrv_unsubscribe(w->context, prog_topic.topic,
+                          on_fpga_progress, w, 0);
         worker_fail(w, rc, "malloc");
         return rc;
     }
@@ -486,6 +572,8 @@ static int32_t worker_fpga_bitstream(struct worker_s * w) {
         "h/fwup/fpga/!cmd", "h/fwup/fpga/!rsp",
         buf, buf_size, WORKER_TIMEOUT_MS);
     free(buf);
+    jsdrv_unsubscribe(w->context, prog_topic.topic,
+                      on_fpga_progress, w, 0);
     if (rc) worker_fail(w, rc, "fpga program failed");
     return rc;
 }
@@ -544,12 +632,17 @@ static int32_t worker_mem_op(struct worker_s * w, uint32_t txn_id,
 
 static int32_t worker_write_resource(struct worker_s * w,
         const struct jsdrv_fwup_resource_s * res,
-        const uint8_t * data, uint32_t size) {
+        const uint8_t * data, uint32_t size,
+        uint16_t pct_start, uint16_t pct_end) {
     char msg[128];
     int32_t rc;
     uint32_t txn_base = 1000 + w->resource_idx * 1000;
+    // Erase is fast; write takes most of the time per resource.
+    uint16_t pct_after_erase = (uint16_t)
+        (pct_start + ((uint32_t)(pct_end - pct_start) / 4));
 
     // Erase in 64KB blocks (device only supports single-block erase)
+    w->pct = pct_start;
     tfp_snprintf(msg, sizeof(msg), "erase %s @ 0x%06X (%u B)",
                  res->mem_topic, res->offset, res->erase_size);
     worker_publish_status(w, msg);
@@ -572,14 +665,18 @@ static int32_t worker_write_resource(struct worker_s * w,
     }
 
     // Write page by page
+    w->pct = pct_after_erase;
     tfp_snprintf(msg, sizeof(msg), "write %s @ 0x%06X (%u B)",
                  res->mem_topic, res->offset, size);
     worker_publish_status(w, msg);
 
+    uint32_t total_pages = (size + FW_PAGE_SIZE - 1) / FW_PAGE_SIZE;
+    if (total_pages == 0) total_pages = 1;
     uint32_t off = res->offset;
     uint32_t rem = size;
     const uint8_t * p = data;
     uint32_t page_num = 1;
+    uint32_t pages_done = 0;
     uint8_t page_buf[FW_PAGE_SIZE];
     while (rem > 0 && !worker_cancelled(w)) {
         uint32_t chunk = (rem > FW_PAGE_SIZE) ? FW_PAGE_SIZE : rem;
@@ -596,10 +693,14 @@ static int32_t worker_write_resource(struct worker_s * w,
         p += chunk;
         rem -= chunk;
         ++page_num;
+        ++pages_done;
+        w->pct = (uint16_t)(pct_after_erase
+            + ((uint32_t)(pct_end - pct_after_erase) * pages_done) / total_pages);
     }
     if (worker_cancelled(w)) {
         rc = JSDRV_ERROR_ABORTED;
     }
+    w->pct = pct_end;
     return rc;
 }
 
@@ -607,18 +708,42 @@ static bool resource_is_sensor(const struct jsdrv_fwup_resource_s * res) {
     return (res->mem_topic[0] == 's');
 }
 
+static uint32_t worker_count_resources(struct worker_s * w, bool sensor) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; JSDRV_FWUP_RESOURCES[i].zip_path; ++i) {
+        if (!w->resources[i] || !w->resource_sizes[i]) continue;
+        if (resource_is_sensor(&JSDRV_FWUP_RESOURCES[i]) != sensor) continue;
+        ++count;
+    }
+    return count;
+}
+
 static int32_t worker_write_resources_filtered(struct worker_s * w,
-                                               bool sensor) {
+                                               bool sensor,
+                                               uint16_t pct_start,
+                                               uint16_t pct_end) {
+    uint32_t count = worker_count_resources(w, sensor);
+    if (count == 0) {
+        w->pct = pct_end;
+        return 0;
+    }
+    uint32_t span = (uint32_t)(pct_end - pct_start);
+    uint32_t done = 0;
     for (uint32_t i = 0; JSDRV_FWUP_RESOURCES[i].zip_path; ++i) {
         if (!w->resources[i] || !w->resource_sizes[i]) continue;
         if (resource_is_sensor(&JSDRV_FWUP_RESOURCES[i]) != sensor) continue;
         if (worker_cancelled(w)) return JSDRV_ERROR_ABORTED;
         w->resource_idx = i;
+        uint16_t r_start = (uint16_t)(pct_start + (span * done) / count);
+        uint16_t r_end = (uint16_t)(pct_start + (span * (done + 1)) / count);
         int32_t rc = worker_write_resource(w, &JSDRV_FWUP_RESOURCES[i],
                                            w->resources[i],
-                                           w->resource_sizes[i]);
+                                           w->resource_sizes[i],
+                                           r_start, r_end);
         if (rc) return rc;
+        ++done;
     }
+    w->pct = pct_end;
     return 0;
 }
 
@@ -662,6 +787,7 @@ static JSDRV_THREAD_RETURN_TYPE worker_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
         rc = worker_wait_reconnect(w);
         if (rc) goto done;
         w->state = WST_REOPEN;
+        w->pct = PCT_REOPEN_END;
         rc = worker_open(w);
         if (rc) goto done;
         device_opened = true;
@@ -670,8 +796,10 @@ static JSDRV_THREAD_RETURN_TYPE worker_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     // Ctrl resources work without the FPGA
     if (!(w->flags & JSDRV_FWUP_FLAG_SKIP_RESOURCES)) {
         if (worker_cancelled(w)) goto close_done;
-        w->state = WST_RESOURCE;
-        rc = worker_write_resources_filtered(w, false);
+        w->state = WST_CTRL_RESOURCE;
+        rc = worker_write_resources_filtered(w, false,
+                                             PCT_REOPEN_END,
+                                             PCT_CTRL_RESOURCE_END);
         if (rc) {
             worker_fail(w, rc, "ctrl resource write failed");
             goto close_done;
@@ -696,13 +824,15 @@ static JSDRV_THREAD_RETURN_TYPE worker_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     // Sensor resources require sensor comm (FPGA must be running)
     if (!(w->flags & JSDRV_FWUP_FLAG_SKIP_RESOURCES)) {
         if (worker_cancelled(w)) goto close_done;
-        w->state = WST_RESOURCE;
+        w->state = WST_SENSOR_RESOURCE;
         w->result = 0;
-        rc = worker_write_resources_filtered(w, true);
+        rc = worker_write_resources_filtered(w, true,
+                                             PCT_FPGA_VERIFY_END,
+                                             PCT_SENSOR_RESOURCE_END);
         if (rc) {
             JSDRV_LOGI("fwup/%03u: sensor resources failed (%d), retrying",
                        w->id, (int) rc);
-            w->state = WST_RESOURCE;
+            w->state = WST_SENSOR_RESOURCE;
             w->result = 0;
             worker_publish_status(w, "reopening for sensor resources");
             worker_close(w);
@@ -711,8 +841,10 @@ static JSDRV_THREAD_RETURN_TYPE worker_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
             rc = worker_open(w);
             if (rc) goto done;
             device_opened = true;
-            w->state = WST_RESOURCE;
-            rc = worker_write_resources_filtered(w, true);
+            w->state = WST_SENSOR_RESOURCE;
+            rc = worker_write_resources_filtered(w, true,
+                                                 PCT_FPGA_VERIFY_END,
+                                                 PCT_SENSOR_RESOURCE_END);
         }
         if (rc) {
             worker_fail(w, rc, "sensor resource write failed");
@@ -721,6 +853,7 @@ static JSDRV_THREAD_RETURN_TYPE worker_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     }
 
     w->state = WST_DONE;
+    w->pct = PCT_DONE;
     w->result = 0;
 
 close_done:
