@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.1.0
+
+2026 Apr 27
+
+* Added Windows 11 ARM build.
+
+
 ## 2.0.7
 
 2026 Apr 27
