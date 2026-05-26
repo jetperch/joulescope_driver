@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.1.1
+
+2026 May 26
+
+* Fixed small errors introduced by buffer_signal.c for JS320
+  * Quantization error on standard deviation
+  * Correctly weight summaries by number of samples rather than equal weight
+
+
 ## 2.1.0
 
 2026 Apr 27

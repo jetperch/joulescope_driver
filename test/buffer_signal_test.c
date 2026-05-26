@@ -362,6 +362,196 @@ static void test_summary_single_entry_time_range(void **state) {
     jsdrv_bufsig_free(&b);
 }
 
+// Insert a fixed +s/-s pattern around `mean` so the population std is exactly `s`
+// across any contiguous window with an even sample count.
+static void insert_pattern_samples(struct bufsig_s * b, uint64_t sample_id_start,
+                                   uint32_t length, float mean, float s) {
+    struct jsdrv_stream_signal_s sig;
+    memset(&sig, 0, sizeof(sig));
+    sig.sample_id = sample_id_start;
+    sig.field_id = JSDRV_FIELD_CURRENT;
+    sig.index = 7;
+    sig.element_type = JSDRV_DATA_TYPE_FLOAT;
+    sig.element_size_bits = 32;
+    sig.element_count = length;
+    sig.sample_rate = 1000000;
+    sig.decimate_factor = 1;
+    sig.time_map.offset_time = JSDRV_TIME_HOUR;
+    sig.time_map.counter_rate = sig.sample_rate;
+    sig.time_map.offset_counter = 0;
+    float * f32 = (float *) sig.data;
+    for (uint32_t i = 0; i < length; ++i) {
+        f32[i] = ((sample_id_start + i) & 1) ? (mean - s) : (mean + s);
+    }
+    jsdrv_bufsig_recv_data(b, &sig);
+}
+
+static float request_std(struct bufsig_s * b, uint64_t start, uint64_t end) {
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = start;
+    req.time.samples.end = end;
+    req.time.samples.length = 1;
+    uint64_t rsp_u64[1 << 14];
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
+    jsdrv_bufsig_process_request(b, &req, rsp);
+    assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
+    struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
+    return entries[0].std;
+}
+
+static void test_summary_std_across_levels_large(void **state) {
+    initialize();  // r0=10, rN=10
+    const float mean = 1.0f;
+    const float s = 1.0e-3f;  // std easily above quantization floor
+    uint32_t chunk = 1000;
+    for (uint64_t sid = 0; sid < 200000; sid += chunk) {
+        insert_pattern_samples(&b, sid, chunk, mean, s);
+    }
+
+    // Pick ranges so summary_get walks tgt_level = 0, 1, 2.
+    // levels[0].samples_per_entry = r0 = 10
+    // levels[1].samples_per_entry = r0*rN = 100
+    // levels[2].samples_per_entry = r0*rN*rN = 1000
+    float std_lvl0 = request_std(&b, 0, 49);          // incr=50, tgt_level=0
+    float std_lvl1 = request_std(&b, 0, 499);         // incr=500, tgt_level=1
+    float std_lvl2 = request_std(&b, 0, 4999);        // incr=5000, tgt_level=2
+    float std_lvl2b = request_std(&b, 0, 49999);      // incr=50000, tgt_level=2 (more entries)
+
+    printf("std_lvl0=%g std_lvl1=%g std_lvl2=%g std_lvl2b=%g (expected ~%g)\n",
+           std_lvl0, std_lvl1, std_lvl2, std_lvl2b, s);
+
+    assert_float_equal(s, std_lvl0, s * 0.05);
+    assert_float_equal(s, std_lvl1, s * 0.05);
+    assert_float_equal(s, std_lvl2, s * 0.05);
+    assert_float_equal(s, std_lvl2b, s * 0.05);
+    jsdrv_bufsig_free(&b);
+}
+
+static void test_summary_std_across_levels_small(void **state) {
+    // Mimic the JS320-at-10kHz scenario: tiny std at modest mean
+    initialize();  // r0=10, rN=10
+    const float mean = 1.0e-6f;
+    const float s = 0.7e-9f;  // 0.7 nA, like the user reports
+    uint32_t chunk = 1000;
+    for (uint64_t sid = 0; sid < 200000; sid += chunk) {
+        insert_pattern_samples(&b, sid, chunk, mean, s);
+    }
+
+    float std_lvl0 = request_std(&b, 0, 49);
+    float std_lvl1 = request_std(&b, 0, 499);
+    float std_lvl2 = request_std(&b, 0, 4999);
+    float std_lvl2b = request_std(&b, 0, 49999);
+
+    printf("small: std_lvl0=%g std_lvl1=%g std_lvl2=%g std_lvl2b=%g (expected ~%g)\n",
+           std_lvl0, std_lvl1, std_lvl2, std_lvl2b, s);
+
+    // Allow 10% tolerance for tiny-magnitude quantization in the Q30 path.
+    assert_float_equal(s, std_lvl0, s * 0.10);
+    assert_float_equal(s, std_lvl1, s * 0.10);
+    assert_float_equal(s, std_lvl2, s * 0.10);
+    assert_float_equal(s, std_lvl2b, s * 0.10);
+    jsdrv_bufsig_free(&b);
+}
+
+// Box-Muller, deterministic given a seed.
+static uint32_t g_rand_state = 0x12345678u;
+static uint32_t lcg_rand(void) {
+    g_rand_state = g_rand_state * 1664525u + 1013904223u;
+    return g_rand_state;
+}
+static float box_muller(void) {
+    float u1 = (lcg_rand() + 1u) / (float)((uint64_t)UINT32_MAX + 2u);
+    float u2 = (lcg_rand() + 1u) / (float)((uint64_t)UINT32_MAX + 2u);
+    return sqrtf(-2.0f * logf(u1)) * cosf(6.28318530718f * u2);
+}
+
+static void insert_gaussian_samples(struct bufsig_s * b, uint64_t sample_id_start,
+                                    uint32_t length, float mean, float s) {
+    struct jsdrv_stream_signal_s sig;
+    memset(&sig, 0, sizeof(sig));
+    sig.sample_id = sample_id_start;
+    sig.field_id = JSDRV_FIELD_CURRENT;
+    sig.index = 7;
+    sig.element_type = JSDRV_DATA_TYPE_FLOAT;
+    sig.element_size_bits = 32;
+    sig.element_count = length;
+    sig.sample_rate = 1000000;
+    sig.decimate_factor = 1;
+    sig.time_map.offset_time = JSDRV_TIME_HOUR;
+    sig.time_map.counter_rate = sig.sample_rate;
+    sig.time_map.offset_counter = 0;
+    float * f32 = (float *) sig.data;
+    for (uint32_t i = 0; i < length; ++i) {
+        f32[i] = mean + s * box_muller();
+    }
+    jsdrv_bufsig_recv_data(b, &sig);
+}
+
+static void test_summary_std_gaussian_small_mean(void **state) {
+    // JS320-at-10kHz scenario: tiny std (0.7 nA) on a 1 uA mean.
+    // Tests whether Q30 quantization in summary_level0_get_by_idx swallows the noise.
+    initialize();  // r0=10, rN=10
+    g_rand_state = 0x12345678u;
+    const float mean = 1.0e-6f;
+    const float s = 0.7e-9f;
+    uint32_t chunk = 1000;
+    for (uint64_t sid = 0; sid < 200000; sid += chunk) {
+        insert_gaussian_samples(&b, sid, chunk, mean, s);
+    }
+
+    // Compute std from raw samples directly (Python-equivalent path).
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = 0;
+    req.time.samples.length = 1000;
+    static uint64_t rsp_u64[1 << 14];
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
+    jsdrv_bufsig_process_request(&b, &req, rsp);
+    float * data = (float *) rsp->data;
+    double sum = 0.0;
+    for (int i = 0; i < 1000; ++i) sum += data[i];
+    double m = sum / 1000.0;
+    double v = 0.0;
+    for (int i = 0; i < 1000; ++i) { double d = data[i] - m; v += d*d; }
+    double std_raw = sqrt(v / 999.0);
+
+    float std_l1 = request_std(&b, 0, 49);     // tgt_level=1
+    float std_l2 = request_std(&b, 0, 499);    // tgt_level=2
+    float std_l3 = request_std(&b, 0, 4999);   // tgt_level=3
+    float std_l4 = request_std(&b, 0, 49999);  // tgt_level=4
+
+    printf("gauss_small: raw=%g l1=%g l2=%g l3=%g l4=%g (expected ~%g)\n",
+           std_raw, std_l1, std_l2, std_l3, std_l4, s);
+    jsdrv_bufsig_free(&b);
+}
+
+static void test_summary_std_gaussian_large_mean(void **state) {
+    // Same noise floor as small_mean, but at unit scale where Q30 has headroom.
+    initialize();  // r0=10, rN=10
+    g_rand_state = 0x12345678u;
+    const float mean = 1.0f;
+    const float s = 1.0e-3f;
+    uint32_t chunk = 1000;
+    for (uint64_t sid = 0; sid < 200000; sid += chunk) {
+        insert_gaussian_samples(&b, sid, chunk, mean, s);
+    }
+
+    float std_lvl0 = request_std(&b, 0, 49);
+    float std_lvl1 = request_std(&b, 0, 499);
+    float std_lvl2 = request_std(&b, 0, 4999);
+    float std_lvl2b = request_std(&b, 0, 49999);
+
+    printf("gauss_large: std_lvl0=%g std_lvl1=%g std_lvl2=%g std_lvl2b=%g "
+           "(expected ~%g)\n",
+           std_lvl0, std_lvl1, std_lvl2, std_lvl2b, s);
+    jsdrv_bufsig_free(&b);
+}
+
 static void test_summary_integration_accuracy(void **state) {
     initialize();
     insert_const_samples(&b, 1000, 1000, 1.0f);
@@ -400,6 +590,10 @@ int main(void) {
             cmocka_unit_test(test_summary_wrap),
             cmocka_unit_test(test_summary_response_end_inclusive),
             cmocka_unit_test(test_summary_single_entry_time_range),
+            cmocka_unit_test(test_summary_std_across_levels_large),
+            cmocka_unit_test(test_summary_std_across_levels_small),
+            cmocka_unit_test(test_summary_std_gaussian_small_mean),
+            cmocka_unit_test(test_summary_std_gaussian_large_mean),
             cmocka_unit_test(test_summary_integration_accuracy),
     };
 

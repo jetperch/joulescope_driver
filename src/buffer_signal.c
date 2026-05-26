@@ -216,7 +216,7 @@ static void summarizeN(struct bufsig_s * self, uint8_t level, uint64_t start_idx
         jsdrv_statistics_reset(&s_accum);
         for (uint64_t i = 0; i < lvl_up->r; ++i) {
             src = level_entry(self, level, lvl_dn_idx + i);
-            jsdrv_statistics_from_entry(&s_tmp, src, 1);  // unweighted, all entries equal
+            jsdrv_statistics_from_entry(&s_tmp, src, lvl_dn->samples_per_entry);
             jsdrv_statistics_combine(&s_accum, &s_accum, &s_tmp);
         }
         dst = level_entry(self, level + 1, lvl_up_idx);
@@ -486,7 +486,13 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
 
 static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index, uint64_t incr, struct jsdrv_summary_entry_s * y) {
     uint64_t sample_count = 0;
-    const uint32_t Q = 30;
+    // Float samples use 12Q40: 12 integer bits (±2048 range) + 40 fractional bits.
+    // The 52-bit width matches double's mantissa, so float→int64 round-trips losslessly
+    // for any value in 12-bit integer range. Squared values use Q80 in i128, leaving
+    // ~24 bits of growth headroom in i128 (~16M samples) before signed overflow.
+    // The earlier Q30 lost sub-LSB noise (e.g. 0.7 nA ≈ 0.75 LSB at Q30) to truncation.
+    const uint32_t Q = 40;
+    const double Q_SCALE = (double)(1ULL << Q);
     JSDRV_ASSERT(index < self->N);
     JSDRV_ASSERT(incr <= self->N);
 
@@ -513,7 +519,7 @@ static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index
             if (isnan(f)) {
                 continue;
             }
-            int64_t x_i64 = (int64_t) (f * (1 << Q));
+            int64_t x_i64 = (int64_t) ((double) f * Q_SCALE);
             x1 += x_i64;
             x2 = js220_i128_add(x2, js220_i128_square_i64(x_i64));
             ++sample_count;
@@ -525,7 +531,7 @@ static uint64_t summary_level0_get_by_idx(struct bufsig_s * self, uint64_t index
             }
         }
         if (sample_count) {
-            y->avg = (float) (((double) x1) / ((double) sample_count * (double) (1 << Q)));
+            y->avg = (float) (((double) x1) / ((double) sample_count * Q_SCALE));
             y->std = (float) js220_i128_compute_std(x1, x2, sample_count, Q);
             y->min = y_min;
             y->max = y_max;
