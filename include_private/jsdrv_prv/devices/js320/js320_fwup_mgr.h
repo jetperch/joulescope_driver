@@ -42,7 +42,7 @@ struct jsdrv_context_s;
 
 #define JSDRV_FWUP_MGR_TOPIC_ADD     "fwup/@/!add"
 #define JSDRV_FWUP_MGR_TOPIC_LIST    "fwup/@/list"
-#define JSDRV_FWUP_MGR_TOPIC_VERSION "fwup/version"   ///< Retained u32 embedded JS320 firmware version (major<<24 | minor<<16 | patch)
+#define JSDRV_FWUP_MGR_TOPIC_VERSION "fwup/js320/version"   ///< u32 embedded JS320 firmware version
 #define JSDRV_FWUP_INSTANCE_MAX      4
 
 /**
