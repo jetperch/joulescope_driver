@@ -40,9 +40,10 @@ JSDRV_CPP_GUARD_START
 
 struct jsdrv_context_s;
 
-#define JSDRV_FWUP_MGR_TOPIC_ADD    "fwup/@/!add"
-#define JSDRV_FWUP_MGR_TOPIC_LIST   "fwup/@/list"
-#define JSDRV_FWUP_INSTANCE_MAX     4
+#define JSDRV_FWUP_MGR_TOPIC_ADD     "fwup/@/!add"
+#define JSDRV_FWUP_MGR_TOPIC_LIST    "fwup/@/list"
+#define JSDRV_FWUP_MGR_TOPIC_VERSION "fwup/version"   ///< Retained u32 embedded JS320 firmware version (major<<24 | minor<<16 | patch)
+#define JSDRV_FWUP_INSTANCE_MAX      4
 
 /**
  * @brief Flags for the fwup add command header.

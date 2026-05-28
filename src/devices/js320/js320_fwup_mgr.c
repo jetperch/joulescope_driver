@@ -22,6 +22,7 @@
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv/topic.h"
+#include "jsdrv/version.h"
 #include "jsdrv/os_event.h"
 #include "jsdrv/os_thread.h"
 #include "jsdrv_prv/cdef.h"
@@ -1078,13 +1079,20 @@ static void mgr_unsubscribe(const char * topic,
     jsdrvp_backend_send(mgr_.context, m);
 }
 
-
 int32_t jsdrv_fwup_mgr_initialize(struct jsdrv_context_s * context) {
     memset(&mgr_, 0, sizeof(mgr_));
     mgr_.context = context;
     mgr_subscribe(JSDRV_FWUP_MGR_TOPIC_ADD, JSDRV_SFLAG_PUB, mgr_on_add);
     mgr_publish_list();
-    JSDRV_LOGI("fwup manager initialized");
+    uint32_t fw_ver = JSDRV_VERSION_ENCODE_U32(JS320_FIRMWARE_VERSION_MAJOR,
+                                              JS320_FIRMWARE_VERSION_MINOR,
+                                              JS320_FIRMWARE_VERSION_PATCH);
+    mgr_send_to_frontend(JSDRV_FWUP_MGR_TOPIC_VERSION, &jsdrv_union_u32_r(fw_ver));
+    JSDRV_LOGI("fwup manager initialized (embedded v%u.%u.%u, size=%u)",
+               (unsigned) JS320_FIRMWARE_VERSION_MAJOR,
+               (unsigned) JS320_FIRMWARE_VERSION_MINOR,
+               (unsigned) JS320_FIRMWARE_VERSION_PATCH,
+               (unsigned) JS320_FIRMWARE_SIZE);
     return 0;
 }
 

@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.1.2
+
+2026 May 28
+
+* Added fwup/version topic to JS320 devices to support introspection.
+
+
 ## 2.1.1
 
 2026 May 26
