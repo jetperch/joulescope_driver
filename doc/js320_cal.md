@@ -443,18 +443,14 @@ def parse_record(rec: bytes) -> dict:
 
 ## When does new cal take effect?
 
-The fpga_mcu loads `ACTIVE` into FPGA cal memory **once, at boot**.
-After a successful `current_offset` or `voltage_offset` (or a
-`slot_copy` into `ACTIVE`), the new record is on flash but the FPGA
-datapath is still using the old coefficients from the previous boot.
+Immediately. After a successful `current_offset`, `voltage_offset`,
+or `slot_copy` into `ACTIVE`, the handler publishes `s/cal/!reload`
+before its final `h/cal/!rsp`, and the fpga_mcu reloads `ACTIVE`
+from flash into the FPGA cal RAM. The next sample the FPGA emits
+already uses the new coefficients. No power cycle is needed.
 
-A power-cycle of the JS320 is required to load the new `ACTIVE`.
-Host-driven device close/open does not trigger an fpga_mcu reboot
-and is not sufficient.
-
-The cal handler does not trigger a reboot. The UI should prompt the
-user to power-cycle the JS320 after writing `ACTIVE`, and confirm
-the new cal by re-reading the record on the next session.
+`slot_copy` into a non-`ACTIVE` slot (e.g. `ACTIVE → TRIM1`) does
+not change the FPGA cal RAM and skips the reload.
 
 ## Recommended pre-flight: snapshot before mutating
 

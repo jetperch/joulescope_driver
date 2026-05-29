@@ -778,6 +778,23 @@ static void on_write_done(struct js320_cal_s * self) {
     cal_begin_verify(self);
 }
 
+// Tell the fpga_mcu to reload ACTIVE from flash into the FPGA cal RAM
+// so the new coefficients take effect without a power cycle.
+static void cal_request_reload(struct js320_cal_s * self) {
+    jsdrvp_mb_dev_publish_to_device(self->dev, "s/cal/!reload",
+        &jsdrv_union_u8(1));
+}
+
+static bool cal_wrote_active(const struct js320_cal_s * self) {
+    if (self->op == JSDRV_CAL_OP_CURRENT_OFFSET) return true;
+    if (self->op == JSDRV_CAL_OP_VOLTAGE_OFFSET) return true;
+    if (self->op == JSDRV_CAL_OP_SLOT_COPY
+            && self->dst_slot == JSDRV_CAL_SLOT_ACTIVE) {
+        return true;
+    }
+    return false;
+}
+
 static void on_verify_done(struct js320_cal_s * self,
                            uint32_t rsp_offset,
                            const uint8_t * data, uint32_t data_size) {
@@ -795,6 +812,9 @@ static void on_verify_done(struct js320_cal_s * self,
     if (self->page_idx < self->page_count) {
         cal_send_read_page(self);
         return;
+    }
+    if (cal_wrote_active(self)) {
+        cal_request_reload(self);
     }
     cal_finish(self, 0);
 }
