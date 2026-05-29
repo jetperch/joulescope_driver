@@ -22,20 +22,10 @@
 
 #include "jsdrv_prv/meta_binary.h"
 #include "jsdrv/error_code.h"
+#include "jsdrv_prv/check32.h"
 #include "jsdrv_prv/log.h"
 #include <string.h>
 #include <stdio.h>
-
-// mb_check32_xxhash: integrity check (mirrors mb/check32.h)
-static uint32_t check32_xxhash(const uint32_t * data, uint32_t length) {
-    uint32_t value = 0x9e3779b1U;  // MB_CHECK32_INITIAL_VALUE
-    for (uint32_t i = 0; i < length; ++i) {
-        value += data[i] * 0x85ebca6bU;
-        value = (value << 13) | (value >> 19);
-        value *= 0xc2b2ae35U;
-    }
-    return value;
-}
 
 // Mirror of mb/pubsub_meta.h and mb/value.h for host-side parsing.
 #define MB_PUBSUB_META_MAGIC            "MBtm_1.0"
@@ -229,7 +219,7 @@ int32_t meta_binary_parse(
     if (hdr->total_size >= 8 && (hdr->total_size & 3) == 0) {
         uint32_t check_words = hdr->total_size / 4 - 1;
         const uint32_t * blob_u32 = (const uint32_t *) blob;
-        uint32_t computed = check32_xxhash(blob_u32, check_words);
+        uint32_t computed = jsdrv_check32_xxhash(blob_u32, check_words);
         if (computed != blob_u32[check_words]) {
             JSDRV_LOGW("meta_binary: check32 mismatch: computed=0x%08x stored=0x%08x",
                         computed, blob_u32[check_words]);

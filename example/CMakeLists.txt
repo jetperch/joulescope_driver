@@ -54,6 +54,7 @@ add_definitions(
 add_executable(minibitty_exe
         minibitty/main.cpp
         minibitty/adapter.c
+        minibitty/cal.c
         minibitty/firmware.c
         minibitty/force_remove.c
         minibitty/fpga_mem.c

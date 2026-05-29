@@ -128,6 +128,7 @@ int32_t app_match(struct app_s * self, const char * filter) {
 
 const struct command_s COMMANDS[] = {
         {"adapter", on_adapter, "MiniBitty adapter"},
+        {"cal", on_cal, "JS320 calibration: read/copy slots, offset cal"},
         {"firmware", on_firmware, "Update device firmware"},
         {"force_remove", on_force_remove, "Stress test: force-remove DUT during streaming"},
         {"fpga_mem", on_fpga_mem, "Program FPGA flash memory"},

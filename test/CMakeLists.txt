@@ -42,6 +42,7 @@ add_dependencies(buffer_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(buffer_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(buffer_test ${CMAKE_CURRENT_BINARY_DIR}/buffer_test)
 
+ADD_CMOCKA_TEST(check32_test)
 ADD_CMOCKA_TEST(cstr_test)
 
 add_executable(dbc_test dbc_test.c)
@@ -88,6 +89,11 @@ add_dependencies(js320_fwup_mgr_test jsdrv tinyprintf miniz cmocka)
 target_link_libraries(js320_fwup_mgr_test jsdrv tinyprintf miniz cmocka)
 add_test(js320_fwup_mgr_test ${CMAKE_CURRENT_BINARY_DIR}/js320_fwup_mgr_test)
 
+add_executable(js320_cal_mgr_test devices/js320/js320_cal_mgr_test.c)
+add_dependencies(js320_cal_mgr_test jsdrv tinyprintf cmocka)
+target_link_libraries(js320_cal_mgr_test jsdrv tinyprintf cmocka)
+add_test(js320_cal_mgr_test ${CMAKE_CURRENT_BINARY_DIR}/js320_cal_mgr_test)
+
 ADD_CMOCKA_DEVICE_TEST(js320 js320_stats_test)
 
 # js320_drv_test includes the driver source directly and stubs every
@@ -105,6 +111,7 @@ add_executable(frontend_test frontend_test.c
         ../src/devices/js220/js220_usb.c
         ../src/devices/js220/js220_params.c
         ../src/devices/js320/firmware.c
+        ../src/devices/js320/js320_cal_mgr.c
         ../src/devices/js320/js320_drv.c
         ../src/devices/js320/js320_fwup.c
         ../src/devices/js320/js320_fwup_mgr.c

@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.0
+
+2026 May 29
+
+* Added JS320 current and voltage offset calibration.
+
+
 ## 2.1.2
 
 2026 May 28
