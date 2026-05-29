@@ -238,6 +238,22 @@ bool js320_fwup_handle_publish(struct js320_fwup_s * self, const char * subtopic
     return false;
 }
 
+struct js320_cal_s { int dummy; };
+static struct js320_cal_s g_cal_stub;
+struct js320_cal_s * js320_cal_alloc(void) { return &g_cal_stub; }
+void js320_cal_free(struct js320_cal_s * self) { (void) self; }
+void js320_cal_on_open(struct js320_cal_s * self, struct jsdrvp_mb_dev_s * dev) { (void) self; (void) dev; }
+void js320_cal_on_close(struct js320_cal_s * self) { (void) self; }
+void js320_cal_on_timeout(struct js320_cal_s * self) { (void) self; }
+bool js320_cal_handle_cmd(struct js320_cal_s * self, const char * subtopic, const struct jsdrv_union_s * value) {
+    (void) self; (void) subtopic; (void) value;
+    return false;
+}
+bool js320_cal_handle_publish(struct js320_cal_s * self, const char * subtopic, const struct jsdrv_union_s * value) {
+    (void) self; (void) subtopic; (void) value;
+    return false;
+}
+
 int32_t js320_stats_convert(const struct js320_statistics_raw_s * src, struct jsdrv_statistics_s * dst) {
     (void) src; (void) dst;
     return -1;

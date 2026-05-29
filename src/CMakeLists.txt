@@ -79,7 +79,7 @@ set(SOURCES
         devices/js220/js220_usb.c
         devices/js220/js220_params.c
         devices/js320/firmware.c
-        devices/js320/js320_cal_mgr.c
+        devices/js320/js320_cal.c
         devices/js320/js320_drv.c
         devices/js320/js320_fwup.c
         devices/js320/js320_fwup_mgr.c

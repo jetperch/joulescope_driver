@@ -17,27 +17,26 @@
 /**
  * @file
  *
- * @brief JS320 calibration: read/copy slots, offset cal.
+ * @brief minibitty subcommand: JS320 calibration.
  */
 
 #include "minibitty_exe_prv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv/os_thread.h"
-#include "jsdrv/time.h"
-#include "jsdrv_prv/devices/js320/js320_cal_mgr.h"
-#include "jsdrv_prv/platform.h"
+#include "jsdrv_prv/devices/js320/js320_cal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 
-static volatile bool cal_done_ = false;
-static volatile int32_t cal_rc_ = 0;
-static uint32_t cal_t_start_ = 0;
+static volatile bool cal_done_;
+static volatile int32_t cal_rsp_status_;
+static volatile uint32_t cal_rsp_txn_id_;
 static uint8_t cal_record_[JSDRV_CAL_RECORD_SIZE];
-static volatile bool cal_record_received_ = false;
-static const char * cal_out_path_ = NULL;
+static volatile bool cal_record_received_;
+static const char * cal_out_path_;
+static uint32_t cal_txn_id_;
 
 
 static int usage(void) {
@@ -46,20 +45,19 @@ static int usage(void) {
         "\n"
         "Subcommands:\n"
         "  read   <slot> [--out <path>] [device_filter]\n"
-        "         Read 1024-byte calibration record from slot.\n"
+        "         Read the 1024-byte calibration record from slot.\n"
         "  copy   <src_slot> <dst_slot> [device_filter]\n"
-        "         Copy src_slot -> dst_slot.  Allowed:\n"
+        "         Copy src_slot -> dst_slot.  Allowed transitions:\n"
         "           any -> ACTIVE\n"
         "           ACTIVE -> TRIM1\n"
         "           ACTIVE -> TRIM2\n"
         "  offset_current [--samples N] [device_filter]\n"
-        "         Sweep upper-triangular shunt/mux, measure current\n"
-        "         ADC offsets for ADC0/1/2, write ACTIVE.\n"
-        "         Caller must arrange a zero-current input state.\n"
+        "         Sweep upper-triangular shunt/mux, measure current ADC\n"
+        "         offsets for ADC0/1/2, write ACTIVE.  Caller must arrange\n"
+        "         a zero-current input state (open at the current jacks).\n"
         "  offset_voltage [--samples N] [device_filter]\n"
         "         Measure voltage ADC offsets at both ranges (15V/2V),\n"
-        "         write ACTIVE.  Caller must arrange a zero-voltage\n"
-        "         (typically shorted v+ to v-) input state.\n"
+        "         write ACTIVE.  Caller must short v+ to v-.\n"
         "\n"
         "Slot tokens: ACTIVE | TRIM1 | TRIM2 | FIELD | LAB | FACTORY\n"
     );
@@ -77,6 +75,18 @@ static int slot_from_string(const char * s, uint8_t * out) {
     return 1;
 }
 
+static const char * slot_to_string(uint8_t slot) {
+    switch (slot) {
+        case JSDRV_CAL_SLOT_ACTIVE:  return "ACTIVE";
+        case JSDRV_CAL_SLOT_TRIM2:   return "TRIM2";
+        case JSDRV_CAL_SLOT_TRIM1:   return "TRIM1";
+        case JSDRV_CAL_SLOT_FIELD:   return "FIELD";
+        case JSDRV_CAL_SLOT_LAB:     return "LAB";
+        case JSDRV_CAL_SLOT_FACTORY: return "FACTORY";
+        default:                     return "?";
+    }
+}
+
 
 static void on_status(void * user_data, const char * topic,
                       const struct jsdrv_union_s * value) {
@@ -84,22 +94,11 @@ static void on_status(void * user_data, const char * topic,
     if (value->type != JSDRV_UNION_STR) {
         return;
     }
-    // Status topics look like "cal/NNN/status".  Ignore "cal/@/list" etc.
-    if (!strstr(topic, "/status")) {
+    if (!strstr(topic, "/h/cal/!status")) {
         return;
     }
-    printf("  [%u ms] [%s] %s\n", jsdrv_time_ms_u32() - cal_t_start_,
-           topic, value->value.str);
-
-    if (strstr(value->value.str, "\"state\":\"DONE\"")) {
-        cal_rc_ = 0;
-        cal_done_ = true;
-    } else if (strstr(value->value.str, "\"state\":\"ERROR\"")) {
-        cal_rc_ = 1;
-        cal_done_ = true;
-    }
+    printf("  [status] %s\n", value->value.str);
 }
-
 
 static void on_data(void * user_data, const char * topic,
                     const struct jsdrv_union_s * value) {
@@ -107,15 +106,8 @@ static void on_data(void * user_data, const char * topic,
     if (value->type != JSDRV_UNION_BIN) {
         return;
     }
-    if (!strstr(topic, "/data")) {
+    if (!strstr(topic, "/h/cal/!data")) {
         return;
-    }
-    if (value->size > JSDRV_CAL_RECORD_SIZE) {
-        printf("  [data] %s size %u (truncated to %u)\n",
-               topic, (unsigned) value->size,
-               (unsigned) JSDRV_CAL_RECORD_SIZE);
-    } else {
-        printf("  [data] %s size %u\n", topic, (unsigned) value->size);
     }
     uint32_t copy = value->size;
     if (copy > JSDRV_CAL_RECORD_SIZE) {
@@ -125,8 +117,26 @@ static void on_data(void * user_data, const char * topic,
     cal_record_received_ = true;
 }
 
+static void on_rsp(void * user_data, const char * topic,
+                   const struct jsdrv_union_s * value) {
+    (void) user_data;
+    if (!strstr(topic, "/h/cal/!rsp")) {
+        return;
+    }
+    if (value->type != JSDRV_UNION_BIN
+            || value->size < sizeof(struct jsdrv_cal_rsp_s)) {
+        cal_rsp_status_ = JSDRV_ERROR_MESSAGE_INTEGRITY;
+        cal_done_ = true;
+        return;
+    }
+    const struct jsdrv_cal_rsp_s * rsp =
+        (const struct jsdrv_cal_rsp_s *) value->value.bin;
+    cal_rsp_txn_id_ = rsp->transaction_id;
+    cal_rsp_status_ = rsp->status;
+    cal_done_ = true;
+}
 
-/// Decode and print the human-readable fields of a 1024-byte cal record.
+
 static void print_record_summary(const uint8_t * rec) {
     static const uint8_t MAGIC[16] = {
         0x4a, 0x53, 0x33, 0x32, 0x30, 0x63, 0x61, 0x6c,
@@ -136,29 +146,20 @@ static void print_record_summary(const uint8_t * rec) {
     uint8_t format_version = rec[16];
     uint16_t vendor_id  = (uint16_t)(rec[18] | (rec[19] << 8));
     uint16_t product_id = (uint16_t)(rec[20] | (rec[21] << 8));
-
     char serial[9] = {0};
     memcpy(serial, rec + 24, 8);
-    serial[8] = '\0';
-
     int64_t create_time = 0;
     for (int i = 0; i < 8; ++i) {
         create_time |= ((int64_t)(rec[32 + i])) << (i * 8);
     }
-
     char source_info[33] = {0};
     memcpy(source_info, rec + 40, 32);
-    source_info[32] = '\0';
-
     uint32_t cal_source_version =
         (uint32_t)(rec[72]) | ((uint32_t)(rec[73]) << 8) |
         ((uint32_t)(rec[74]) << 16) | ((uint32_t)(rec[75]) << 24);
-
     char sig_magic[17] = {0};
     memcpy(sig_magic, rec + 952, 16);
-    sig_magic[16] = '\0';
     bool sig_is_jsdrv = (0 == memcmp(rec + 952, "JSDRV_OFFSET_CAL", 16));
-
     uint32_t check =
         (uint32_t)(rec[1020]) | ((uint32_t)(rec[1021]) << 8) |
         ((uint32_t)(rec[1022]) << 16) | ((uint32_t)(rec[1023]) << 24);
@@ -177,41 +178,82 @@ static void print_record_summary(const uint8_t * rec) {
 }
 
 
-static int run_op(struct app_s * self, struct jsdrv_cal_add_header_s * hdr) {
+/// Subscribe to cal status/data/rsp under the device prefix, publish
+/// the command, wait for !rsp, then unsubscribe.
+static int run_cmd(struct app_s * self, struct jsdrv_cal_cmd_s * cmd) {
+    struct jsdrv_topic_s topic;
+
     cal_done_ = false;
-    cal_rc_ = 0;
+    cal_rsp_status_ = 0;
+    cal_rsp_txn_id_ = 0;
     cal_record_received_ = false;
     memset(cal_record_, 0, sizeof(cal_record_));
-    cal_t_start_ = jsdrv_time_ms_u32();
+    cmd->transaction_id = ++cal_txn_id_;
 
-    jsdrv_subscribe(self->context, "cal/", JSDRV_SFLAG_PUB,
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/cal/!status");
+    jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB,
                     on_status, self, 0);
-    jsdrv_subscribe(self->context, "cal/", JSDRV_SFLAG_PUB,
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/cal/!data");
+    jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB,
                     on_data, self, 0);
 
-    int32_t rc = jsdrv_publish(self->context, JSDRV_CAL_MGR_TOPIC_ADD,
-                               &jsdrv_union_bin((const uint8_t *) hdr,
-                                                sizeof(*hdr)),
-                               10000);
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/cal/!rsp");
+    jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB,
+                    on_rsp, self, 0);
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/cal/!cmd");
+    int32_t rc = jsdrv_publish(self->context, topic.topic,
+        &jsdrv_union_bin((const uint8_t *) cmd, sizeof(*cmd)), 0);
     if (rc) {
-        printf("ERROR: cal add failed: %d\n", (int) rc);
-        jsdrv_unsubscribe(self->context, "cal/", on_status, self, 0);
-        jsdrv_unsubscribe(self->context, "cal/", on_data, self, 0);
-        return rc;
+        printf("ERROR: cal !cmd publish failed: %d\n", (int) rc);
+        goto teardown;
     }
 
     while (!quit_ && !cal_done_) {
         jsdrv_thread_sleep_ms(50);
     }
-
-    jsdrv_unsubscribe(self->context, "cal/", on_status, self, 0);
-    jsdrv_unsubscribe(self->context, "cal/", on_data, self, 0);
-
     if (!cal_done_) {
-        printf("\nInterrupted.\n");
-        return 1;
+        rc = JSDRV_ERROR_ABORTED;
+        goto teardown;
     }
-    return cal_rc_;
+    rc = cal_rsp_status_;
+
+teardown:
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/cal/!status");
+    jsdrv_unsubscribe(self->context, topic.topic, on_status, self, 0);
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/cal/!data");
+    jsdrv_unsubscribe(self->context, topic.topic, on_data, self, 0);
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "h/cal/!rsp");
+    jsdrv_unsubscribe(self->context, topic.topic, on_rsp, self, 0);
+    return rc;
+}
+
+
+static int open_device(struct app_s * self, char * device_filter) {
+    ROE(app_match(self, device_filter));
+    printf("Target device: %s\n", self->device.topic);
+    int32_t rc = jsdrv_open(self->context, self->device.topic,
+                            JSDRV_DEVICE_OPEN_MODE_RESUME,
+                            JSDRV_TIMEOUT_MS_DEFAULT);
+    if (rc) {
+        printf("ERROR: jsdrv_open failed: %d\n", (int) rc);
+        return rc;
+    }
+    return 0;
+}
+
+static void close_device(struct app_s * self) {
+    jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
 }
 
 
@@ -240,17 +282,14 @@ static int on_cal_read(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
-    ROE(app_match(self, device_filter));
-    printf("Target device: %s\n", self->device.topic);
+    ROE(open_device(self, device_filter));
 
-    struct jsdrv_cal_add_header_s hdr;
-    memset(&hdr, 0, sizeof(hdr));
-    jsdrv_cstr_copy(hdr.device_prefix, self->device.topic,
-                    sizeof(hdr.device_prefix));
-    hdr.op = JSDRV_CAL_OP_SLOT_READ;
-    hdr.src_slot = slot;
-
-    int rc = run_op(self, &hdr);
+    struct jsdrv_cal_cmd_s cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.op = JSDRV_CAL_OP_SLOT_READ;
+    cmd.src_slot = slot;
+    int rc = run_cmd(self, &cmd);
+    close_device(self);
 
     if (rc == 0 && cal_record_received_) {
         printf("\nCalibration record (1024 bytes):\n");
@@ -265,30 +304,16 @@ static int on_cal_read(struct app_s * self, int argc, char * argv[]) {
             fclose(f);
             if (n != JSDRV_CAL_RECORD_SIZE) {
                 printf("ERROR: short write to %s (%zu/%u)\n",
-                       cal_out_path_, n,
-                       (unsigned) JSDRV_CAL_RECORD_SIZE);
+                       cal_out_path_, n, (unsigned) JSDRV_CAL_RECORD_SIZE);
                 return 1;
             }
             printf("  -> wrote %s (%u bytes)\n",
                    cal_out_path_, (unsigned) JSDRV_CAL_RECORD_SIZE);
         }
-    } else if (rc == 0) {
-        printf("WARNING: completed but no data received\n");
+    } else if (rc != 0) {
+        printf("ERROR: slot_read failed: %d\n", rc);
     }
     return rc;
-}
-
-
-static const char * slot_to_string(uint8_t slot) {
-    switch (slot) {
-        case JSDRV_CAL_SLOT_ACTIVE:  return "ACTIVE";
-        case JSDRV_CAL_SLOT_TRIM2:   return "TRIM2";
-        case JSDRV_CAL_SLOT_TRIM1:   return "TRIM1";
-        case JSDRV_CAL_SLOT_FIELD:   return "FIELD";
-        case JSDRV_CAL_SLOT_LAB:     return "LAB";
-        case JSDRV_CAL_SLOT_FACTORY: return "FACTORY";
-        default:                     return "?";
-    }
 }
 
 
@@ -317,25 +342,26 @@ static int on_cal_copy(struct app_s * self, int argc, char * argv[]) {
         ARG_CONSUME();
     }
 
-    ROE(app_match(self, device_filter));
-    printf("Target device: %s\n", self->device.topic);
+    ROE(open_device(self, device_filter));
     printf("Copy: %s -> %s\n",
            slot_to_string(src_slot), slot_to_string(dst_slot));
 
-    struct jsdrv_cal_add_header_s hdr;
-    memset(&hdr, 0, sizeof(hdr));
-    jsdrv_cstr_copy(hdr.device_prefix, self->device.topic,
-                    sizeof(hdr.device_prefix));
-    hdr.op = JSDRV_CAL_OP_SLOT_COPY;
-    hdr.src_slot = src_slot;
-    hdr.dst_slot = dst_slot;
-
-    return run_op(self, &hdr);
+    struct jsdrv_cal_cmd_s cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.op = JSDRV_CAL_OP_SLOT_COPY;
+    cmd.src_slot = src_slot;
+    cmd.dst_slot = dst_slot;
+    int rc = run_cmd(self, &cmd);
+    close_device(self);
+    if (rc) {
+        printf("ERROR: slot_copy failed: %d\n", rc);
+    }
+    return rc;
 }
 
 
-static int on_cal_offset_op(struct app_s * self, int argc, char * argv[],
-                             uint8_t op, const char * label) {
+static int on_cal_offset(struct app_s * self, int argc, char * argv[],
+                         uint8_t op, const char * label) {
     uint32_t samples_per_point = 0;
     char * device_filter = NULL;
     while (argc) {
@@ -352,19 +378,20 @@ static int on_cal_offset_op(struct app_s * self, int argc, char * argv[],
         }
     }
 
-    ROE(app_match(self, device_filter));
-    printf("Target device: %s\n", self->device.topic);
+    ROE(open_device(self, device_filter));
     printf("Offset cal: %s (samples=%u)\n", label,
-           samples_per_point ? samples_per_point : 100000);
+           samples_per_point ? samples_per_point : 200000);
 
-    struct jsdrv_cal_add_header_s hdr;
-    memset(&hdr, 0, sizeof(hdr));
-    jsdrv_cstr_copy(hdr.device_prefix, self->device.topic,
-                    sizeof(hdr.device_prefix));
-    hdr.op = op;
-    hdr.samples_per_point = samples_per_point;
-
-    return run_op(self, &hdr);
+    struct jsdrv_cal_cmd_s cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.op = op;
+    cmd.samples_per_point = samples_per_point;
+    int rc = run_cmd(self, &cmd);
+    close_device(self);
+    if (rc) {
+        printf("ERROR: %s failed: %d\n", label, rc);
+    }
+    return rc;
 }
 
 
@@ -380,12 +407,12 @@ int on_cal(struct app_s * self, int argc, char * argv[]) {
         return on_cal_copy(self, argc, argv);
     }
     if (0 == strcmp(subcmd, "offset_current")) {
-        return on_cal_offset_op(self, argc, argv,
-                                 JSDRV_CAL_OP_CURRENT_OFFSET, "current");
+        return on_cal_offset(self, argc, argv,
+                             JSDRV_CAL_OP_CURRENT_OFFSET, "offset_current");
     }
     if (0 == strcmp(subcmd, "offset_voltage")) {
-        return on_cal_offset_op(self, argc, argv,
-                                 JSDRV_CAL_OP_VOLTAGE_OFFSET, "voltage");
+        return on_cal_offset(self, argc, argv,
+                             JSDRV_CAL_OP_VOLTAGE_OFFSET, "offset_voltage");
     }
     printf("Unknown cal subcommand: %s\n", subcmd);
     return usage();

@@ -28,7 +28,6 @@
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/buffer.h"
-#include "jsdrv_prv/devices/js320/js320_cal_mgr.h"
 #include "jsdrv_prv/devices/js320/js320_fwup_mgr.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/devices.h"
@@ -1003,7 +1002,6 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
     jsdrv_pubsub_process(c->pubsub);
     JSDRV_RETURN_ON_ERROR(jsdrv_buffer_initialize(c));
     JSDRV_RETURN_ON_ERROR(jsdrv_fwup_mgr_initialize(c));
-    JSDRV_RETURN_ON_ERROR(jsdrv_cal_mgr_initialize(c));
 
     // Publish the context before spawning the frontend thread so the
     // backend factory (which runs on that thread) can observe a valid
@@ -1040,7 +1038,6 @@ void jsdrv_finalize(struct jsdrv_context_s * context, uint32_t timeout_ms) {
         JSDRV_LOGI("jsdrv_finalize: join frontend_thread timeout=%u", (unsigned) timeout_ms);
         int32_t jrc = jsdrv_thread_join(&context->thread, timeout_ms);
         JSDRV_LOGI("jsdrv_finalize: frontend_thread joined rc=%d", (int) jrc);
-        jsdrv_cal_mgr_finalize();
         jsdrv_fwup_mgr_finalize();
         jsdrv_buffer_finalize();
         jsdrv_pubsub_finalize(c->pubsub);

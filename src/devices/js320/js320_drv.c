@@ -22,6 +22,7 @@
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/dbc.h"
 #include "jsdrv_prv/frontend.h"
+#include "jsdrv_prv/devices/js320/js320_cal.h"
 #include "jsdrv_prv/devices/js320/js320_fwup.h"
 #include "jsdrv_prv/devices/js320/js320_jtag.h"
 #include "jsdrv_prv/devices/js320/js320_stats.h"
@@ -166,6 +167,7 @@ struct js320_drv_s {
     struct jsdrvp_mb_dev_s * dev;
     struct js320_jtag_s * jtag;
     struct js320_fwup_s * fwup;
+    struct js320_cal_s * cal;
     double i_scale;
     double v_scale;
     uint32_t fs;            // host-tracked sample rate, Hz
@@ -629,6 +631,7 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
     self->identity = identity;
     js320_jtag_on_open(self->jtag, dev);
     js320_fwup_on_open(self->fwup, dev);
+    js320_cal_on_open(self->cal, dev);
     // RAW mode is link-only (recovery fwup); skip frontend-facing metadata
     // publishes that assume the device-side pubsub / streaming will come up.
     if (0xFF != jsdrvp_mb_dev_open_mode(dev)) {
@@ -680,6 +683,7 @@ static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s 
     self->waiting_for_sensor = false;
     js320_fwup_on_close(self->fwup);
     js320_jtag_on_close(self->jtag);
+    js320_cal_on_close(self->cal);
     self->dev = NULL;
     JSDRV_LOGI("JS320 driver closed");
 }
@@ -1125,6 +1129,7 @@ static bool js320_handle_cmd(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
         || handle_cmd(self, dev, subtopic, value)
         || js320_fwup_handle_cmd(self->fwup, subtopic, value)
         || js320_jtag_handle_cmd(self->jtag, subtopic, value)
+        || js320_cal_handle_cmd(self->cal, subtopic, value)
     );
 }
 
@@ -1178,7 +1183,10 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
     if (js320_fwup_handle_publish(self->fwup, subtopic, value)) {
         return true;
     }
-    return js320_jtag_handle_publish(self->jtag, subtopic, value);
+    if (js320_jtag_handle_publish(self->jtag, subtopic, value)) {
+        return true;
+    }
+    return js320_cal_handle_publish(self->cal, subtopic, value);
 }
 
 static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
@@ -1196,6 +1204,7 @@ static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
     js320_ack_timeout_check(&self->gpi_ack,    dev, "s/gpi/+/dwnN");
     js320_fwup_on_timeout(self->fwup);
     js320_jtag_on_timeout(self->jtag);
+    js320_cal_on_timeout(self->cal);
 }
 
 static void js320_finalize(struct jsdrvp_mb_drv_s * drv) {
@@ -1203,6 +1212,7 @@ static void js320_finalize(struct jsdrvp_mb_drv_s * drv) {
     JSDRV_LOGI("JS320 driver finalized");
     js320_fwup_free(self->fwup);
     js320_jtag_free(self->jtag);
+    js320_cal_free(self->cal);
     jsdrv_free(self);
 }
 
@@ -1223,6 +1233,7 @@ static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     }
     self->jtag = js320_jtag_alloc();
     self->fwup = js320_fwup_alloc();
+    self->cal = js320_cal_alloc();
     self->drv.on_open = js320_on_open;
     self->drv.on_close = js320_on_close;
     self->drv.handle_app = js320_handle_app;
