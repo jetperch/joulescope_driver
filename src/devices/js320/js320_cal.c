@@ -90,11 +90,22 @@ static const uint8_t CAL_INDEX_MAP[36] = {
 // 12 power-line cycles at 1 MHz = 200k samples per point.
 #define DEFAULT_SAMPLES_PER_POINT    200000U
 #define MUX_SETTLE_MS                20U
+// Let the queued stream-disable publishes take effect and the USB
+// pipe drain before starting flash I/O.
+#define STREAM_DISABLE_SETTLE_MS     100U
 
 
 // --- Save/restore topics ---
-
-#define SAVE_TOPIC_COUNT 11
+//
+// Streaming state observed (via handle_cmd / handle_publish), snapshotted
+// at sweep entry, and restored at completion.  Indices
+// [0, SAVE_STREAM_BEGIN) are configuration topics the sweep mutates.
+// Indices [SAVE_STREAM_BEGIN, SAVE_TOPIC_COUNT) are sample stream enables:
+// the device supports only two full-size streams at once and the sweep
+// uses both s/adc slots, so every other stream (i, v, p, i-range, gpi
+// 0..3, trigger) must be disabled for the duration and restored after.
+#define SAVE_TOPIC_COUNT  20
+#define SAVE_STREAM_BEGIN 11
 static const char * const SAVE_TOPICS[SAVE_TOPIC_COUNT] = {
     "s/i/range/mode",
     "s/i/range/select",
@@ -107,6 +118,15 @@ static const char * const SAVE_TOPICS[SAVE_TOPIC_COUNT] = {
     "s/adc/0/ctrl",
     "s/adc/1/sel",
     "s/adc/1/ctrl",
+    "s/i/ctrl",
+    "s/v/ctrl",
+    "s/p/ctrl",
+    "s/i/range/ctrl",
+    "s/gpi/0/ctrl",
+    "s/gpi/1/ctrl",
+    "s/gpi/2/ctrl",
+    "s/gpi/3/ctrl",
+    "s/gpi/7/ctrl",
 };
 
 
@@ -114,6 +134,7 @@ static const char * const SAVE_TOPICS[SAVE_TOPIC_COUNT] = {
 
 enum cal_state_e {
     CAL_IDLE = 0,
+    CAL_DISABLE_SETTLE, ///< Waiting for the other streams to stop before flash I/O.
     CAL_READ,           ///< Reading record from a slot, one page at a time.
     CAL_ERASE,          ///< Erasing the destination slot's 64 KB block.
     CAL_WRITE,          ///< Writing record pages.
@@ -165,6 +186,12 @@ struct js320_cal_s {
     int64_t  adc_sum[2];
     uint32_t adc_count[2];
     uint32_t adc_need[2];
+
+    // ADC stream lifetime.  The stream is subscribed and enabled once at
+    // the start of an offset sweep and torn down once at completion, so
+    // a multi-point sweep never thrashes the host streaming state.
+    bool     stream_active;
+    bool     stream_dual;            ///< true when slot 1 is also in use.
 };
 
 
@@ -187,6 +214,7 @@ static const char * op_name(uint8_t op) {
 // Status is never emitted while CAL_IDLE; only active states reach here.
 static const char * state_name(uint8_t state) {
     switch (state) {
+        case CAL_DISABLE_SETTLE: return "disable";
         case CAL_READ:           return "read";
         case CAL_ERASE:          return "erase";
         case CAL_WRITE:          return "write";
@@ -343,10 +371,37 @@ static void cal_send_erase(struct js320_cal_s * self) {
 
 // --- Streaming-state save / restore ---
 
+// Publish a retained u32 to a device subtopic through the host pubsub
+// (jsdrv_publish), so the device driver's stream-ctrl logic runs and the
+// retained frontend value updates.  Used for the stream-enable topics:
+// a direct-to-device publish would bypass the smart-power handling, and
+// re-publishing an unchanged frontend value is deduped by the pubsub.
+// timeout 0 keeps it non-blocking (we are on the frontend thread).
+static void cal_host_publish_u32(struct js320_cal_s * self,
+                                 const char * subtopic, uint32_t v) {
+    char topic[JSDRV_TOPIC_LENGTH_MAX];
+    tfp_snprintf(topic, sizeof(topic), "%s/%s",
+                 jsdrvp_mb_dev_prefix(self->dev), subtopic);
+    jsdrv_publish(jsdrvp_mb_dev_context(self->dev), topic,
+                  &jsdrv_union_u32_r(v), 0);
+}
+
 static void cal_snapshot_prior(struct js320_cal_s * self) {
     memcpy(self->prior_value, self->saved_value, sizeof(self->prior_value));
     memcpy(self->prior_known, self->saved_known, sizeof(self->prior_known));
     self->restore_pending = true;
+}
+
+// Disable every other sample stream so the sweep's two s/adc streams fit
+// the device's two-full-size-stream budget.  Prior values were captured
+// by cal_snapshot_prior and are re-enabled by cal_restore_prior.  Goes
+// through the host path so the frontend value changes to 0 (letting the
+// later restore to the prior value take effect) and the smart-power
+// logic runs.
+static void cal_streams_disable(struct js320_cal_s * self) {
+    for (int i = SAVE_STREAM_BEGIN; i < SAVE_TOPIC_COUNT; ++i) {
+        cal_host_publish_u32(self, SAVE_TOPICS[i], 0);
+    }
 }
 
 static void cal_restore_prior(struct js320_cal_s * self) {
@@ -358,13 +413,24 @@ static void cal_restore_prior(struct js320_cal_s * self) {
         if (!self->prior_known[i]) {
             continue;
         }
-        jsdrvp_mb_dev_publish_to_device(self->dev, SAVE_TOPICS[i],
-            &jsdrv_union_u32(self->prior_value[i]));
+        if (i >= SAVE_STREAM_BEGIN) {
+            // Stream enables: restore through the host path (smart-power
+            // + frontend value), matching how they were disabled.
+            cal_host_publish_u32(self, SAVE_TOPICS[i], self->prior_value[i]);
+        } else {
+            // Config topics the sweep set directly: restore directly so
+            // the device leaves the cal-time values regardless of the
+            // (unchanged) frontend retained value.
+            jsdrvp_mb_dev_publish_to_device(self->dev, SAVE_TOPICS[i],
+                &jsdrv_union_u32(self->prior_value[i]));
+        }
     }
 }
 
 
 // --- Op completion ---
+
+static void cal_stream_teardown(struct js320_cal_s * self);
 
 static void cal_finish(struct js320_cal_s * self, int32_t status) {
     if (status) {
@@ -372,6 +438,7 @@ static void cal_finish(struct js320_cal_s * self, int32_t status) {
     } else {
         JSDRV_LOGI("cal %s: complete", op_name(self->op));
     }
+    cal_stream_teardown(self);
     cal_restore_prior(self);
     jsdrvp_mb_dev_set_timeout(self->dev, 0);
     cal_send_rsp(self, status);
@@ -425,39 +492,46 @@ static void cal_unsubscribe(struct js320_cal_s * self, const char * subtopic,
                       fn, self, 0);
 }
 
-static void cal_arm_stream(struct js320_cal_s * self,
-                           int8_t slot0_adc, int8_t slot1_adc) {
+// Subscribe to the ADC data stream(s) and start continuous streaming.
+// Called once at the start of an offset sweep.  slot 0 is always used;
+// slot 1 is used for the current sweep's ADC0+ADC1 pass.  The slot 0
+// source is set per pass; slot 1 stays on ADC1.
+static void cal_stream_setup(struct js320_cal_s * self, bool dual) {
+    self->stream_dual = dual;
+    self->stream_active = true;
+    cal_subscribe(self, "s/adc/0/!data", on_adc0_sample);
     jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/0/ctrl",
-        &jsdrv_union_u32(0));
-    jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/1/ctrl",
-        &jsdrv_union_u32(0));
-    if (slot0_adc >= 0) {
-        jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/0/sel",
-            &jsdrv_union_u32((uint32_t) slot0_adc));
-        cal_subscribe(self, "s/adc/0/!data", on_adc0_sample);
-        jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/0/ctrl",
-            &jsdrv_union_u32(1));
-    }
-    if (slot1_adc >= 0) {
+        &jsdrv_union_u32(1));
+    if (dual) {
         jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/1/sel",
-            &jsdrv_union_u32((uint32_t) slot1_adc));
+            &jsdrv_union_u32(1));
         cal_subscribe(self, "s/adc/1/!data", on_adc1_sample);
         jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/1/ctrl",
             &jsdrv_union_u32(1));
     }
 }
 
-static void cal_disarm_stream(struct js320_cal_s * self) {
-    if (self->adc_need[0]) {
-        cal_unsubscribe(self, "s/adc/0/!data", on_adc0_sample);
+// Stop the ADC stream(s), reset their source select to the default, and
+// unsubscribe.  Called once at sweep completion (from cal_finish), never
+// from inside the data callback.  cal_restore_prior runs afterward and
+// re-applies the host's prior s/adc values if it had set any.
+static void cal_stream_teardown(struct js320_cal_s * self) {
+    if (!self->stream_active) {
+        return;
     }
-    if (self->adc_need[1]) {
-        cal_unsubscribe(self, "s/adc/1/!data", on_adc1_sample);
-    }
+    self->stream_active = false;
     jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/0/ctrl",
         &jsdrv_union_u32(0));
-    jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/1/ctrl",
+    jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/0/sel",
         &jsdrv_union_u32(0));
+    cal_unsubscribe(self, "s/adc/0/!data", on_adc0_sample);
+    if (self->stream_dual) {
+        jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/1/ctrl",
+            &jsdrv_union_u32(0));
+        jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/1/sel",
+            &jsdrv_union_u32(0));
+        cal_unsubscribe(self, "s/adc/1/!data", on_adc1_sample);
+    }
 }
 
 static void cal_begin_capture(struct js320_cal_s * self,
@@ -561,14 +635,19 @@ static void cal_current_arm_mux(struct js320_cal_s * self) {
         &jsdrv_union_u32(mux));
 }
 
-static void cal_current_begin_pass(struct js320_cal_s * self) {
-    if (self->sweep_pass == 0) {
-        cal_arm_stream(self, 0, 1);   // pass A: ADC0 + ADC1
-        cal_begin_capture(self, true, true);
-    } else {
-        cal_arm_stream(self, 2, -1);  // pass B: ADC2 only
-        cal_begin_capture(self, true, false);
-    }
+// Point the slot 0 stream at the ADC for this pass and arm the settle
+// delay.  Pass 0 reads ADC0 (slot 0) and ADC1 (slot 1, already armed);
+// pass 1 reads ADC2 (slot 0).  The stream stays running; the settle
+// window discards samples taken before the source switch.
+static void cal_current_pass_config(struct js320_cal_s * self) {
+    uint32_t slot0_adc = (self->sweep_pass == 0) ? 0 : 2;
+    jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/0/sel",
+        &jsdrv_union_u32(slot0_adc));
+    cal_arm_settle(self);
+}
+
+static void cal_current_capture_begin(struct js320_cal_s * self) {
+    cal_begin_capture(self, true, self->sweep_pass == 0);
     self->state = CAL_SWEEP_CAPTURE;
 }
 
@@ -589,11 +668,17 @@ static uint16_t cal_current_pct(struct js320_cal_s * self) {
     return (uint16_t)(100U + ((uint32_t) captures_done * 780U) / 42U);
 }
 
+// Set the shunt range/mux for a new sweep point and start its pass 0.
+static void cal_current_point_start(struct js320_cal_s * self) {
+    cal_current_arm_mux(self);
+    self->sweep_pass = 0;
+    cal_current_pass_config(self);
+}
+
 static void cal_current_after_capture(struct js320_cal_s * self) {
     uint8_t idx = CAL_INDEX_MAP[self->sweep_i_select * 6 + self->sweep_i_mux];
     int32_t mean0 = adc_mean_to_q31(self->adc_sum[0], self->adc_count[0]);
     int32_t mean1 = adc_mean_to_q31(self->adc_sum[1], self->adc_count[1]);
-    cal_disarm_stream(self);
     if (self->sweep_pass == 0) {
         cal_set_offset(self->record,
             0 * CAL_POINTS_PER_CURRENT_CHAN + idx, mean0);
@@ -606,7 +691,7 @@ static void cal_current_after_capture(struct js320_cal_s * self) {
             (unsigned) self->sweep_i_select, (unsigned) self->sweep_i_mux,
             (int) mean0, (int) mean1);
         cal_send_status(self, cal_current_pct(self), msg);
-        cal_current_begin_pass(self);
+        cal_current_pass_config(self);
         return;
     }
     cal_set_offset(self->record,
@@ -630,9 +715,7 @@ static void cal_current_after_capture(struct js320_cal_s * self) {
     }
     self->sweep_i_select = next_i;
     self->sweep_i_mux = next_mux;
-    self->sweep_pass = 0;
-    cal_current_arm_mux(self);
-    cal_arm_settle(self);
+    cal_current_point_start(self);
 }
 
 static void cal_current_after_active_read(struct js320_cal_s * self) {
@@ -640,31 +723,33 @@ static void cal_current_after_active_read(struct js320_cal_s * self) {
         cal_finish(self, JSDRV_ERROR_MESSAGE_INTEGRITY);
         return;
     }
-    cal_snapshot_prior(self);
     jsdrvp_mb_dev_publish_to_device(self->dev, "s/i/range/mode",
         &jsdrv_union_u32(5));
+    cal_stream_setup(self, true);
     self->sweep_i_select = 0;
     self->sweep_i_mux = 0;
-    self->sweep_pass = 0;
-    cal_current_arm_mux(self);
     cal_send_status(self, 100, "sweeping current offsets");
-    cal_arm_settle(self);
+    cal_current_point_start(self);
 }
 
 
 // --- Voltage cal step ---
 
-static void cal_voltage_begin_capture(struct js320_cal_s * self) {
+// Select the voltage range for this point and arm the settle delay.
+// The slot 0 stream stays on ADC3 (voltage) for the whole sweep.
+static void cal_voltage_pass_config(struct js320_cal_s * self) {
     jsdrvp_mb_dev_publish_to_device(self->dev, "s/v/range/select",
         &jsdrv_union_u32(self->voltage_v_select));
-    cal_arm_stream(self, 3, -1);   // ADC3 = voltage
+    cal_arm_settle(self);
+}
+
+static void cal_voltage_capture_begin(struct js320_cal_s * self) {
     cal_begin_capture(self, true, false);
     self->state = CAL_SWEEP_CAPTURE;
 }
 
 static void cal_voltage_after_capture(struct js320_cal_s * self) {
     int32_t mean = adc_mean_to_q31(self->adc_sum[0], self->adc_count[0]);
-    cal_disarm_stream(self);
     cal_set_offset(self->record, CAL_VOLTAGE_IDX + self->voltage_v_select,
                    mean);
     char msg[64];
@@ -675,7 +760,7 @@ static void cal_voltage_after_capture(struct js320_cal_s * self) {
                     msg);
     if (self->voltage_v_select == 0) {
         self->voltage_v_select = 1;
-        cal_arm_settle(self);
+        cal_voltage_pass_config(self);
         return;
     }
     cal_stamp_signature_and_check(self->record);
@@ -687,12 +772,14 @@ static void cal_voltage_after_active_read(struct js320_cal_s * self) {
         cal_finish(self, JSDRV_ERROR_MESSAGE_INTEGRITY);
         return;
     }
-    cal_snapshot_prior(self);
     jsdrvp_mb_dev_publish_to_device(self->dev, "s/v/range/mode",
         &jsdrv_union_u32(1));
+    jsdrvp_mb_dev_publish_to_device(self->dev, "s/adc/0/sel",
+        &jsdrv_union_u32(3));   // ADC3 = voltage
+    cal_stream_setup(self, false);
     self->voltage_v_select = 0;
     cal_send_status(self, 100, "sweeping voltage offsets");
-    cal_arm_settle(self);
+    cal_voltage_pass_config(self);
 }
 
 
@@ -918,6 +1005,7 @@ static void cal_start(struct js320_cal_s * self,
     self->samples_per_point = cmd->samples_per_point;
     self->mem_cmd_id = 0;
     self->restore_pending = false;
+    self->stream_active = false;
 
     switch (cmd->op) {
         case JSDRV_CAL_OP_SLOT_READ:
@@ -939,11 +1027,17 @@ static void cal_start(struct js320_cal_s * self,
         }
 
         case JSDRV_CAL_OP_CURRENT_OFFSET:
-            cal_begin_read(self, JSDRV_CAL_SLOT_ACTIVE, "reading ACTIVE");
-            break;
-
         case JSDRV_CAL_OP_VOLTAGE_OFFSET:
-            cal_begin_read(self, JSDRV_CAL_SLOT_ACTIVE, "reading ACTIVE");
+            // Quiet all other sample streams before any flash I/O: the
+            // device's two-stream budget must be free for the ACTIVE read
+            // and the sweep's s/adc streams.  The disable publishes are
+            // queued on the host path, so settle before reading ACTIVE.
+            cal_snapshot_prior(self);
+            cal_streams_disable(self);
+            self->state = CAL_DISABLE_SETTLE;
+            cal_send_status(self, 20, "disabling streams");
+            jsdrvp_mb_dev_set_timeout(self->dev, jsdrv_time_utc()
+                + (int64_t) STREAM_DISABLE_SETTLE_MS * JSDRV_TIME_MILLISECOND);
             break;
 
         default:
@@ -970,6 +1064,7 @@ void js320_cal_on_open(struct js320_cal_s * cal, struct jsdrvp_mb_dev_s * dev) {
     cal->state = CAL_IDLE;
     cal->op = 0xFF;
     cal->restore_pending = false;
+    cal->stream_active = false;
     memset(cal->saved_known, 0, sizeof(cal->saved_known));
     memset(cal->prior_known, 0, sizeof(cal->prior_known));
 }
@@ -979,6 +1074,7 @@ void js320_cal_on_close(struct js320_cal_s * cal) {
         JSDRV_LOGW("cal: device closed during %s, aborting",
                    op_name(cal->op));
         jsdrvp_mb_dev_set_timeout(cal->dev, 0);
+        cal_stream_teardown(cal);
         cal->state = CAL_IDLE;
         cal->op = 0xFF;
         cal->restore_pending = false;
@@ -1051,12 +1147,17 @@ bool js320_cal_handle_publish(struct js320_cal_s * cal,
 }
 
 void js320_cal_on_timeout(struct js320_cal_s * cal) {
+    if (cal->state == CAL_DISABLE_SETTLE) {
+        // Streams are quiet; now safe to read ACTIVE and run the sweep.
+        cal_begin_read(cal, JSDRV_CAL_SLOT_ACTIVE, "reading ACTIVE");
+        return;
+    }
     if (cal->state != CAL_SWEEP_SETTLE) {
         return;
     }
     if (cal->op == JSDRV_CAL_OP_CURRENT_OFFSET) {
-        cal_current_begin_pass(cal);
+        cal_current_capture_begin(cal);
     } else if (cal->op == JSDRV_CAL_OP_VOLTAGE_OFFSET) {
-        cal_voltage_begin_capture(cal);
+        cal_voltage_capture_begin(cal);
     }
 }

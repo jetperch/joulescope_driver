@@ -1125,11 +1125,15 @@ static bool handle_cmd(struct js320_drv_s * self,
 static bool js320_handle_cmd(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
                               const char * subtopic, const struct jsdrv_union_s * value) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    // js320_cal_handle_cmd runs first so it can observe the streaming
+    // ctrl topics (s/i/ctrl, s/v/ctrl, s/p/ctrl) that the generic
+    // handle_cmd consumes.  It returns false for everything except its
+    // own h/cal/!cmd, so the rest of the chain still runs.
     return (false
+        || js320_cal_handle_cmd(self->cal, subtopic, value)
         || handle_cmd(self, dev, subtopic, value)
         || js320_fwup_handle_cmd(self->fwup, subtopic, value)
         || js320_jtag_handle_cmd(self->jtag, subtopic, value)
-        || js320_cal_handle_cmd(self->cal, subtopic, value)
     );
 }
 

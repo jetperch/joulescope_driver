@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.1
+
+2026 May 29
+
+* Modified offset calibration to save/restore state once, not every point.
+
+
 ## 2.2.0
 
 2026 May 29
