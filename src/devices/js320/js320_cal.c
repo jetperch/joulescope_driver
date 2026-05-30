@@ -1148,7 +1148,7 @@ bool js320_cal_handle_publish(struct js320_cal_s * cal,
 }
 
 void js320_cal_on_timeout(struct js320_cal_s * cal) {
-    JSDRV_LOGW("js320_cal_on_timeout: state=%d", cal->state);
+    JSDRV_LOGD1("js320_cal_on_timeout: state=%d", cal->state);
     if (cal->state == CAL_DISABLE_SETTLE) {
         // Streams are quiet; now safe to read ACTIVE and run the sweep.
         cal_begin_read(cal, JSDRV_CAL_SLOT_ACTIVE, "reading ACTIVE");
