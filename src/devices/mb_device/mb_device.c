@@ -254,6 +254,7 @@ static void send_frame_ctrl_to_device(struct jsdrvp_mb_dev_s * d, uint8_t ctrl) 
 static bool on_ll_open(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     self->out_frame_id = 0;
+    self->in_frame_id = 0;
     // Drop any stale timesync maps from a previous open so accessors
     // return NULL until the current session's !map publishes arrive.
     memset(self->time_maps, 0, sizeof(self->time_maps));

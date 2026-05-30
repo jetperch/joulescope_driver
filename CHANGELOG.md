@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.3
+
+2026 May 30
+
+* Fixed WARNING log entries on Window's device close.
+* Fixed WARNING log message on USB reconnect.
+
+
 ## 2.2.2
 
 2026 May 30

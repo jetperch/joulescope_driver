@@ -255,6 +255,16 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
             } else if (ec == ERROR_SEM_TIMEOUT) {
                 JSDRV_LOGD1("bulk_in_process timeout");
                 bulk_in_transfer_free(t);  // timeout ok
+            } else if ((ec == ERROR_OPERATION_ABORTED)     // 995: pending reads aborted (close)
+                       || (ec == ERROR_GEN_FAILURE)        // 31: device stopped functioning (removed)
+                       || (ec == ERROR_NO_SUCH_DEVICE)     // 433: device gone
+                       || (ec == ERROR_DEVICE_NOT_CONNECTED)) {
+                // Expected during a graceful close or device removal: the
+                // outstanding reads are cancelled or the device is gone.
+                // Not an error, so log at debug to avoid close-time noise.
+                JSDRV_LOGD1("bulk_in_process device closing/removed: ec=%d", (int) ec);
+                bulk_in_transfer_free(t);
+                rc = 1;
             } else {
                 WINDOWS_LOG(JSDRV_LOGW, "%s", "bulk_in_process WinUsb_GetOverlappedResult error");
                 bulk_in_transfer_free(t);
