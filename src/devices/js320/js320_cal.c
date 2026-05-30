@@ -302,8 +302,9 @@ static void cal_send_status(struct js320_cal_s * self, uint16_t pct_x10,
         "{\"op\":\"%s\",\"state\":\"%s\",\"pct\":%u.%u,\"msg\":\"%s\"}",
         op_name(self->op), state_name(self->state),
         pct_whole, pct_frac, msg);
+    JSDRV_LOGI("cal_status: %s", buf);
     jsdrvp_mb_dev_send_to_frontend(self->dev, "h/cal/!status",
-        &jsdrv_union_cstr_r(buf));
+        &jsdrv_union_cstr(buf));
 }
 
 static void cal_send_rsp(struct js320_cal_s * self, int32_t status) {
