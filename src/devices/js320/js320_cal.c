@@ -868,6 +868,7 @@ static void on_write_done(struct js320_cal_s * self) {
 // Tell the fpga_mcu to reload ACTIVE from flash into the FPGA cal RAM
 // so the new coefficients take effect without a power cycle.
 static void cal_request_reload(struct js320_cal_s * self) {
+    JSDRV_LOGI("cal_request_reload");
     jsdrvp_mb_dev_publish_to_device(self->dev, "s/cal/!reload",
         &jsdrv_union_u8(1));
 }
@@ -995,7 +996,6 @@ static void on_adc_data(struct js320_cal_s * self, int slot,
 
 
 // --- Command entry ---
-
 static void cal_start(struct js320_cal_s * self,
                       const struct jsdrv_cal_cmd_s * cmd) {
     self->transaction_id = cmd->transaction_id;
@@ -1007,6 +1007,7 @@ static void cal_start(struct js320_cal_s * self,
     self->restore_pending = false;
     self->stream_active = false;
 
+    JSDRV_LOGI("Starting calibration operation: %d", cmd->op);
     switch (cmd->op) {
         case JSDRV_CAL_OP_SLOT_READ:
             if (cmd->src_slot >= JSDRV_CAL_SLOT_COUNT) {
@@ -1071,8 +1072,7 @@ void js320_cal_on_open(struct js320_cal_s * cal, struct jsdrvp_mb_dev_s * dev) {
 
 void js320_cal_on_close(struct js320_cal_s * cal) {
     if (cal->state != CAL_IDLE) {
-        JSDRV_LOGW("cal: device closed during %s, aborting",
-                   op_name(cal->op));
+        JSDRV_LOGW("cal: device closed during %s, aborting", op_name(cal->op));
         jsdrvp_mb_dev_set_timeout(cal->dev, 0);
         cal_stream_teardown(cal);
         cal->state = CAL_IDLE;
@@ -1147,6 +1147,7 @@ bool js320_cal_handle_publish(struct js320_cal_s * cal,
 }
 
 void js320_cal_on_timeout(struct js320_cal_s * cal) {
+    JSDRV_LOGW("js320_cal_on_timeout: state=%d", cal->state);
     if (cal->state == CAL_DISABLE_SETTLE) {
         // Streams are quiet; now safe to read ACTIVE and run the sweep.
         cal_begin_read(cal, JSDRV_CAL_SLOT_ACTIVE, "reading ACTIVE");
