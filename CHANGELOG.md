@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.4
+
+2026 Jun 1
+
+* Improved minibitty info command.
+* Bumped JS320 firmware to 0.6.4.
+
+
 ## 2.2.3
 
 2026 May 30

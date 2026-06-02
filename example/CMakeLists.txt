@@ -54,6 +54,7 @@ add_definitions(
 add_executable(minibitty_exe
         minibitty/main.cpp
         minibitty/adapter.c
+        minibitty/boot_info.c
         minibitty/cal.c
         minibitty/firmware.c
         minibitty/force_remove.c
@@ -87,6 +88,12 @@ else()
     target_link_libraries(minibitty_exe jsdrv)
 endif()
 set_target_properties(minibitty_exe PROPERTIES OUTPUT_NAME minibitty)
+
+# Standalone unit test for the boot/personality decoders (no jsdrv dependency).
+add_executable(boot_info_test
+        minibitty/boot_info.c
+        minibitty/boot_info_test.c
+)
 
 add_executable(fuzz fuzz.c)
 add_dependencies(fuzz jsdrv)
