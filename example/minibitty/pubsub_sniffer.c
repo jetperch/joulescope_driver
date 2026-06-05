@@ -36,8 +36,12 @@ static void on_publish(void * user_data, const char * topic, const struct jsdrv_
         case JSDRV_UNION_STR:
             printf("[%s] %s\n", topic, value->value.str);
             break;
-        case JSDRV_UNION_BIN:
-            printf("[%s] BIN(%u):", topic, (unsigned) value->size);
+        case JSDRV_UNION_BIN:    /* intentional fall-through */
+        case JSDRV_UNION_STDMSG: /* intentional fall-through */
+        case JSDRV_UNION_FRAME: {
+            const char * kind = (value->type == JSDRV_UNION_BIN) ? "BIN"
+                : (value->type == JSDRV_UNION_STDMSG) ? "STDMSG" : "FRAME";
+            printf("[%s] %s(%u):", topic, kind, (unsigned) value->size);
             for (uint32_t i = 0; i < value->size && i < 64; ++i) {
                 printf(" %02X", value->value.bin[i]);
             }
@@ -46,6 +50,7 @@ static void on_publish(void * user_data, const char * topic, const struct jsdrv_
             }
             printf("\n");
             break;
+        }
         case JSDRV_UNION_U8:
             printf("[%s] u8=%u\n", topic, (unsigned) value->value.u8);
             break;
