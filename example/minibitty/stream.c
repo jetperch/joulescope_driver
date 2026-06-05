@@ -37,6 +37,18 @@ enum loopback_location_e {
 };
 
 static volatile time_t last_data_time_ = 0;
+static bool stats_enable_ = false;  // --stats: display the sys utilization report
+
+// mb_sys_util_v1_s feature bits (see minibitty mb/tasks/sys.h).
+#define UTIL_FEATURE_CPU   (1u << 0)
+#define UTIL_FEATURE_STACK (1u << 1)
+#define UTIL_FEATURE_HEAP  (1u << 2)
+
+static uint32_t rd_le_u32(const uint8_t * p) {
+    uint32_t v;
+    memcpy(&v, p, sizeof(v));  // host and device are little-endian
+    return v;
+}
 
 void on_u4_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     static uint32_t counter = 0;
@@ -106,6 +118,58 @@ void on_stats_data(void * user_data, const char * topic, const struct jsdrv_unio
     (void) value;
     last_data_time_ = time(NULL);
     printf("stats\n");
+}
+
+// Parse and display the sys MB_STDMSG_UTILIZATION report (mb_sys_util_v1_s).
+// The delivered value is the stdmsg: an 8-byte stdmsg header followed by the
+// 8-byte mb_sys_util_v1_s header and a run of (measured, total) u32 pairs
+// ordered cpu -> stack -> heap per the feature bits.
+void on_util_stats(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) user_data;
+    (void) topic;
+    last_data_time_ = time(NULL);
+    if ((value->type != JSDRV_UNION_STDMSG) || (value->size < 16)) {
+        return;  // need the stdmsg header (8) + mb_sys_util_v1_s header (8)
+    }
+    const uint8_t * b = value->value.bin;
+    const uint8_t * end = b + value->size;
+    const uint8_t * v1 = b + 8;          // skip the stdmsg header
+    uint8_t features = v1[0];
+    uint8_t stack_count = v1[1];
+    uint8_t heap_count = v1[2];
+    const uint8_t * pair = v1 + 8;       // pairs follow the v1 header
+
+    printf("sys util:");
+    if (features & UTIL_FEATURE_CPU) {
+        if ((pair + 8) > end) { printf("\n"); return; }
+        uint32_t busy = rd_le_u32(pair);
+        uint32_t total = rd_le_u32(pair + 4);
+        double pct = (total > 0) ? (100.0 * (double) busy / (double) total) : 0.0;
+        printf("  cpu %5.2f%% (%u/%u)", pct, (unsigned) busy, (unsigned) total);
+        pair += 8;
+    }
+    if (features & UTIL_FEATURE_STACK) {
+        for (uint8_t i = 0; i < stack_count; ++i) {
+            if ((pair + 8) > end) { printf("\n"); return; }
+            uint32_t used = rd_le_u32(pair);
+            uint32_t total = rd_le_u32(pair + 4);
+            double pct = (total > 0) ? (100.0 * (double) used / (double) total) : 0.0;
+            printf("  stack %u/%u B (%.1f%%)", (unsigned) used, (unsigned) total, pct);
+            pair += 8;
+        }
+    }
+    if (features & UTIL_FEATURE_HEAP) {
+        for (uint8_t i = 0; i < heap_count; ++i) {
+            if ((pair + 8) > end) { printf("\n"); return; }
+            uint32_t used = rd_le_u32(pair);
+            uint32_t total = rd_le_u32(pair + 4);
+            double pct = (total > 0) ? (100.0 * (double) used / (double) total) : 0.0;
+            printf("  heap%u %u/%u B (%.1f%%)", (unsigned) i, (unsigned) used, (unsigned) total, pct);
+            pair += 8;
+        }
+    }
+    printf("\n");
+    fflush(stdout);
 }
 
 #define PUBLISH_U32(topic_, value_) \
@@ -191,6 +255,17 @@ static int run(struct app_s * self, const char * device) {
     }
 
 
+    if (stats_enable_) {
+        // Subscribe to the ctrl-app sys utilization report (1 Hz).
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, "c/sys/util/!stat");
+        rc = jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_util_stats, NULL, 0);
+        if (rc) {
+            printf("subscribe %s failed with %d\n", topic.topic, (int) rc);
+            rc = 0;  // non-fatal: continue streaming without stats
+        }
+    }
+
     last_data_time_ = time(NULL);
     time_t end_time = self->duration_ms
         ? (time(NULL) + (self->duration_ms + 999) / 1000)
@@ -223,10 +298,12 @@ static int run(struct app_s * self, const char * device) {
 
 static int usage(void) {
     printf(
-        "usage: minibitty stream [--duration <ms>] device_path\n"
+        "usage: minibitty stream [--duration <ms>] [--stats] device_path\n"
         "\n"
         "  --duration <ms>  Run for duration then exit 0. If no data\n"
         "                   received for 5 seconds, exit with error.\n"
+        "  --stats          Also display the sys utilization report\n"
+        "                   (CPU / stack / heap) during streaming.\n"
         );
     return 1;
 }
@@ -234,6 +311,7 @@ static int usage(void) {
 int on_stream(struct app_s * self, int argc, char * argv[]) {
     char *device_filter = NULL;
     self->duration_ms = 0;
+    stats_enable_ = false;
 
     while (argc) {
         if (argv[0][0] != '-') {
@@ -246,6 +324,9 @@ int on_stream(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
             ARG_REQUIRE();
             self->duration_ms = (uint32_t) strtoul(argv[0], NULL, 10);
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--stats")) {
+            stats_enable_ = true;
             ARG_CONSUME();
         } else {
             return usage();
