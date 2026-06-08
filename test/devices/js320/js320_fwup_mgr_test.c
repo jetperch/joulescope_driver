@@ -102,12 +102,12 @@ static void test_resource_table_entries(void ** state) {
 
     assert_string_equal(r[0].zip_path, "0/0/app/pubsub_metadata.bin");
     assert_string_equal(r[0].mem_topic, "c/xspi/!cmd");
-    assert_int_equal(r[0].offset, 0x080000);
+    assert_int_equal(r[0].offset, 0x060000);  // slot 0 envelope pubsub
     assert_int_equal(r[0].erase_size, 0x20000);
 
     assert_string_equal(r[1].zip_path, "0/0/app/mbgen.bin");
     assert_string_equal(r[1].mem_topic, "c/xspi/!cmd");
-    assert_int_equal(r[1].offset, 0x0A0000);
+    assert_int_equal(r[1].offset, 0x070000);  // slot 0 envelope trace
     assert_int_equal(r[1].erase_size, 0x20000);
 
     assert_string_equal(r[2].zip_path, "1/0/app/pubsub_metadata.bin");

@@ -43,9 +43,13 @@ JSDRV_STATIC_ASSERT(sizeof(struct jsdrv_fwup_add_rsp_s) == 8, fwup_add_rsp_size)
 // Resource table
 // =====================================================================
 
+// Controller (c/xspi) metadata is co-located with the active program slot 0
+// envelope (pubsub 0x060000, trace 0x070000); the ctrl firmware update targets
+// slot 0, with slot 1 (provisioned golden) + recovery as fallbacks.  Sensor
+// (s/flash) resources live on the separate FPGA SPI flash and are unchanged.
 const struct jsdrv_fwup_resource_s JSDRV_FWUP_RESOURCES[] = {
-    {"0/0/app/pubsub_metadata.bin", "c/xspi/!cmd",  0x080000, 0x20000},
-    {"0/0/app/mbgen.bin",           "c/xspi/!cmd",  0x0A0000, 0x20000},
+    {"0/0/app/pubsub_metadata.bin", "c/xspi/!cmd",  0x060000, 0x20000},
+    {"0/0/app/mbgen.bin",           "c/xspi/!cmd",  0x070000, 0x20000},
     {"1/0/app/pubsub_metadata.bin", "s/flash/!cmd",  0x140000, 0x20000},
     {"1/0/app/mbgen.bin",           "s/flash/!cmd",  0x160000, 0x20000},
     {NULL, NULL, 0, 0},

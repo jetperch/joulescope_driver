@@ -15,7 +15,7 @@ BLOBS = [
     {
         "name": "ctrl pubsub_metadata",
         "topic": "c/xspi/!cmd",
-        "offset": 0x080000,
+        "offset": 0x060000,  # slot 0 envelope pubsub metadata
         "golden": r"C:\repos\Jetperch\js320\mbbuild\js320_p1_0_0_app\pubsub_metadata.bin",
     },
     {

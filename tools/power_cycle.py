@@ -24,8 +24,8 @@ cd C:\repos\Jetperch\js320 && python -m pyminibitty product build
 Process to update the JS320 firmware (note that since open fails, these commands are not reliable)
 C:\repos\Jetperch\minibitty_host\cmake-build\example\Debug\minibitty.exe firmware update "C:\repos\Jetperch\js320\mbbuild\js320_p1_0_0_app\js320_p1_0_0_app.mbfw"
 C:\repos\Jetperch\minibitty_host\cmake-build\example\Debug\minibitty.exe fpga_mem program "C:\repos\Jetperch\js320\gateware\impl1\js320_impl1.bit"
-C:\repos\Jetperch\minibitty_host\cmake-build\example\Debug\minibitty.exe mem c/xspi/!cmd 0 erase 0x080000 0x20000
-C:\repos\Jetperch\minibitty_host\cmake-build\example\Debug\minibitty.exe mem -p 1 c/xspi/!cmd 0 write 0x080000 "C:\repos\Jetperch\js320\mbbuild\js320_p1_0_0_app\pubsub_metadata.bin" --verify
+C:\repos\Jetperch\minibitty_host\cmake-build\example\Debug\minibitty.exe mem c/xspi/!cmd 0 erase 0x060000 0x20000
+C:\repos\Jetperch\minibitty_host\cmake-build\example\Debug\minibitty.exe mem -p 1 c/xspi/!cmd 0 write 0x060000 "C:\repos\Jetperch\js320\mbbuild\js320_p1_0_0_app\pubsub_metadata.bin" --verify
 C:\repos\Jetperch\minibitty_host\cmake-build\example\Debug\minibitty.exe mem s/flash/!cmd 0 erase 0x140000 0x20000
 C:\repos\Jetperch\minibitty_host\cmake-build\example\Debug\minibitty.exe mem -p 1 s/flash/!cmd 0 write 0x140000 "C:\repos\Jetperch\js320\mbbuild\js320_p1_1_0_app\pubsub_metadata.bin" --verify
 
