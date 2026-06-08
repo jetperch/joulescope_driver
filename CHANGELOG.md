@@ -9,6 +9,7 @@ This file contains the list of changes made to the Joulescope driver.
 2026 Jun 8
 
 * Changed JS320 flash organization to support production 1.0 units.
+* Removed erase slot 0 hack for JS320 firmware < 1.0.
 
 
 ## 2.2.4
