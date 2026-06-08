@@ -307,19 +307,6 @@ static bool send_publish_stdmsg(const char * subtopic,
     return js320_fwup_handle_publish(g_ctx.fwup, subtopic, &v);
 }
 
-/// Pop the pre-update ERASE of slot 0 (locked-mode workaround) and
-/// reply with success.  Call immediately after sending FWUP_CTRL_OP_UPDATE.
-static void drive_ctrl_pre_erase(void) {
-    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FWUP_DEV_OP_ERASE, fc->operation);
-    assert_int_equal(0, fc->target);
-    uint8_t rsp_buf[DEV_CMD_SIZE];
-    uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ERASE,
-                 0, 0, 0, NULL, 0);
-    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
-}
-
 /// Get expected page data (with 0xFF padding).
 static void get_expected_page(const uint8_t * image, uint32_t image_size,
                                uint32_t page_idx, uint8_t * out) {
@@ -373,11 +360,7 @@ static void test_ctrl_update_success(void ** state) {
     bool handled = js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
     assert_true(handled);
 
-    // Pre-update erase of slot 0 (locked-mode workaround)
-    assert_int_equal(1, dev_cmd_pending());
-    drive_ctrl_pre_erase();
-
-    // Should have sent ALLOCATE
+    // First device command is ALLOCATE (no pre-erase).
     assert_int_equal(1, dev_cmd_pending());
     struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
     assert_int_equal(FWUP_DEV_OP_ALLOCATE, fc->operation);
@@ -426,11 +409,11 @@ static void test_ctrl_update_success(void ** state) {
                  0, 256, FW_PAGE_SIZE, page, FW_PAGE_SIZE);
     send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
-    // Should have sent UPDATE
+    // Should have sent UPDATE committing to slot 0
     assert_int_equal(1, dev_cmd_pending());
     fc = pop_fw_cmd("c/fwup/!cmd");
     assert_int_equal(FWUP_DEV_OP_UPDATE, fc->operation);
-    assert_int_equal(1, fc->target);
+    assert_int_equal(0, fc->target);
 
     // Send UPDATE response
     build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_UPDATE,
@@ -507,7 +490,7 @@ static void test_ctrl_busy_rejection(void ** state) {
     struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
-    // Drain the pre-update ERASE command
+    // Drain the first device command (ALLOCATE)
     assert_int_equal(1, dev_cmd_pending());
     pop_dev_cmd();
 
@@ -535,8 +518,6 @@ static void test_ctrl_device_error_write(void ** state) {
     struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
-    // Pre-update erase of slot 0
-    drive_ctrl_pre_erase();
 
     // ALLOCATE
     struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
@@ -579,8 +560,6 @@ static void test_ctrl_verify_mismatch(void ** state) {
     struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
-    // Pre-update erase of slot 0
-    drive_ctrl_pre_erase();
 
     // ALLOCATE
     struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
@@ -637,36 +616,28 @@ static void test_ctrl_update_no_image(void ** state) {
     assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, g_ctx.fe_rsp.status);
 }
 
-/// Pre-update ERASE of slot 0 must run first regardless of caller's
-/// image_slot, and the final UPDATE commit must always target slot 1.
-static void test_ctrl_update_locked_mode_workaround(void ** state) {
+/// UPDATE always commits to controller XSPI slot 0, ignoring the caller's
+/// image_slot, and there is no pre-erase step (first cmd is ALLOCATE).
+static void test_ctrl_update_commits_slot0(void ** state) {
     (void) state;
     uint8_t image[256];
     memset(image, 0x5A, sizeof(image));
 
     uint8_t cmd_buf[sizeof(struct fwup_ctrl_cmd_s) + sizeof(image)];
     uint32_t cmd_size;
-    // Caller requests slot 0 — workaround must override to slot 1.
+    // Caller requests slot 1 — UPDATE must still commit to slot 0.
     build_ctrl_cmd(cmd_buf, &cmd_size, 71, FWUP_CTRL_OP_UPDATE,
-                   0, 1, image, sizeof(image));
+                   1, 1, image, sizeof(image));
     struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
-    // First device cmd is ERASE on slot 0 (not ALLOCATE)
+    // First device cmd is ALLOCATE (no pre-erase).
     assert_int_equal(1, dev_cmd_pending());
     struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FWUP_DEV_OP_ERASE, fc->operation);
-    assert_int_equal(0, fc->target);
+    assert_int_equal(FWUP_DEV_OP_ALLOCATE, fc->operation);
 
     uint8_t rsp_buf[DEV_CMD_SIZE + FW_PAGE_SIZE];
     uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ERASE,
-                 0, 0, 0, NULL, 0);
-    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
-
-    // ALLOCATE → WRITE → READ → UPDATE
-    fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FWUP_DEV_OP_ALLOCATE, fc->operation);
     build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ALLOCATE,
                  0, 0, sizeof(image), NULL, 0);
     send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
@@ -683,46 +654,16 @@ static void test_ctrl_update_locked_mode_workaround(void ** state) {
                  0, 0, FW_PAGE_SIZE, page, FW_PAGE_SIZE);
     send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
-    // Final UPDATE commit must target slot 1, ignoring caller's slot 0.
+    // Final UPDATE commit must target slot 0, ignoring caller's slot 1.
     fc = pop_fw_cmd("c/fwup/!cmd");
     assert_int_equal(FWUP_DEV_OP_UPDATE, fc->operation);
-    assert_int_equal(1, fc->target);
+    assert_int_equal(0, fc->target);
     build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_UPDATE,
                  0, 0, 0, NULL, 0);
     send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
 
     assert_int_equal(0, g_ctx.fe_rsp.status);
     assert_int_equal(71, (int) g_ctx.fe_rsp.transaction_id);
-}
-
-/// If the pre-update ERASE of slot 0 fails, UPDATE must abort
-/// without sending ALLOCATE/WRITE.
-static void test_ctrl_update_pre_erase_fails(void ** state) {
-    (void) state;
-    uint8_t image[256];
-    memset(image, 0x5B, sizeof(image));
-
-    uint8_t cmd_buf[sizeof(struct fwup_ctrl_cmd_s) + sizeof(image)];
-    uint32_t cmd_size;
-    build_ctrl_cmd(cmd_buf, &cmd_size, 72, FWUP_CTRL_OP_UPDATE,
-                   1, 1, image, sizeof(image));
-    struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
-    js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
-
-    // Pop the ERASE and respond with a device error.
-    struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
-    assert_int_equal(FWUP_DEV_OP_ERASE, fc->operation);
-    uint8_t rsp_buf[DEV_CMD_SIZE];
-    uint32_t rsp_size;
-    build_fw_rsp(rsp_buf, &rsp_size, fc->transaction_id, FWUP_DEV_OP_ERASE,
-                 1, 0, 0, NULL, 0);
-    send_publish_stdmsg("h/!rsp", rsp_buf, rsp_size);
-
-    // Should have aborted: no further device cmds, IO error response.
-    assert_int_equal(0, dev_cmd_pending());
-    assert_string_equal("h/fwup/ctrl/!rsp", g_ctx.fe_subtopic);
-    assert_int_equal(72, (int) g_ctx.fe_rsp.transaction_id);
-    assert_int_equal(JSDRV_ERROR_IO, g_ctx.fe_rsp.status);
 }
 
 
@@ -1059,8 +1000,6 @@ static void test_pipeline_depth_default(void ** state) {
     struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
-    // Pre-update erase of slot 0
-    drive_ctrl_pre_erase();
 
     // ALLOCATE
     struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
@@ -1091,8 +1030,6 @@ static void test_pipeline_depth_clamp(void ** state) {
     struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
-    // Pre-update erase of slot 0
-    drive_ctrl_pre_erase();
 
     // ALLOCATE
     struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
@@ -1122,8 +1059,6 @@ static void test_last_page_padding(void ** state) {
     struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
-    // Pre-update erase of slot 0
-    drive_ctrl_pre_erase();
 
     // ALLOCATE
     struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
@@ -1260,8 +1195,6 @@ static void test_ctrl_pipeline_refill(void ** state) {
     struct jsdrv_union_s v = jsdrv_union_bin(cmd_buf, cmd_size);
     js320_fwup_handle_cmd(g_ctx.fwup, "h/fwup/ctrl/!cmd", &v);
 
-    // Pre-update erase of slot 0
-    drive_ctrl_pre_erase();
 
     // ALLOCATE
     struct mb_stdmsg_mem_s * fc = pop_fw_cmd("c/fwup/!cmd");
@@ -1617,9 +1550,7 @@ int main(void) {
                                         setup, teardown),
         cmocka_unit_test_setup_teardown(test_ctrl_update_no_image,
                                         setup, teardown),
-        cmocka_unit_test_setup_teardown(test_ctrl_update_locked_mode_workaround,
-                                        setup, teardown),
-        cmocka_unit_test_setup_teardown(test_ctrl_update_pre_erase_fails,
+        cmocka_unit_test_setup_teardown(test_ctrl_update_commits_slot0,
                                         setup, teardown),
         // FPGA tests
         cmocka_unit_test_setup_teardown(test_fpga_program_success,
