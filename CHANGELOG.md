@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.7
+
+2026 Jun 9
+
+* Changed JS320 flash organization to support production 1.0.3+ units.
+
+
 ## 2.2.6
 
 2026 Jun 8
