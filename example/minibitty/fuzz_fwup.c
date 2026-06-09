@@ -70,10 +70,10 @@ struct block_info_s {
 
 static const struct block_info_s BLOCKS[BLOCK_COUNT] = {
     // id                      name             topic           offset      size
-    // Controller XSPI slot 0 envelope: program 0x000000, pubsub 0x060000, trace 0x070000.
-    [BLOCK_CTRL_FW]       = {"ctrl_fw",       "c/xspi/!cmd",  0x000000, 0x60000},
-    [BLOCK_CTRL_PUBSUB]   = {"ctrl_pubsub",   "c/xspi/!cmd",  0x060000, 0x20000},
-    [BLOCK_CTRL_TRACE]    = {"ctrl_trace",    "c/xspi/!cmd",  0x070000, 0x20000},
+    // Controller XSPI slot 0 envelope: program 0x000000, pubsub 0x040000, trace 0x060000.
+    [BLOCK_CTRL_FW]       = {"ctrl_fw",       "c/xspi/!cmd",  0x000000, 0x40000},
+    [BLOCK_CTRL_PUBSUB]   = {"ctrl_pubsub",   "c/xspi/!cmd",  0x040000, 0x20000},
+    [BLOCK_CTRL_TRACE]    = {"ctrl_trace",    "c/xspi/!cmd",  0x060000, 0x20000},
     [BLOCK_SENSOR_FPGA]   = {"sensor_fpga",   "c/jtag/!cmd",  0x000000, 0},
     [BLOCK_SENSOR_PUBSUB] = {"sensor_pubsub", "s/flash/!cmd", 0x140000, 0x20000},
     [BLOCK_SENSOR_TRACE]  = {"sensor_trace",  "s/flash/!cmd", 0x160000, 0x20000},
