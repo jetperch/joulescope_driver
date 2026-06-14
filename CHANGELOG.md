@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.9
+
+2026 Jun 15
+
+* Migrated GitHub action to use "Visual Studio 18 2026"
+
+
 ## 2.2.8
 
 2026 Jun 14
