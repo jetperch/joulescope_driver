@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.11
+
+2026 Jun 17 [in progress]
+
+* Force s/dwnN/N 2 & 3 to 4.
+
+
 ## 2.2.10
 
 2026 Jun 17

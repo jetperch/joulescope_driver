@@ -263,8 +263,8 @@ static inline uint32_t js320_signal_extra_factor(uint32_t n) {
     if (n <= 1U) {
         return 1U;
     }
-    if (n == 3U) {
-        return 2U;
+    if (n <= 3U) {
+        return 4U;
     }
     return n;
 }
@@ -1049,10 +1049,8 @@ static int32_t js320_fs_to_dwn_n(uint32_t fs, uint32_t * n_out) {
     uint32_t extra = JS320_SIGNAL_RATE_AFTER_DECIMATE / fs;
     if (extra == 1U) {
         *n_out = 0U;
-    } else if (extra == 2U) {
-        *n_out = 2U;
-    } else if (extra == 3U) {
-        // gateware clamps 3 to factor 2, which would produce a rate that
+    } else if (extra <= 3U) {
+        // gateware clamps 2 & 3 to factor 4, which would produce a rate that
         // disagrees with the user's request.  Reject to avoid a silent mismatch.
         return JSDRV_ERROR_PARAMETER_INVALID;
     } else if (extra <= 1000U) {
