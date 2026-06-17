@@ -135,54 +135,43 @@ struct jsdrvp_mb_drv_s {
                        struct jsdrvp_mb_dev_s * dev);
 
     /**
-     * @brief Called to publish factory default values for all configurable topics.
+     * @brief Defer OPEN# to sync child pubsub instances.
      *
-     * Called when the device is opened with JSDRV_DEVICE_OPEN_MODE_DEFAULTS.
-     * The upper driver should publish default values for all parameters
-     * to the physical device via jsdrvp_mb_dev_publish_to_device().
+     * Called once after the core (link-identity) instance state sync
+     * completes, BEFORE mb_device signals OPEN#.  Return true to DEFER
+     * the open: the device is not declared open yet, and the driver must
+     * eventually complete it by either:
+     *   - syncing a child instance via jsdrvp_mb_dev_instance_state_sync()
+     *     with emit_open=true (that sync signals OPEN# when it finishes), or
+     *   - calling jsdrvp_mb_dev_open_complete() directly (e.g. a child
+     *     readiness timeout -- open must complete, never fail).
+     * Return false (or NULL hook) to signal OPEN# immediately.
      *
-     * @param drv This driver instance.
-     * @param dev The mb_device handle for calling service functions.
-     */
-    void (*publish_defaults)(struct jsdrvp_mb_drv_s * drv,
-                             struct jsdrvp_mb_dev_s * dev);
-
-    /**
-     * @brief Return the null-terminated list of top-level topic prefixes
-     *        that mb_device should iterate during state_fetch.
-     *
-     * Example: a device with separate ctrl and sensor pubsub tasks
-     * returns "cs".  The returned pointer must outlive the open
-     * session.  If NULL or if this hook returns NULL, mb_device uses
-     * a built-in default ("cs" today for backwards compatibility;
-     * replaceable with null-target GET_INIT once firmware supports it).
-     *
-     * @param drv This driver instance.
-     * @return Null-terminated prefix character list, or NULL for default.
-     */
-    const char * (*state_fetch_prefixes)(struct jsdrvp_mb_drv_s * drv);
-
-    /**
-     * @brief Gate state_fetch on driver-specific readiness.
-     *
-     * Called once on open, after drv->on_open and any RESUME/DEFAULTS
-     * handling.  Return true to let mb_device start state_fetch
-     * immediately.  Return false to defer state_fetch until the driver
-     * explicitly calls jsdrvp_mb_dev_state_fetch_start(dev) from a
-     * later callback (e.g. handle_publish when a readiness signal
-     * arrives, or on_timeout as a fallback).
-     *
-     * NULL is treated as "always ready" — the generic fast path.
-     *
-     * The driver is responsible for arming its own readiness timeout
-     * via jsdrvp_mb_dev_set_timeout + on_timeout if it defers.
+     * Typical use (JS320): arm a sensor-ready timeout here, then sync the
+     * sensor 's' instance once c/comm/sensor/state reports the link up.
      *
      * @param drv This driver instance.
      * @param dev The mb_device handle.
-     * @return true to proceed with state_fetch immediately, false to defer.
+     * @return true to defer OPEN# (driver completes it), false to open now.
      */
-    bool (*open_ready)(struct jsdrvp_mb_drv_s * drv,
-                       struct jsdrvp_mb_dev_s * dev);
+    bool (*open_children)(struct jsdrvp_mb_drv_s * drv,
+                          struct jsdrvp_mb_dev_s * dev);
+
+    /**
+     * @brief Called when a child instance sync (emit_open=false) completes.
+     *
+     * Lets the driver chain additional work after a deferred-open child
+     * sync -- e.g. after the sensor 's' device instance, restore the
+     * host-side 'h' instance via jsdrvp_mb_dev_host_replay() and then
+     * complete the open via jsdrvp_mb_dev_open_complete().
+     *
+     * @param drv This driver instance.
+     * @param dev The mb_device handle.
+     * @param prefix The instance prefix char that just finished syncing.
+     */
+    void (*on_instance_synced)(struct jsdrvp_mb_drv_s * drv,
+                               struct jsdrvp_mb_dev_s * dev,
+                               char prefix);
 
     /**
      * @brief Called to destroy the upper driver instance.
@@ -320,6 +309,56 @@ const struct jsdrv_time_map_s * jsdrvp_mb_dev_time_map(
  * @param dev The mb_device handle.
  */
 void jsdrvp_mb_dev_state_fetch_start(struct jsdrvp_mb_dev_s * dev);
+
+/**
+ * @brief Best-effort, non-blocking state sync for a child pubsub instance.
+ *
+ * mb_device manages only the link-identity (USB) instance during open.
+ * A device-specific driver calls this to sync an additional pubsub
+ * instance (e.g. the JS320 sensor 's') once that instance is alive,
+ * AFTER the core open has completed.  It runs the same open-mode
+ * sequence (DEFAULTS/RESUME) against the given prefix but never emits
+ * OPEN# and never fails the open: errors are logged and skipped.
+ *
+ * Typically invoked from handle_publish when a readiness signal proves
+ * the child instance is running, with on_timeout as a fallback.
+ *
+ * @param dev The mb_device handle.
+ * @param prefix The child instance's top-level pubsub prefix char.
+ * @param emit_open If true, signal OPEN# when this sync completes; use
+ *        this to finish an open deferred by drv->open_children.  If
+ *        false, the sync is purely best-effort (no OPEN#).
+ * @return true if the sync started; false if a sequence is already
+ *         running (caller should retry later) or the prefix is invalid.
+ */
+bool jsdrvp_mb_dev_instance_state_sync(struct jsdrvp_mb_dev_s * dev,
+                                       char prefix, bool emit_open);
+
+/**
+ * @brief Signal OPEN# for an open deferred by drv->open_children.
+ *
+ * Use when completing a deferred open WITHOUT a child sync that carries
+ * emit_open=true -- e.g. a child-readiness timeout where the child is
+ * skipped but the open must still complete (it never fails on a child).
+ *
+ * @param dev The mb_device handle.
+ */
+void jsdrvp_mb_dev_open_complete(struct jsdrvp_mb_dev_s * dev);
+
+/**
+ * @brief Restore the host's retained values under a prefix to handle_cmd.
+ *
+ * Subscribes RETAIN to {device}/{prefix} and immediately unsubscribes,
+ * re-delivering the host pubsub's retained values to the device-specific
+ * driver's handle_cmd.  Used for the host-side 'h' instance (topics such
+ * as h/fp, h/fs, h/i_scale, h/v_scale that the driver owns in handle_cmd
+ * rather than a device pubsub instance), to restore the driver's internal
+ * state from the host cache on open.
+ *
+ * @param dev The mb_device handle.
+ * @param prefix The host-side instance prefix char (e.g. 'h').
+ */
+void jsdrvp_mb_dev_host_replay(struct jsdrvp_mb_dev_s * dev, char prefix);
 
 JSDRV_CPP_GUARD_END
 

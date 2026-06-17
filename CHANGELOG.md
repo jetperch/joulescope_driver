@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.10
+
+2026 Jun 17
+
+* Fixed state synchronization on device open.
+* Bumped JS320 firmware to 1.1.1.
+* Added host topic metadata.
+
+
 ## 2.2.9
 
 2026 Jun 15

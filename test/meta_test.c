@@ -48,6 +48,38 @@ const char * META_NO_DEFAULT = "{"
     "\"brief\": \"Number selection.\""
 "}";
 
+const char * META_F32 = "{"
+    "\"dtype\": \"f32\","
+    "\"brief\": \"A scale factor.\","
+    "\"default\": 1.0"
+"}";
+
+const char * META_F64 = "{"
+    "\"dtype\": \"f64\","
+    "\"brief\": \"A scale factor.\","
+    "\"default\": 1.0"
+"}";
+
+static void test_float_dtype(void **state) {
+    (void) state;
+    uint8_t dtype = 0;
+    struct jsdrv_union_s value;
+
+    assert_int_equal(0, jsdrv_meta_dtype(META_F32, &dtype));
+    assert_int_equal(JSDRV_UNION_F32, dtype);
+    assert_int_equal(0, jsdrv_meta_dtype(META_F64, &dtype));
+    assert_int_equal(JSDRV_UNION_F64, dtype);
+
+    // A value for a float-typed topic must validate (no options/range):
+    // dtype_lookup must know "f32"/"f64", else jsdrv_meta_value rejects it.
+    value = jsdrv_union_f32(2.0f);
+    assert_int_equal(0, jsdrv_meta_value(META_F32, &value));
+    value = jsdrv_union_f64(2.0);
+    assert_int_equal(0, jsdrv_meta_value(META_F32, &value));  // f64 host value, f32 meta
+    value = jsdrv_union_f64(2.0);
+    assert_int_equal(0, jsdrv_meta_value(META_F64, &value));
+}
+
 static void test_basic(void **state) {
     (void) state;
     uint8_t dtype = 0;
@@ -203,6 +235,7 @@ int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_basic),
             cmocka_unit_test(test_value),
+            cmocka_unit_test(test_float_dtype),
             cmocka_unit_test(test_no_default),
             cmocka_unit_test(test_flags_none),
             cmocka_unit_test(test_flags_no_flags_key),

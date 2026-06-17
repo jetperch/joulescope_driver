@@ -203,6 +203,22 @@ void jsdrvp_mb_dev_state_fetch_start(struct jsdrvp_mb_dev_s * dev) {
     (void) dev;
 }
 
+bool jsdrvp_mb_dev_instance_state_sync(struct jsdrvp_mb_dev_s * dev, char prefix, bool emit_open) {
+    (void) dev;
+    (void) prefix;
+    (void) emit_open;
+    return true;
+}
+
+void jsdrvp_mb_dev_open_complete(struct jsdrvp_mb_dev_s * dev) {
+    (void) dev;
+}
+
+void jsdrvp_mb_dev_host_replay(struct jsdrvp_mb_dev_s * dev, char prefix) {
+    (void) dev;
+    (void) prefix;
+}
+
 
 // --- Stubs for js320 sub-modules (jtag, fwup, stats) ---
 

@@ -56,12 +56,16 @@ changes are being reverted in favor of this redesign.
 
 ### Mode semantics
 
-| Mode | Host cache after open | Device after open | Notes |
-|---|---|---|---|
-| `DEFAULTS` (0) | metadata `default` for every topic | metadata `default` | Mirrors device power-on except without a physical reset |
-| `RESUME` (1) | device's current state (existing behaviour) | unchanged | `state_fetch` populates cache |
-| `OVERRIDE` (new, 2) | host's pre-existing cache | pushed from host cache | Topics absent from host cache keep device's current value |
-| `RAW` (0xFF) | unchanged | unchanged | LL-only open, existing behaviour |
+| Mode | Per writable topic, pushed to device + host cache | Notes |
+|---|---|---|
+| `DEFAULTS` (0) | host's retained value if present, else metadata `default` | merges the old DEFAULTS + OVERRIDE; read-only/non-retained excluded |
+| `RESUME` (1) | (nothing pushed) — host adopts the device's current state | `state_fetch` populates the host cache |
+| `RAW` (0xFF) | unchanged | LL-only open, existing behaviour |
+
+> **Implemented 2026-06.** The separate `OVERRIDE` mode was dropped: the
+> `DEFAULTS` semantic above (host value else default) covers both cases.
+> The change is **host-only** — no `minibitty` firmware changes were
+> needed.  See "Implementation status" at the end of this document.
 
 `DEFAULTS` and `OVERRIDE` both push state *to* the device using the
 same MiniBitty protocol primitive: a batched `MB_STDMSG_STATE_TYPE_SET_CMD`
@@ -235,3 +239,94 @@ end-to-end test:
 Under fuzz: `sample_id skip` count must be 0 (any leftover is a
 genuine protocol bug, not a state-management bug). dwnN mismatches of
 the kind observed during the 2026-04-16 session must be gone.
+
+## Implementation status (2026-06)
+
+Implemented host-side in `src/devices/mb_device/mb_device.c`,
+`src/devices/js320/js320_drv.c`, and
+`include_private/jsdrv_prv/devices/mb_device/mb_drv.h`.  Validated on
+hardware via `test/hw/test_open_state_js320.py`.
+
+What shipped, and how it differs from the original plan above:
+
+* **Single managed instance.** mb_device manages only the pubsub
+  instance named in the link identity (`identity.pubsub_prefix`, `'c'`
+  for the JS320).  The hard-coded `{"h","c","s"}` RESUME replay loop and
+  the `"cs"` `STATE_FETCH_PREFIXES` default are gone, along with the
+  `state_fetch_prefixes` and `publish_defaults` driver hooks.
+
+* **`open_seq` sequencer.** A macro `open_phase`
+  (DISCOVER→META→GATHER→SET→VALUES→DONE) inside `ST_OPEN` drives the
+  restore.  RESUME is VALUES→META→DONE; DEFAULTS adds the gather + SET.
+  Metadata is fetched before the device values so DEFAULTS can build the
+  SET and capture host values before the read-back overwrites the cache.
+
+* **No targeted `./info` GET was needed.** Instead, DEFAULTS runs a
+  DISCOVER GET that enumerates the instance with host publishing
+  *suppressed* (it only captures the `././info` blob descriptors), then
+  reads metadata, then a second GET publishes the read-back values.
+
+* **Host-value gather via loopback sentinel.**  After subscribing
+  RETAIN to the instance subtree, the device publishes a marker to a
+  unique **out-of-prefix** topic (`mbg/<txn>`) it also subscribes to.
+  Two non-obvious constraints, both learned the hard way:
+  - The sentinel topic must NOT match a device prefix (`device_lookup`
+    keys on the first 3 path segments): publishes under the device
+    prefix are tagged with the device as origin and suppressed from
+    echoing back (`is_same_subscriber`), so they never return.
+  - Each path segment must be <= 7 chars (`JSDRV_TOPIC_LENGTH_PER_LEVEL`
+    is 8); the first attempt used `mbgather/<8-hex>` and was silently
+    rejected, forcing the gather onto its 250 ms timeout fallback.
+
+* **Batched `SET_CMD`.**  Writable, retained, has-`default` topics are
+  packed into `mb_stdmsg_state_entry_s` TLVs (host value if gathered,
+  else metadata default) and chunked to fit one frame.  The firmware
+  applies every frame but **reliably acks only the END frame**, so all
+  chunks are sent back-to-back and only the final SET_RESP is awaited.
+
+* **Child sync — open WAITS for it; order is `c → s → h → OPEN#`.**
+  After the core `'c'` sync, the `drv->open_children` hook lets the
+  driver DEFER OPEN# while child instances are synced, so the device is
+  not declared open with `'s'`/`'h'` topics missing (one-shot tools like
+  `jsdrv info` see them).
+  - **`'s'` (sensor device instance):**
+    `jsdrvp_mb_dev_instance_state_sync(dev,'s',emit_open=false)` reruns
+    the open-mode sequence against the sensor.  js320 keys it off the
+    **closed-loop** signal `c/comm/sensor/state == 1` (the ctrl reports
+    the sensor link up; it tears down on close and re-establishes on
+    open, so the 0→1 transition fires every open).
+  - **`'h'` (host-side instance):**  `h/fp`, `h/fs`, `h/i_scale`,
+    `h/v_scale` are owned by the js320 driver's `handle_cmd`, not a
+    device pubsub instance.  `jsdrvp_mb_dev_host_replay(dev,'h')`
+    re-delivers the host's retained `h/*` values to `handle_cmd`,
+    restoring the driver's internal state from the host cache.  It runs
+    AFTER `'s'` (via the `drv->on_instance_synced` hook) so a host-cached
+    `h/fs` wins over the sensor sync's `s/dwnN/N`.
+  - The driver then completes the open: `on_instance_synced('s')` →
+    `host_replay('h')` → `jsdrvp_mb_dev_open_complete()`.  If the sensor
+    never comes up, `on_timeout` does `host_replay('h')` +
+    `open_complete()` (under the `jsdrv_open` timeout) so open still
+    completes — it never FAILS on the sensor, letting the UI run a
+    firmware update.  A general child-instance discovery abstraction
+    remains future work.
+
+* **Float metadata dtypes.**  `src/meta.c`'s `dtype_map` lacked `f32`/
+  `f64`, so `jsdrv_meta_value` rejected any publish to a float-typed
+  topic (e.g. `h/i_scale`/`h/v_scale`) with `PARAMETER_INVALID`.  Added
+  both (tested in `meta_test.c::test_float_dtype`).
+
+* **MiniBitty retain convention.**  Every subtopic whose leaf does not
+  start with `'!'` is retained, regardless of metadata.  `handle_in_publish`
+  marks such device publishes `JSDRV_UNION_FLAG_RETAIN` so the host cache
+  tracks runtime transitions (e.g. `c/comm/sensor/state` 0→1); without
+  it a non-retained publish would *clear* the prior cached value.
+
+* **Failure handling.**  Every step (gather sentinel, SET_RESP, missing
+  metadata) advances on timeout rather than aborting; open always
+  reaches OPEN#.
+
+Verification end-states (the `OVERRIDE` row is subsumed by `DEFAULTS`):
+
+* `DEFAULTS`: with an empty host cache, every writable topic equals its
+  metadata `default`; with a cached host value, that value is preserved.
+* `RESUME`: host retained values match the device's GET_RSP.

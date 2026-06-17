@@ -43,6 +43,8 @@ const struct dtype_map_s dtype_map[] = {
         {"i16", JSDRV_UNION_I16},
         {"i32", JSDRV_UNION_I32},
         {"i64", JSDRV_UNION_I64},
+        {"f32", JSDRV_UNION_F32},
+        {"f64", JSDRV_UNION_F64},
         {"bool", JSDRV_UNION_U8},
         {NULL, 0},
 };

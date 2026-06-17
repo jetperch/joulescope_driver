@@ -17,6 +17,7 @@
 #define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
 #include "jsdrv.h"
 #include "jsdrv/error_code.h"
+#include "jsdrv/meta.h"
 #include "jsdrv/topic.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/cdef.h"
@@ -54,25 +55,44 @@
 // harmless.
 #define MB_DEV_TIME_MAP_COUNT   (256U)
 
-// Hard-coded pubsub prefixes for state fetch (until distributed discovery)
-// Default iteration prefixes when the upper driver does not provide
-// its own via drv->state_fetch_prefixes().  This preserves legacy
-// behavior for drivers that haven't opted into the callback yet and
-// for devices whose firmware exposes both a `c` (ctrl) and `s`
-// (sensor) task.  Drop to "" once null-target GET_INIT lands firmware
-// side (see doc/plans/open_state_management.md).
-static const char STATE_FETCH_PREFIXES_DEFAULT[] = "cs";
-
+// state_fetch.phase: the micro-phase of the in-flight protocol exchange.
 #define STATE_FETCH_PHASE_IDLE      0
 #define STATE_FETCH_PHASE_GET_INIT  1
 #define STATE_FETCH_PHASE_GET_NEXT  2
 #define STATE_FETCH_PHASE_META_HDR  3
 #define STATE_FETCH_PHASE_META_DATA 4
+#define STATE_FETCH_PHASE_SET       5  // SET_CMD in flight, awaiting SET_RESP
+
+// state_fetch.open_phase: the macro-sequence of the open state restore,
+// driven by open_seq_* as each exchange completes.  See open_seq_start.
+//   RESUME (1):   VALUES -> META -> DONE
+//   DEFAULTS (0): DISCOVER -> META -> GATHER -> SET -> VALUES -> DONE
+#define OPEN_PHASE_IDLE     0
+#define OPEN_PHASE_DISCOVER 1  // GET to discover ././info blobs (values suppressed)
+#define OPEN_PHASE_META     2  // read + parse metadata blobs
+#define OPEN_PHASE_GATHER   3  // capture host retained values (DEFAULTS)
+#define OPEN_PHASE_SET      4  // push SET_CMD batch to device (DEFAULTS)
+#define OPEN_PHASE_VALUES   5  // GET retained device values, publish to host
+#define OPEN_PHASE_DONE     6
 
 #define STATE_FETCH_GET_INIT_RETRY_MAX      20
 #define STATE_FETCH_GET_INIT_RETRY_TIMEOUT  (JSDRV_TIME_SECOND / 20)  // 50 ms
 #define STATE_FETCH_META_BLOBS_MAX  8
 #define STATE_FETCH_META_PAGE_SIZE  256
+
+// DEFAULTS open: max settable topics pushed via SET_CMD, and the max
+// inline value bytes per entry (scalars; larger values are skipped).
+#define OPEN_SET_ENTRY_MAX   128
+#define OPEN_SET_VALUE_CAP   8
+
+// MiniBitty pubsub state op codes (mb_stdmsg_state_type_e).
+#define MB_STDMSG_STATE_TYPE_GET_INIT  1
+#define MB_STDMSG_STATE_TYPE_GET_RSP   2
+#define MB_STDMSG_STATE_TYPE_GET_NEXT  3
+#define MB_STDMSG_STATE_TYPE_SET_CMD   4
+#define MB_STDMSG_STATE_TYPE_SET_RESP  5
+#define MB_STDMSG_STATE_FLAG_START     (1u << 0)
+#define MB_STDMSG_STATE_FLAG_END       (1u << 1)
 
 #ifndef MB_STDMSG_STATE
 #define MB_STDMSG_STATE 0x08
@@ -89,15 +109,25 @@ struct state_fetch_blob_s {
     char     topic[32];
 };
 
+// One target setting for a DEFAULTS-mode SET_CMD push.  Built from the
+// metadata default during the META phase, then overridden in place by a
+// gathered host retained value (if any) before the SET_CMD is sent.
+struct open_set_entry_s {
+    char     topic[MB_TOPIC_SIZE_MAX];  // instance-relative, e.g. "c/led/red"
+    uint8_t  value_type;                // JSDRV_UNION_* (== MB_VALUE_*)
+    uint16_t value_size;                // bytes (scalars, <= OPEN_SET_VALUE_CAP)
+    uint8_t  value[OPEN_SET_VALUE_CAP];
+};
+
 struct state_fetch_s {
     uint8_t  prefix_idx;
     uint8_t  phase;
+    uint8_t  open_phase;       // OPEN_PHASE_*: macro open-restore sequence
+    bool     publish_values;   // GET values to host pubsub (false during DISCOVER)
     uint8_t  retry_count;
     uint32_t transaction_id;
-    // Null-terminated list of top-level prefixes to iterate.  Set by
-    // state_fetch_start from drv->state_fetch_prefixes(), else from
-    // d->identity.pubsub_prefix (single char built into prefix_buf),
-    // else STATE_FETCH_PREFIXES_DEFAULT.  Outlives the fetch.
+    // Single-element prefix list holding d->identity.pubsub_prefix (the
+    // one pubsub instance mb_device manages).  Built into prefix_buf.
     const char * prefixes;
     char     prefix_buf[2];  // backing storage for identity-derived prefix
     // metadata blob info captured from ././info entries
@@ -109,6 +139,17 @@ struct state_fetch_s {
     uint32_t meta_buf_size;
     uint32_t meta_buf_offset;
     uint32_t meta_total_size;
+    // DEFAULTS: target SET state (default values overridden by host values)
+    struct open_set_entry_s set_entries[OPEN_SET_ENTRY_MAX];
+    uint16_t set_count;
+    uint16_t set_cursor;   // next entry to pack into a SET_CMD frame
+    bool     set_overflow; // settable topics exceeded OPEN_SET_ENTRY_MAX
+    // DEFAULTS: host-value gather via loopback sentinel
+    bool     gathering;        // handle_cmd buffers retained host values
+    char     gather_topic[24]; // unique out-of-prefix sentinel topic
+    bool     emit_open;        // send OPEN# when this sequence completes
+    bool     is_core;          // the core link-identity instance open
+                               // (consult drv->open_children before OPEN#)
 };
 
 // todo move to an appropriate place
@@ -302,16 +343,30 @@ static bool on_link_identify(struct jsdrvp_mb_dev_s * self, uint8_t event) {
 // --- State fetch: !state GET to restore device retained values ---
 
 static void state_fetch_start(struct jsdrvp_mb_dev_s * self);
+static void state_fetch_begin_get(struct jsdrvp_mb_dev_s * self, bool publish_values);
 static void state_fetch_send_get_init(struct jsdrvp_mb_dev_s * self);
 static void state_fetch_send_get_next(struct jsdrvp_mb_dev_s * self);
 static void state_fetch_advance_prefix(struct jsdrvp_mb_dev_s * self);
 static void state_fetch_start_meta(struct jsdrvp_mb_dev_s * self);
 static void state_fetch_send_meta_read(struct jsdrvp_mb_dev_s * self);
-static void state_fetch_complete(struct jsdrvp_mb_dev_s * self);
+static void open_seq_on_get_end(struct jsdrvp_mb_dev_s * self);
+static void open_seq_on_meta_end(struct jsdrvp_mb_dev_s * self);
+static void open_seq_start_gather(struct jsdrvp_mb_dev_s * self);
+static void open_seq_on_gathered(struct jsdrvp_mb_dev_s * self);
+static void open_seq_gather_unsubscribe(struct jsdrvp_mb_dev_s * self);
+static void state_set_send_next(struct jsdrvp_mb_dev_s * self);
+static void state_set_on_rsp(struct jsdrvp_mb_dev_s * self, uint8_t status);
+static void open_seq_done(struct jsdrvp_mb_dev_s * self);
 
 static void state_fetch_publish_state(struct jsdrvp_mb_dev_s * self,
                                        const char * topic, uint8_t value_type,
                                        const void * value, uint32_t size) {
+    // Suppress during the DISCOVER pass: that GET only locates the
+    // ././info metadata blob descriptors; its values must not overwrite
+    // the host cache before the DEFAULTS host-value gather runs.
+    if (!self->state_fetch.publish_values) {
+        return;
+    }
     // Build message with fully-qualified device topic, same as handle_in_publish
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(self->context);
     struct jsdrv_topic_s t;
@@ -360,43 +415,118 @@ static void state_fetch_publish_stdmsg_to_device(struct jsdrvp_mb_dev_s * self,
     publish_to_device(self, topic, &v);
 }
 
-static void state_fetch_start(struct jsdrvp_mb_dev_s * self) {
+// Begin (or restart) a GET enumeration over the managed instance.
+// Resets only the GET cursor; metadata/blob state is preserved so the
+// DEFAULTS read-back (GET #2) can run after the DISCOVER pass.
+static void state_fetch_begin_get(struct jsdrvp_mb_dev_s * self, bool publish_values) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    sf->prefix_idx = 0;
+    sf->retry_count = 0;
+    sf->publish_values = publish_values;
+    state_fetch_send_get_init(self);
+}
+
+// Run the open-restore sequence for one pubsub instance:
+//   RESUME (1):   VALUES -> META -> DONE  (adopt device state)
+//   DEFAULTS (0): DISCOVER -> META -> GATHER -> SET -> VALUES -> DONE
+// emit_open: send OPEN# when this sequence completes.
+// is_core: this is the core link-identity instance; on completion
+//   consult drv->open_children to optionally defer OPEN# while child
+//   instances (e.g. the JS320 sensor 's') are synced.
+static void open_seq_begin(struct jsdrvp_mb_dev_s * self, char prefix,
+                           bool emit_open, bool is_core) {
     struct state_fetch_s * sf = &self->state_fetch;
     memset(sf, 0, sizeof(*sf));
-    sf->prefix_idx = 0;
     sf->transaction_id = 0x5F00;
-    sf->prefixes = NULL;
-    if (self->drv && self->drv->state_fetch_prefixes) {
-        sf->prefixes = self->drv->state_fetch_prefixes(self->drv);
+    sf->emit_open = emit_open;
+    sf->is_core = is_core;
+    sf->prefix_buf[0] = prefix;
+    sf->prefix_buf[1] = '\0';
+    sf->prefixes = sf->prefix_buf;
+    if (!sf->prefixes[0]) {
+        JSDRV_LOGW("open_seq: no pubsub prefix; skipping");
+        open_seq_done(self);
+        return;
     }
-    if (!sf->prefixes || !sf->prefixes[0]) {
-        if (self->identity.pubsub_prefix) {
-            sf->prefix_buf[0] = self->identity.pubsub_prefix;
-            sf->prefix_buf[1] = '\0';
-            sf->prefixes = sf->prefix_buf;
-        } else {
-            sf->prefixes = STATE_FETCH_PREFIXES_DEFAULT;
-        }
+    if (1 == self->open_mode) {  // RESUME
+        sf->open_phase = OPEN_PHASE_VALUES;
+        state_fetch_begin_get(self, true);
+    } else {  // DEFAULTS
+        sf->open_phase = OPEN_PHASE_DISCOVER;
+        state_fetch_begin_get(self, false);
     }
-    state_fetch_send_get_init(self);
+}
+
+// mb_device syncs the link-identity instance (e.g. 'c' for the JS320)
+// as the core open.  On completion, drv->open_children may defer OPEN#
+// to sync child instances; see jsdrvp_mb_dev_instance_state_sync.
+static void state_fetch_start(struct jsdrvp_mb_dev_s * self) {
+    open_seq_begin(self, self->identity.pubsub_prefix, true, true);
 }
 
 void jsdrvp_mb_dev_state_fetch_start(struct jsdrvp_mb_dev_s * dev) {
     if (!dev) {
         return;
     }
-    if (dev->state_fetch.phase != STATE_FETCH_PHASE_IDLE) {
-        // fetch already running or completed; ignore duplicate kicks
+    if (dev->state_fetch.open_phase != OPEN_PHASE_IDLE) {
+        // sequence already running or completed; ignore duplicate kicks
         return;
     }
     state_fetch_start(dev);
+}
+
+bool jsdrvp_mb_dev_instance_state_sync(struct jsdrvp_mb_dev_s * dev,
+                                       char prefix, bool emit_open) {
+    if (!dev || !prefix) {
+        return false;
+    }
+    if (dev->state_fetch.open_phase != OPEN_PHASE_IDLE) {
+        // a sequence (core open or a prior sync) is still running
+        return false;
+    }
+    JSDRV_LOGI("instance_state_sync '%c' (mode=%d, emit_open=%d)",
+               prefix, (int) dev->open_mode, (int) emit_open);
+    open_seq_begin(dev, prefix, emit_open, false);
+    return true;
+}
+
+void jsdrvp_mb_dev_open_complete(struct jsdrvp_mb_dev_s * dev) {
+    if (!dev) {
+        return;
+    }
+    JSDRV_LOGI("open_complete (driver-signaled)");
+    send_to_frontend(dev, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
+}
+
+void jsdrvp_mb_dev_host_replay(struct jsdrvp_mb_dev_s * dev, char prefix) {
+    if (!dev || !prefix) {
+        return;
+    }
+    // Re-deliver the host's retained values under {prefix} to handle_cmd
+    // by subscribing RETAIN then immediately unsubscribing.  Used for the
+    // host-side 'h' instance, whose topics (h/fp, h/fs, h/i_scale,
+    // h/v_scale) are owned by the device-specific driver's handle_cmd, not
+    // a device pubsub instance -- so this restores the driver's internal
+    // state from the host cache on open.  Safe for host-side topics: they
+    // are applied by handle_cmd, not pushed to the device.
+    char p[2] = {prefix, '\0'};
+    struct jsdrv_topic_s t;
+    jsdrv_topic_set(&t, dev->ll.prefix);
+    jsdrv_topic_append(&t, p);
+    JSDRV_LOGI("host_replay '%c' (%s)", prefix, t.topic);
+    jsdrvp_device_subscribe(dev->context, dev->ll.prefix, t.topic,
+                            JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
+    jsdrvp_device_unsubscribe(dev->context, dev->ll.prefix, t.topic,
+                              JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
 }
 
 static void state_fetch_send_get_init(struct jsdrvp_mb_dev_s * self) {
     struct state_fetch_s * sf = &self->state_fetch;
     char prefix = sf->prefixes[sf->prefix_idx];
     if (!prefix) {
-        state_fetch_start_meta(self);
+        // GET enumeration of the instance complete; let the sequencer
+        // decide what runs next (metadata, read-back, or done).
+        open_seq_on_get_end(self);
         return;
     }
     sf->phase = STATE_FETCH_PHASE_GET_INIT;
@@ -477,6 +607,11 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
     uint8_t state_flags = sh[5];
     uint8_t status = sh[6];
 
+    if (sf->phase == STATE_FETCH_PHASE_SET) {
+        state_set_on_rsp(self, status);
+        return;
+    }
+
     timeout_clear(self);
 
     if (sf->phase == STATE_FETCH_PHASE_GET_INIT) {
@@ -535,8 +670,12 @@ static void state_fetch_on_rsp(struct jsdrvp_mb_dev_s * self,
             // Publish the retained value to the host pubsub
             state_fetch_publish_state(self, topic, vtype, vdata, vsize);
 
-            // Check if this is the ././info topic
-            if (0 == strcmp(topic + 1, "/./info") && vtype == JSDRV_UNION_STDMSG) {
+            // Capture the ././info metadata blob descriptors the first
+            // time we see them.  Guard on blob_count so the DEFAULTS
+            // read-back GET (#2) does not re-append the same blobs.
+            if ((0 == sf->blob_count)
+                    && (0 == strcmp(topic + 1, "/./info"))
+                    && (vtype == JSDRV_UNION_STDMSG)) {
                 state_fetch_process_info_entry(self, vdata, vsize);
             }
 
@@ -560,6 +699,67 @@ static void state_fetch_advance_prefix(struct jsdrvp_mb_dev_s * self) {
 }
 
 // --- Metadata fetch: read binary blobs via memory protocol ---
+
+// Byte size of a scalar JSDRV_UNION_* / MB_VALUE_* type, or 0 if the
+// type is not a fixed-size scalar (str/json/bin/null/etc).
+static uint16_t union_scalar_size(uint8_t type) {
+    switch (type) {
+        case JSDRV_UNION_U8:  /* fall-through */
+        case JSDRV_UNION_I8:  return 1;
+        case JSDRV_UNION_U16: /* fall-through */
+        case JSDRV_UNION_I16: return 2;
+        case JSDRV_UNION_U32: /* fall-through */
+        case JSDRV_UNION_I32: /* fall-through */
+        case JSDRV_UNION_F32: return 4;
+        case JSDRV_UNION_U64: /* fall-through */
+        case JSDRV_UNION_I64: /* fall-through */
+        case JSDRV_UNION_F64: return 8;
+        default: return 0;
+    }
+}
+
+// Record a settable topic for the DEFAULTS SET_CMD push: skip read-only
+// and non-retained (leaf starts with '!') topics, and topics without a
+// usable scalar default.  The default value is stored now and may be
+// overridden later by a gathered host value.
+static void open_set_record(struct jsdrvp_mb_dev_s * self,
+                            const char * topic, const char * json_meta) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    uint32_t flags = 0;
+    if (jsdrv_meta_flags(json_meta, &flags) || (flags & JSDRV_META_FLAG_RO)) {
+        return;  // read-only (or unparseable) -> never push
+    }
+    const char * leaf = topic;
+    for (const char * p = topic; *p; ++p) {
+        if (*p == '/') { leaf = p + 1; }
+    }
+    if (leaf[0] == '!') {
+        return;  // command / event / stream: not retained, not settable
+    }
+    struct jsdrv_union_s def;
+    if (jsdrv_meta_default(json_meta, &def) || (def.type == JSDRV_UNION_NULL)) {
+        return;  // no default -> exclude
+    }
+    uint16_t size = union_scalar_size(def.type);
+    if ((size == 0) || (size > OPEN_SET_VALUE_CAP)) {
+        JSDRV_LOGI("open_set: skip non-scalar default %s", topic);
+        return;
+    }
+    if (sf->set_count >= OPEN_SET_ENTRY_MAX) {
+        if (!sf->set_overflow) {  // log once: do not silently cap
+            JSDRV_LOGW("open_set: settable topics exceed %d; dropping overflow (e.g. %s)",
+                       OPEN_SET_ENTRY_MAX, topic);
+        }
+        sf->set_overflow = true;
+        return;
+    }
+    struct open_set_entry_s * e = &sf->set_entries[sf->set_count++];
+    jsdrv_cstr_copy(e->topic, topic, sizeof(e->topic));
+    e->value_type = def.type;
+    e->value_size = size;
+    memset(e->value, 0, sizeof(e->value));
+    memcpy(e->value, &def.value.u64, size);
+}
 
 static void meta_fetch_on_topic(void * user_data, const char * topic, const char * json_meta) {
     struct jsdrvp_mb_dev_s * self = (struct jsdrvp_mb_dev_s *) user_data;
@@ -595,6 +795,14 @@ static void meta_fetch_on_topic(void * user_data, const char * topic, const char
         m->value.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
     }
     jsdrvp_backend_send(self->context, m);
+
+    // DEFAULTS: record this topic's target value (metadata default) for
+    // the SET_CMD push.  The resolved (instance-relative) topic matches
+    // the form gathered host values arrive in, so a later host value can
+    // override this default in place.
+    if (0 == self->open_mode) {
+        open_set_record(self, resolved, json_meta);
+    }
 }
 
 static void state_fetch_start_meta(struct jsdrvp_mb_dev_s * self) {
@@ -608,7 +816,7 @@ static void state_fetch_start_meta(struct jsdrvp_mb_dev_s * self) {
         sf->blob_idx++;
     }
     if (sf->blob_idx >= sf->blob_count) {
-        state_fetch_complete(self);
+        open_seq_on_meta_end(self);
         return;
     }
 
@@ -725,7 +933,7 @@ next_blob:
         sf->blob_idx++;
     }
     if (sf->blob_idx >= sf->blob_count) {
-        state_fetch_complete(self);
+        open_seq_on_meta_end(self);
     } else {
         JSDRV_LOGI("state_fetch: reading meta blob %u (type=%u topic=%s offset=0x%x)",
                     sf->blob_idx, sf->blobs[sf->blob_idx].blob_type,
@@ -737,10 +945,255 @@ next_blob:
     }
 }
 
-static void state_fetch_complete(struct jsdrvp_mb_dev_s * self) {
+// --- Open-restore sequencer ---
+//
+// Each open_seq_on_*_end is invoked when one protocol exchange of the
+// open-restore sequence completes, and launches the next exchange based
+// on the open mode and current open_phase.  Failures advance the
+// sequence rather than aborting: open must always reach OPEN# so the UI
+// can recover (e.g. perform a firmware update).
+
+static void open_seq_done(struct jsdrvp_mb_dev_s * self) {
+    bool emit = self->state_fetch.emit_open;
+    bool is_core = self->state_fetch.is_core;
     self->state_fetch.phase = STATE_FETCH_PHASE_IDLE;
-    JSDRV_LOGI("state_fetch: complete, signaling OPEN");
-    send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
+    // Leave open_phase IDLE so a child-instance sync can start next.
+    self->state_fetch.open_phase = OPEN_PHASE_IDLE;
+    // After the core instance, let the driver defer OPEN# to sync child
+    // instances (e.g. the JS320 sensor 's').  The driver then completes
+    // the open via a child sync with emit_open=true, or by calling
+    // jsdrvp_mb_dev_open_complete (e.g. on a sensor-ready timeout).  Open
+    // must still eventually complete -- it never fails on a child.
+    if (is_core && self->drv && self->drv->open_children) {
+        if (self->drv->open_children(self->drv, self)) {
+            JSDRV_LOGI("open_seq: core synced; deferring OPEN for child sync");
+            return;
+        }
+    }
+    if (emit) {
+        JSDRV_LOGI("open_seq: complete, signaling OPEN");
+        send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
+    } else {
+        JSDRV_LOGI("open_seq: child-instance '%c' sync complete",
+                   self->state_fetch.prefix_buf[0]);
+        // Notify the driver so it can chain further syncs (e.g. the
+        // host-side 'h' instance) and then complete the deferred open.
+        if (!is_core && self->drv && self->drv->on_instance_synced) {
+            self->drv->on_instance_synced(self->drv, self,
+                                          self->state_fetch.prefix_buf[0]);
+        }
+    }
+}
+
+// A GET enumeration over the managed instance just finished.
+static void open_seq_on_get_end(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    if (sf->open_phase == OPEN_PHASE_DISCOVER) {
+        // DEFAULTS GET #1: ././info blobs captured; read the metadata.
+        sf->open_phase = OPEN_PHASE_META;
+        state_fetch_start_meta(self);
+    } else {  // OPEN_PHASE_VALUES
+        if (1 == self->open_mode) {  // RESUME: values first, metadata next
+            sf->open_phase = OPEN_PHASE_META;
+            state_fetch_start_meta(self);
+        } else {  // DEFAULTS GET #2: read-back published; done
+            open_seq_done(self);
+        }
+    }
+}
+
+// The metadata blobs have all been read and parsed.
+static void open_seq_on_meta_end(struct jsdrvp_mb_dev_s * self) {
+    if (1 == self->open_mode) {  // RESUME: metadata was the last step
+        open_seq_done(self);
+    } else {  // DEFAULTS: capture host values, then push the target state
+        open_seq_start_gather(self);
+    }
+}
+
+// DEFAULTS host-value gather.  Subscribe RETAIN to the instance subtree
+// so the host's pre-existing retained values flow into cmd_q, then
+// publish a marker to a unique OUT-OF-PREFIX topic that the device also
+// subscribes to.  Because the frontend delivers to cmd_q in FIFO order,
+// the marker arrives after every retained value, signalling completion.
+// (An out-of-prefix topic is required: publishes under the device prefix
+// are tagged with the device as origin and suppressed from echoing back.)
+static void open_seq_start_gather(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    sf->open_phase = OPEN_PHASE_GATHER;
+    sf->phase = STATE_FETCH_PHASE_IDLE;  // no device exchange during gather
+
+    char inst[MB_TOPIC_SIZE_MAX];
+    struct jsdrv_topic_s sub;
+    jsdrv_topic_set(&sub, self->ll.prefix);
+    inst[0] = sf->prefix_buf[0];  // the instance being synced ('c' or 's')
+    inst[1] = '\0';
+    jsdrv_topic_append(&sub, inst);  // {dev}/<instance>
+
+    // Unique sentinel topic.  Constraints: each path segment must be
+    // <= 7 chars (JSDRV_TOPIC_LENGTH_PER_LEVEL), and it must have < 3
+    // path segments so device_lookup never matches it (hence it is not
+    // origin-suppressed when republished back to this device).
+    snprintf(sf->gather_topic, sizeof(sf->gather_topic),
+             "mbg/%04x", (unsigned) (sf->transaction_id & 0xffffu));
+
+    sf->gathering = true;
+    jsdrvp_device_subscribe(self->context, self->ll.prefix, sub.topic,
+                            JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
+    jsdrvp_device_subscribe(self->context, self->ll.prefix, sf->gather_topic,
+                            JSDRV_SFLAG_PUB);
+
+    // Publish the marker last; it loops back through the frontend after
+    // the retained values delivered by the RETAIN subscribe above.
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(self->context);
+    jsdrv_cstr_copy(m->topic, sf->gather_topic, sizeof(m->topic));
+    m->value = jsdrv_union_i32(1);
+    jsdrvp_backend_send(self->context, m);
+
+    timeout_set(self);  // fall back if the marker never returns
+}
+
+static void open_seq_gather_unsubscribe(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    char inst[MB_TOPIC_SIZE_MAX];
+    struct jsdrv_topic_s sub;
+    jsdrv_topic_set(&sub, self->ll.prefix);
+    inst[0] = sf->prefix_buf[0];
+    inst[1] = '\0';
+    jsdrv_topic_append(&sub, inst);
+    jsdrvp_device_unsubscribe(self->context, self->ll.prefix, sub.topic,
+                              JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
+    if (sf->gather_topic[0]) {
+        jsdrvp_device_unsubscribe(self->context, self->ll.prefix, sf->gather_topic,
+                                  JSDRV_SFLAG_PUB);
+    }
+}
+
+// Override a settable entry's default with a gathered host retained
+// value.  topic is instance-relative (e.g. "c/led/red").
+static void open_seq_gather_add(struct jsdrvp_mb_dev_s * self,
+                                const char * topic, const struct jsdrv_union_s * value) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    uint16_t size = value->size ? (uint16_t) value->size : union_scalar_size(value->type);
+    if ((size == 0) || (size > OPEN_SET_VALUE_CAP)) {
+        return;  // only scalar config is pushed; larger host values ignored
+    }
+    for (uint16_t i = 0; i < sf->set_count; ++i) {
+        struct open_set_entry_s * e = &sf->set_entries[i];
+        if (0 == strcmp(e->topic, topic)) {
+            e->value_type = value->type;
+            e->value_size = size;
+            memset(e->value, 0, sizeof(e->value));
+            memcpy(e->value, &value->value.u64, size);
+            return;
+        }
+    }
+    // Host value with no matching settable metadata entry: ignore (it is
+    // read-only, non-retained, or unknown to this firmware's metadata).
+}
+
+// Gather complete: stop intercepting, drop the subscriptions, push SET.
+static void open_seq_on_gathered(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    timeout_clear(self);
+    sf->gathering = false;
+    open_seq_gather_unsubscribe(self);
+    JSDRV_LOGI("open_seq: gather complete, %u settable topics", sf->set_count);
+    sf->open_phase = OPEN_PHASE_SET;
+    sf->set_cursor = 0;
+    state_set_send_next(self);
+}
+
+// Pack one SET_CMD frame starting at set_cursor and send it to the
+// device.  Returns the flags byte sent (with END set on the last chunk).
+static uint8_t state_set_send_chunk(struct jsdrvp_mb_dev_s * self, bool first) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    uint8_t buf[PAYLOAD_SIZE_MAX_U8];
+    struct mb_stdmsg_header_s * hdr = (struct mb_stdmsg_header_s *) buf;
+    hdr->version = 0;
+    hdr->type = MB_STDMSG_STATE;
+    hdr->origin_prefix = 'h';
+    hdr->metadata = 0;
+    uint32_t off = sizeof(*hdr);
+
+    sf->transaction_id++;
+    uint8_t * sh = buf + off;
+    memset(sh, 0, 8);
+    uint32_t txn = sf->transaction_id;
+    memcpy(sh, &txn, 4);
+    sh[4] = MB_STDMSG_STATE_TYPE_SET_CMD;
+    uint8_t * flags = &sh[5];
+    off += 8;
+
+    while (sf->set_cursor < sf->set_count) {
+        struct open_set_entry_s * e = &sf->set_entries[sf->set_cursor];
+        uint16_t padded = (e->value_size + 7u) & ~7u;
+        if (padded < 8) { padded = 8; }
+        uint32_t entry_size = 40u + padded;
+        if (off + entry_size > sizeof(buf)) {
+            break;  // frame full; remaining entries go in the next chunk
+        }
+        uint8_t * ent = buf + off;
+        memset(ent, 0, entry_size);
+        jsdrv_cstr_copy((char *) ent, e->topic, MB_TOPIC_SIZE_MAX);
+        ent[32] = e->value_type;
+        memcpy(ent + 34, &e->value_size, 2);
+        memcpy(ent + 40, e->value, e->value_size);
+        off += entry_size;
+        sf->set_cursor++;
+    }
+
+    *flags = (first ? MB_STDMSG_STATE_FLAG_START : 0)
+           | ((sf->set_cursor >= sf->set_count) ? MB_STDMSG_STATE_FLAG_END : 0);
+
+    char topic[16];
+    topic[0] = sf->prefix_buf[0];
+    jsdrv_cstr_copy(topic + 1, "/./!state", sizeof(topic) - 1);
+
+    struct jsdrv_union_s v;
+    v.type = JSDRV_UNION_STDMSG;
+    v.size = off;
+    v.value.bin = buf;
+    v.flags = 0;
+    v.app = 0;
+    JSDRV_LOGI("open_seq: SET_CMD chunk to %s, %u/%u entries, flags=0x%x txn=0x%x",
+               topic, sf->set_cursor, sf->set_count, *flags, (unsigned) txn);
+    publish_to_device(self, topic, &v);
+    return *flags;
+}
+
+// Push the target state.  All chunks are sent back-to-back; the device
+// applies every frame but reliably acks only the END frame, so we await
+// just the final SET_RESP (matched by the last chunk's transaction_id).
+static void state_set_send_next(struct jsdrvp_mb_dev_s * self) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    if (sf->set_cursor >= sf->set_count) {
+        // Nothing to set: read back device state into the host cache.
+        sf->open_phase = OPEN_PHASE_VALUES;
+        state_fetch_begin_get(self, true);
+        return;
+    }
+    bool first = true;
+    uint8_t flags = 0;
+    while (sf->set_cursor < sf->set_count) {
+        flags = state_set_send_chunk(self, first);
+        first = false;
+    }
+    (void) flags;  // last chunk carries END; its SET_RESP advances us
+    sf->phase = STATE_FETCH_PHASE_SET;
+    timeout_set(self);
+}
+
+// SET_RESP received (or forced by timeout): advance to the next chunk or
+// to the read-back.  A non-zero status is logged but never fails open.
+static void state_set_on_rsp(struct jsdrvp_mb_dev_s * self, uint8_t status) {
+    struct state_fetch_s * sf = &self->state_fetch;
+    timeout_clear(self);
+    if (status) {
+        JSDRV_LOGW("open_seq: SET_RESP status=%u", status);
+    }
+    sf->phase = STATE_FETCH_PHASE_IDLE;
+    state_set_send_next(self);
 }
 
 // --- End state fetch ---
@@ -764,34 +1217,22 @@ static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
         return true;
     }
 
-    // State restore: replay host-cached values
-    if (1 == self->open_mode) {  // JSDRV_DEVICE_OPEN_MODE_RESUME
-        static const char * const subtrees[] = {"h", "c", "s", NULL};
-        for (const char * const * st = subtrees; *st; ++st) {
-            struct jsdrv_topic_s topic;
-            jsdrv_topic_set(&topic, self->ll.prefix);
-            jsdrv_topic_append(&topic, *st);
-            jsdrvp_device_subscribe(self->context, self->ll.prefix, topic.topic,
-                JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
-            jsdrvp_device_unsubscribe(self->context, self->ll.prefix, topic.topic,
-                JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
-        }
-    } else if (0 == self->open_mode) {  // JSDRV_DEVICE_OPEN_MODE_DEFAULTS
-        if (self->drv && self->drv->publish_defaults) {
-            self->drv->publish_defaults(self->drv, self);
-        }
-    }
+    // Non-RAW open restore runs in state_fetch_start / open_seq below:
+    //   RESUME (1) adopts the device's current pubsub values (read into
+    //     the host cache).  It does NOT push host-cached values back to
+    //     the device -- the old subscribe-RETAIN replay loop over a
+    //     hard-coded {"h","c","s"} prefix list blindly re-sent every
+    //     retained value (including read-only topics such as the firmware
+    //     version), which drove a firmware-update loop.  That is removed.
+    //   DEFAULTS (0) pushes the metadata default (or the host's retained
+    //     value, if present) for each writable topic via a batched
+    //     SET_CMD, then reads the device state back into the host cache.
 
-    // Fetch device state + metadata, then signal OPEN when complete.
-    // A driver may defer by implementing open_ready (returning false)
-    // and invoking jsdrvp_mb_dev_state_fetch_start() when ready.
-    bool ready = true;
-    if (self->drv && self->drv->open_ready) {
-        ready = self->drv->open_ready(self->drv, self);
-    }
-    if (ready) {
-        state_fetch_start(self);
-    }
+    // Sync the core (link-identity) instance, then signal OPEN.  A driver
+    // may defer OPEN# via drv->open_children to sync child instances
+    // (e.g. the JS320 sensor 's') so that open does not complete until
+    // those are handled or timed out -- see open_seq_done.
+    state_fetch_start(self);
     return true;
 }
 
@@ -803,6 +1244,13 @@ static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
 // transition is safe: a late ack in the new state is simply dropped.
 static bool on_pubsub_flush(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
+    // Close mid-gather: drop the gather subscriptions so they do not leak
+    // across the session (a stale RETAIN|PUB sub would double-deliver
+    // instance values on the next open).
+    if (self->state_fetch.gathering) {
+        self->state_fetch.gathering = false;
+        open_seq_gather_unsubscribe(self);
+    }
     if (self->drv && self->drv->on_close) {
         self->drv->on_close(self->drv, self);
     }
@@ -896,6 +1344,19 @@ const struct state_machine_transition_s state_machine_link_identity[] = {
 static bool on_open_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     struct state_fetch_s * sf = &self->state_fetch;
+    if (sf->open_phase == OPEN_PHASE_GATHER) {
+        // Loopback sentinel never returned: proceed with whatever host
+        // values were captured (possibly none -> all metadata defaults).
+        JSDRV_LOGW("open_seq: gather timeout; proceeding with %u host values",
+                   sf->set_count);
+        open_seq_on_gathered(self);
+        return false;
+    }
+    if (sf->phase == STATE_FETCH_PHASE_SET) {
+        JSDRV_LOGW("open_seq: SET_RESP timeout; proceeding");
+        state_set_on_rsp(self, JSDRV_ERROR_TIMED_OUT);
+        return false;
+    }
     if (sf->phase == STATE_FETCH_PHASE_IDLE) {
         return false;
     }
@@ -1162,6 +1623,29 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
     }
 
     const char * topic = prefix_match_and_strip(d->ll.prefix, msg->topic);
+
+    // DEFAULTS host-value gather: while gathering, the loopback sentinel
+    // signals completion and retained instance values are buffered into
+    // the SET target (not forwarded to the device).  See open_seq_start_gather.
+    if (d->state_fetch.gathering) {
+        if (0 == strcmp(msg->topic, d->state_fetch.gather_topic)) {
+            jsdrvp_msg_free(d->context, msg);
+            open_seq_on_gathered(d);
+            return true;
+        }
+        if (topic && (topic[0] == d->state_fetch.prefix_buf[0]) && (topic[1] == '/')) {
+            const char * leaf = topic;
+            for (const char * p = topic; *p; ++p) {
+                if (*p == '/') { leaf = p + 1; }
+            }
+            if (leaf[0] != '!') {  // retained value: capture, do not forward
+                open_seq_gather_add(d, topic, &msg->value);
+                jsdrvp_msg_free(d->context, msg);
+                return true;
+            }
+        }
+    }
+
     if (msg->topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
         if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
             d->finalize_pending = true;
@@ -1358,6 +1842,20 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
     // process value
     m->value.size = value_size;
     m->value.type = value_type;
+    // MiniBitty convention: every subtopic whose leaf does NOT start with
+    // '!' is retained, regardless of metadata.  Mark such publishes RETAIN
+    // so the host pubsub caches the device's current value and runtime
+    // transitions (e.g. c/comm/sensor/state 0->1) persist for query/info.
+    // Without this, a non-retained publish clears the prior cached value.
+    {
+        const char * leaf = publish->topic;
+        for (const char * p = publish->topic; *p; ++p) {
+            if (*p == '/') { leaf = p + 1; }
+        }
+        if (leaf[0] != '!') {
+            m->value.flags |= JSDRV_UNION_FLAG_RETAIN;
+        }
+    }
     if (    0
             || (value_type == JSDRV_UNION_STR)
             || (value_type == JSDRV_UNION_JSON)
