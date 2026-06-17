@@ -1618,6 +1618,10 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGI("topic %s = %" PRIi64, msg->topic, msg->value.value.i64);
     } else if ((msg->value.type == JSDRV_UNION_STR) || (msg->value.type == JSDRV_UNION_JSON)) {
         JSDRV_LOGI("topic %s = %s", msg->topic, msg->value.value.str);
+    } else if (msg->value.type == JSDRV_UNION_F32)  {
+        JSDRV_LOGI("topic %s = %f", msg->topic, msg->value.value.f32);
+    } else if (msg->value.type == JSDRV_UNION_F64)  {
+        JSDRV_LOGI("topic %s = %f", msg->topic, (double) msg->value.value.f64);
     } else {
         JSDRV_LOGI("topic %s = <bin>", msg->topic);
     }

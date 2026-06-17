@@ -244,13 +244,23 @@ struct js320_drv_s {
     // sensor `s` instance is synced (completing the open).  on_timeout
     // completes the open without the sensor if it never comes up.
     bool     waiting_for_sensor;
+    // Latest c/comm/sensor/state, cached on every pub (even when not
+    // waiting).  Lets open_children detect a sensor that came up BEFORE
+    // the watch was armed -- the one-shot 0->1 pub already passed, so a
+    // transition-only check would miss it and fall through to the backstop.
+    bool     sensor_link_up;
 };
 
 // How long to wait for the sensor link (c/comm/sensor/state == 1) before
-// completing open without it.  The ctrl firmware powers the sensor on
-// USBD connect; typical link-up is < 1 s.  Kept below the typical 2 s
-// jsdrv_open timeout so a down sensor still yields a successful open.
-#define JS320_SENSOR_READY_TIMEOUT_NS ((3 * JSDRV_TIME_SECOND) / 2)
+// completing open without it.  With the level-triggered open_children
+// check (see js320_open_children), a present sensor is always synced --
+// either it is already up when the watch is armed, or its 0->1 pub is
+// caught live.  This backstop therefore only fires when the sensor is
+// genuinely absent (e.g. it needs a firmware update): it guarantees OPEN#
+// still fires so the UI can recover.  Measured cold link-up is ~90 ms, so
+// 0.5 s is >5x margin for a present-but-slow sensor while keeping even the
+// absent-sensor path well within the 1.0 s default jsdrv_open timeout.
+#define JS320_SENSOR_READY_TIMEOUT_NS (JSDRV_TIME_SECOND / 2)
 
 // --- Streaming signal helpers ---
 
@@ -681,6 +691,26 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
                identity->vendor_id, identity->product_id);
 }
 
+// Start the deferred sensor `s` sync once the sensor link is up.  Shared
+// by the live-transition path (handle_publish) and the already-up path
+// (open_children).  On success, clears the sensor-ready interlock and its
+// backstop timeout and kicks a sensor timesync resync.  Returns false if
+// a sequence is still running (the caller then relies on on_timeout).
+static bool js320_sensor_sync_start(struct js320_drv_s * self,
+                                    struct jsdrvp_mb_dev_s * dev) {
+    // emit_open=false: on_instance_synced restores the host-side 'h'
+    // instance and completes the open, giving the order c -> s -> h -> OPEN#.
+    if (!jsdrvp_mb_dev_instance_state_sync(dev, 's', false)) {
+        return false;
+    }
+    self->waiting_for_sensor = false;
+    jsdrvp_mb_dev_set_timeout(dev, 0);
+    // Force a sensor timesync resync so s/ts/!map arrives promptly (the
+    // sensor comm ./comm/./!add only fires once).
+    jsdrvp_mb_dev_publish_to_device(dev, "s/ts/!resync", &jsdrv_union_u8_r(1));
+    return true;
+}
+
 // The JS320 exposes two top-level pubsub tasks: `c` (ctrl-side, the USB
 // instance named in the link identity) and `s` (sensor-side, a child
 // instance).  mb_device syncs `c` as the core open; this hook then
@@ -689,16 +719,31 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
 // never fails on the sensor: on a sensor-ready timeout we complete the
 // open anyway (so the UI can perform a firmware update if `s` is down).
 //
-// The ctrl firmware powers the sensor on USBD connect, so the sensor
-// comm link comes up ~1 s later.  c/comm/sensor/state transitions to 1
-// when it is reachable (a reliable closed-loop signal that fires on
-// every open); handle_publish then syncs `s` with emit_open=true, which
-// signals OPEN#.  on_timeout backstops the rare miss.
+// The sensor link comes up quickly (~90 ms after open) and is signalled
+// by c/comm/sensor/state -> 1.  Two cases, both handled:
+//   1. The link is still down when we arm here: handle_publish catches
+//      the live 0->1 pub and syncs `s`.
+//   2. The link already came up before the core `c` sync finished (e.g.
+//      under host-side open latency such as --tcp-server): the one-shot
+//      0->1 pub already passed, so we detect the cached state here and
+//      sync `s` immediately.  Missing this case is what previously left
+//      waiting_for_sensor set until the backstop, delaying OPEN# and
+//      (with a short caller timeout) spuriously failing the open.
+// on_timeout backstops only a genuinely-absent sensor.
 static bool js320_open_children(struct jsdrvp_mb_drv_s * drv,
                                 struct jsdrvp_mb_dev_s * dev) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     self->waiting_for_sensor = true;
     jsdrvp_mb_dev_set_timeout(dev, jsdrv_time_utc() + JS320_SENSOR_READY_TIMEOUT_NS);
+    if (self->sensor_link_up) {
+        // Case 2: sensor beat the ctrl open; sync now rather than waiting
+        // for a 0->1 transition that already fired and will not repeat.
+        JSDRV_LOGI("sensor already up at open_children; syncing 's' now");
+        if (!js320_sensor_sync_start(self, dev)) {
+            JSDRV_LOGW("sensor already up but 's' sync busy; "
+                       "on_timeout will complete open without sensor sync");
+        }
+    }
     return true;  // defer OPEN# until the sensor sync completes or times out
 }
 
@@ -720,6 +765,7 @@ static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s 
         self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
     }
     self->waiting_for_sensor = false;
+    self->sensor_link_up = false;
     js320_fwup_on_close(self->fwup);
     js320_jtag_on_close(self->jtag);
     js320_cal_on_close(self->cal);
@@ -841,6 +887,18 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
     if ((channel >= 5U) && (channel <= 7U)) {
         if (js320_ack_should_drop(&self->signal_ack, sample_id)) {
             return;
+        }
+        float scale = 1.0;
+        switch (channel) {
+            case 5: scale = self->i_scale; break;
+            case 6: scale = self->v_scale; break;
+            case 7: scale = self->i_scale * self->v_scale; break;
+            default: break;
+        }
+
+        float * samples_f32 = (float *) payload_u32;
+        for (size_t i = 0; i < sample_count; ++i) {
+            *samples_f32++ *= scale;
         }
     } else if ((channel >= 8U) && (channel <= 12U)) {
         if (js320_ack_should_drop(&self->gpi_ack, sample_id)) {
@@ -1183,34 +1241,25 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
 
     // Sensor-ready interlock: the ctrl firmware reports the sensor comm
-    // link state on c/comm/sensor/state (0=down, 1=up).  A transition to
-    // 1 means the sensor task's pubsub is reachable; its state can now be
-    // synced without GET_INIT hitting BUSY.  The link is torn down on
-    // host close and re-established on open, so this transition fires on
-    // every open (on_timeout backstops the rare miss).
-    if (self->waiting_for_sensor && (0 == strcmp(subtopic, "c/comm/sensor/state"))) {
+    // link state on c/comm/sensor/state (0=down, 1=up).  Cache every
+    // update -- even when not waiting -- so open_children can detect a
+    // link that came up before the watch was armed.  The link is torn
+    // down on host close and re-established on open, so a 0->1 transition
+    // fires on every open; when we are waiting, sync `s` on that live
+    // transition (the already-up case is handled in open_children).
+    if (0 == strcmp(subtopic, "c/comm/sensor/state")) {
         struct jsdrv_union_s v = *value;
-        if ((0 == jsdrv_union_as_type(&v, JSDRV_UNION_U32)) && (v.value.u32 != 0)) {
-            JSDRV_LOGI("sensor ready: c/comm/sensor/state=1");
-            // Sync the sensor 's' instance (emit_open=false): on_instance_synced
-            // then restores the host-side 'h' instance and completes the open,
-            // giving the order c -> s -> h -> OPEN#.  If a sequence is still
-            // running (unlikely -- the ctrl open is fast), instance_state_sync
-            // returns false and on_timeout backstops.
-            if (jsdrvp_mb_dev_instance_state_sync(dev, 's', false)) {
-                self->waiting_for_sensor = false;
-                jsdrvp_mb_dev_set_timeout(dev, 0);
-                // Force a sensor timesync resync so s/ts/!map arrives
-                // promptly (the sensor comm ./comm/./!add only fires once).
-                jsdrvp_mb_dev_publish_to_device(dev, "s/ts/!resync",
-                    &jsdrv_union_u8_r(1));
-            } else {
-                // Race (unlikely -- the ctrl open is fast): a sequence is
-                // still running, so the sensor sync could not start on this
-                // one-shot 0->1 transition.  waiting_for_sensor stays set and
-                // on_timeout completes the open (without the sensor sync).
-                JSDRV_LOGW("sensor ready but 's' sync busy; "
-                           "on_timeout will complete open without sensor sync");
+        if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U32)) {
+            self->sensor_link_up = (v.value.u32 != 0);
+            if (self->waiting_for_sensor && self->sensor_link_up) {
+                JSDRV_LOGI("sensor ready: c/comm/sensor/state=1");
+                if (!js320_sensor_sync_start(self, dev)) {
+                    // A sequence is still running, so the sync could not
+                    // start on this one-shot 0->1 transition.  The cached
+                    // state stays set; on_timeout backstops.
+                    JSDRV_LOGW("sensor ready but 's' sync busy; "
+                               "on_timeout will complete open without sensor sync");
+                }
             }
         }
         // fall through; the frontend should still see this publish
@@ -1270,8 +1319,11 @@ static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
         // c/comm/sensor/state never reached 1 within the timeout: the
         // sensor is (probably) down.  Skip the sensor sync but still
         // restore the host-side 'h' state, then complete the deferred
-        // open so OPEN# fires promptly (well within the caller's open
-        // timeout) and the UI can run a firmware update.
+        // open so OPEN# fires and the UI can run a firmware update.  With
+        // the level-triggered open_children check a present sensor never
+        // reaches here; this only backstops a genuinely-absent sensor and
+        // fires at JS320_SENSOR_READY_TIMEOUT_NS (0.5 s), well within the
+        // caller's open timeout.
         JSDRV_LOGW("sensor ready timeout; completing open without sensor sync");
         self->waiting_for_sensor = false;
         jsdrvp_mb_dev_host_replay(dev, 'h');
