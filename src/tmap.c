@@ -102,6 +102,9 @@ struct jsdrv_tmap_s * jsdrv_tmap_copy(const struct jsdrv_tmap_s * src) {
     if (NULL == src) {
         return NULL;
     }
+    if ((src->head > src->alloc_size) || (src->tail >= src->alloc_size)) {
+        return NULL;
+    }
     size_t sz = tmap_size(src);
     struct jsdrv_tmap_s * self = jsdrv_tmap_alloc(sz);
     if (sz == 0) {
