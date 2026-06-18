@@ -4,6 +4,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.12
+
+2026 Jun 18
+
+* Fixed occasional 1 sample glitch on JS320 current autoranging.
+  * Bumped JS320 from 1.1.1 to 1.1.2
+
+
 ## 2.2.11
 
 2026 Jun 18
