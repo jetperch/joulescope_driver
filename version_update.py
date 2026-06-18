@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2021 Jetperch LLC
+# Copyright 2021-2026 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ Use the most recently CHANGELOG as the definitive version for:
 
 import os
 import re
+
 
 MYPATH = os.path.dirname(os.path.abspath(__file__))
 
@@ -97,6 +98,24 @@ def _node_version(version):
     os.replace(path_tmp, path)
 
 
+def _node_lock_version(version):
+    path = os.path.join(MYPATH, 'node_api', 'package-lock.json')
+    path_tmp = path + '.tmp'
+    active = False
+    with open(path, 'rt') as rd:
+        with open(path_tmp, 'wt') as wr:
+            for line in rd:
+                if line.strip() == '"name": "joulescope_driver",':
+                    active = True
+                elif active:
+                    active = False
+                    parts = line.split(':')
+                    if parts[0].strip() == '"version"':
+                        line = f'{parts[0]}: "{_str(version)}",\n'
+                wr.write(line)
+    os.replace(path_tmp, path)
+
+
 def run():
     version = _changelog_version()
     print(f'Version = {_str(version)}')
@@ -104,6 +123,7 @@ def run():
     _include_h_version(version)
     _py_version(version)
     _node_version(version)
+    _node_lock_version(version)
     return 0
 
 

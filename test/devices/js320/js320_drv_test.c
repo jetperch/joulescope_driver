@@ -442,7 +442,8 @@ static void test_smart_power_ivp_high_rate_host_compute(void ** state) {
 static void test_smart_power_ivp_low_rate_device_compute(void ** state) {
     struct js320_drv_s * self = *state;
     // Drop fs below 1 MHz; smart-power must NOT activate even with all 3.
-    self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(500000));
+    // 250 kHz (factor 4) is a valid rate; 500 kHz (factor 2) is now rejected.
+    self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(250000));
     self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(1));
     self->drv.handle_cmd(&self->drv, NULL, "s/v/ctrl", &jsdrv_union_u32_r(1));
     self->drv.handle_cmd(&self->drv, NULL, "s/p/ctrl", &jsdrv_union_u32_r(1));
@@ -461,8 +462,9 @@ static void test_smart_power_fs_transition_clears_compute(void ** state) {
     self->drv.handle_cmd(&self->drv, NULL, "s/p/ctrl", &jsdrv_union_u32_r(1));
     assert_true(self->power_compute_on_host);
 
-    // Drop to 500 kHz: device must take over power streaming.
-    self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(500000));
+    // Drop to 250 kHz (factor 4; 500 kHz/factor 2 is now rejected): device
+    // must take over power streaming.
+    self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(250000));
     assert_false(self->power_compute_on_host);
     assert_int_equal(1, find_publish("s/p/ctrl")->value_u32);
 }
@@ -660,12 +662,12 @@ static void test_dwnN_signal_passthrough_codes(void ** state) {
     assert_int_equal(JS320_DECIMATE, js320_runtime_decimate(self, 5));
     self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(1));
     assert_int_equal(JS320_DECIMATE, js320_runtime_decimate(self, 5));
-    // 3 maps to 2 (gateware clamp) -> runtime = 32.
+    // 3 is forced to factor 4 (gateware clamps 2 & 3 to 4) -> runtime = 64.
     self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(3));
-    assert_int_equal(JS320_DECIMATE * 2, js320_runtime_decimate(self, 5));
-    // 2 -> factor 2 -> runtime = 32.
+    assert_int_equal(JS320_DECIMATE * 4, js320_runtime_decimate(self, 5));
+    // 2 is forced to factor 4 -> runtime = 64.
     self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(2));
-    assert_int_equal(JS320_DECIMATE * 2, js320_runtime_decimate(self, 5));
+    assert_int_equal(JS320_DECIMATE * 4, js320_runtime_decimate(self, 5));
 }
 
 static void test_dwnN_gpi_mode_off(void ** state) {
@@ -724,15 +726,16 @@ static void test_fs_to_dwn_n_mapping(void ** state) {
     uint32_t n = 99U;
     assert_int_equal(0, js320_fs_to_dwn_n(1000000U, &n));
     assert_int_equal(0U, n);
-    assert_int_equal(0, js320_fs_to_dwn_n(500000U, &n));
-    assert_int_equal(2U, n);
+    // fs=500000 needs factor 2, which gateware forces to 4: reject to avoid
+    // a silent rate mismatch.
+    assert_int_not_equal(0, js320_fs_to_dwn_n(500000U, &n));
     assert_int_equal(0, js320_fs_to_dwn_n(250000U, &n));
     assert_int_equal(4U, n);
     assert_int_equal(0, js320_fs_to_dwn_n(1000U, &n));
     assert_int_equal(1000U, n);
     // fs=333333 doesn't divide 1 MHz evenly.
     assert_int_not_equal(0, js320_fs_to_dwn_n(333333U, &n));
-    // Factor-3 rejected (gateware clamps to 2).
+    // Factor 2 & 3 rejected (gateware forces them to factor 4).
     assert_int_not_equal(0, js320_fs_to_dwn_n(1000000U / 3U, &n));
     // fs > 1 MHz rejected.
     assert_int_not_equal(0, js320_fs_to_dwn_n(2000000U, &n));

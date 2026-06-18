@@ -6,9 +6,13 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.2.11
 
-2026 Jun 17 [in progress]
+2026 Jun 18
 
 * Force s/dwnN/N 2 & 3 to 4.
+* Fixed JS320 open race condition.
+* Fixed JS320 current and voltage scaling.
+* Added missing tmap bounds check.
+* Bumped node.js package lock versions.
 
 
 ## 2.2.10

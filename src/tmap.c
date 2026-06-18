@@ -47,6 +47,10 @@ static size_t tmap_size(const struct jsdrv_tmap_s * self) {
     if (NULL == self) {
         return 0;
     }
+    if ((self->head > self->alloc_size) || (self->tail >= self->alloc_size)) {
+        return 0;
+    }
+
     if (self->head >= self->tail) {
         return self->head - self->tail;
     }
