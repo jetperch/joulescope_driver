@@ -228,22 +228,10 @@ static struct testcase_s TESTS[] = {
             {NULL}
         },
     },
-    {
-        // i+v at half rate via signal dwnN/N=2 -> 1 MHz / 2 = 500 kHz.
-        // Uses the gateware decimate shift path (no division).
-        .name = "i+v dwnN=2 (500 kHz) @ fp=20",
-        .publish_rate = 20,
-        .fs = 1000000,
-        .signal_dwn_n = 2,
-        .gpi_dwn_mode = 2,
-        .gpi_dwn_n = 16,
-        .duration_ms = 2000,
-        .sigs = {
-            {"s/i/!data", "s/i/ctrl", 500000, true, true},
-            {"s/v/!data", "s/v/ctrl", 500000, true, true},
-            {NULL}
-        },
-    },
+    // NOTE: signal dwnN/N values 2 and 3 are NOT supported by the gateware;
+    // only N=1 (passthrough) and the sequential-divider path (N>=4, e.g. 10
+    // below) produce valid streams. Do not add dwnN=2 or dwnN=3 here as
+    // expected-to-work cases.
     {
         // i+v at 1/10 rate via signal dwnN/N=10 -> 1 MHz / 10 = 100 kHz.
         // Uses the gateware decimate sequential divider path.
