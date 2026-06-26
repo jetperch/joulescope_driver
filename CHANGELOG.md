@@ -4,6 +4,15 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.2.13
+
+2026 Jun 26
+
+* Fixed current reading stuck at ±2.2A max on some JS320 units.
+  * Bumped JS320 from 1.1.2 to 1.1.3 which
+    reduced current overflow from almost 100% to 95% of ADC max.
+
+
 ## 2.2.12
 
 2026 Jun 18
