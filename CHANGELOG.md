@@ -11,6 +11,8 @@ This file contains the list of changes made to the Joulescope driver.
 * Fixed current reading stuck at ±2.2A max on some JS320 units.
   * Bumped JS320 from 1.1.2 to 1.1.3 which
     reduced current overflow from almost 100% to 95% of ADC max.
+* Dropped support for Python 3.11 and earlier.  See
+ [NEP 29](https://numpy.org/neps/nep-0029-deprecation_policy.html).
 
 
 ## 2.2.12
