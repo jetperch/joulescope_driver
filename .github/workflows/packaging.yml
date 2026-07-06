@@ -105,6 +105,23 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
 
+      # Stage under the {os}-{arch}/ platform dir at upload time so
+      # push_bench_tools reassembles the full tree with one merged download.
+      - name: Stage bench tools for joulescope_ci
+        if: matrix.shared == 'OFF'
+        shell: bash
+        run: |
+          mkdir -p jci/windows-x86_64
+          cp cmake_build/example/Release/minibitty.exe jci/windows-x86_64/
+
+      - name: Upload bench tools for joulescope_ci
+        if: matrix.shared == 'OFF'
+        uses: actions/upload-artifact@v5
+        with:
+          name: jci-windows-x86_64
+          path: jci
+          if-no-files-found: error
+
   build_native_posix:
     name: Build native on ${{ matrix.os }}
     needs:
@@ -114,6 +131,11 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest"]
+        include:
+          # joulescope_ci bench platform (stations.yaml {os}-{arch} vocabulary)
+          - {os: "ubuntu-latest", jci_platform: linux-x86_64}
+          - {os: "ubuntu-24.04-arm", jci_platform: linux-arm64}
+          - {os: "macos-latest", jci_platform: macos-arm64}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -146,6 +168,20 @@ jobs:
         with:
           name: ${{ matrix.os }}
           path: cmake_build_static/example/jsdrv
+          if-no-files-found: error
+
+      # Stage under the {os}-{arch}/ platform dir at upload time so
+      # push_bench_tools reassembles the full tree with one merged download.
+      - name: Stage bench tools for joulescope_ci
+        run: |
+          mkdir -p jci/${{ matrix.jci_platform }}
+          cp cmake_build_static/example/minibitty jci/${{ matrix.jci_platform }}/
+
+      - name: Upload bench tools for joulescope_ci
+        uses: actions/upload-artifact@v5
+        with:
+          name: jci-${{ matrix.jci_platform }}
+          path: jci
           if-no-files-found: error
 
   build_python_sdist:
@@ -292,6 +328,47 @@ jobs:
           files: |
             dist/*
             windows-latest/*
+
+  push_bench_tools:
+    name: Push bench tools to joulescope_ci
+    if: github.event_name == 'push'
+    needs:
+      - build_native_win
+      - build_native_posix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      # The jci-* artifacts already contain {os}-{arch}/ platform
+      # directories (the coordinator's stations.yaml vocabulary), so one
+      # merged download reassembles the complete tree.  The coordinator
+      # extracts this tree and ships each platform's tools to the matching
+      # benches (joulescope_ci doc/architecture.md section 9).
+      - name: Download bench tools
+        uses: actions/download-artifact@v6
+        with:
+          pattern: jci-*
+          merge-multiple: true
+          path: jci
+
+      - name: Assemble joulescope_ci artifact zip
+        run: |
+          chmod +x jci/*/minibitty*
+          ls -lR jci
+          cd jci && zip -r ../jci_artifacts.zip *
+
+      - name: Push to joulescope_ci coordinator
+        env:
+          JCI_BUILD_TOKEN: ${{ secrets.JCI_BUILD_TOKEN }}
+        run: |
+          python3 ci/ci_artifact_push.py \
+            --url https://api.jetperch.com/github/build \
+            --source github --repo joulescope_driver \
+            --ref "$GITHUB_REF" --commit "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --build-kind dev \
+            --artifact-type tool \
+            --artifact jci_artifacts.zip
 
   build_node_js:
     name: build_node_js_${{ matrix.os }}
