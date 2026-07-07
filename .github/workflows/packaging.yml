@@ -80,7 +80,9 @@ jobs:
       - name: Build
         run: |
           cmake --version
-          cmake -S . -B cmake_build -G "Visual Studio 18 2026" -DCMAKE_CONFIGURATION_TYPES=Release -DCMAKE_VERBOSE_MAKEFILE=ON -DBUILD_SHARED_LIBS=${{matrix.shared}}
+          # No -G: the default picks the newest installed Visual Studio,
+          # which differs between windows-latest and windows-11-arm images.
+          cmake -S . -B cmake_build -DCMAKE_CONFIGURATION_TYPES=Release -DCMAKE_VERBOSE_MAKEFILE=ON -DBUILD_SHARED_LIBS=${{matrix.shared}}
           cmake --build cmake_build --config Release --target ${{matrix.target}}
 
       - name: Run tests
