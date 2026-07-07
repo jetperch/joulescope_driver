@@ -54,16 +54,19 @@ jobs:
           if-no-files-found: error
 
   build_native_win:
-    name: Build native on windows-latest
+    name: Build native on ${{ matrix.os }} (shared=${{ matrix.shared }})
     needs:
       - firmware_update
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {shared: OFF, target: ALL_BUILD}
-          - {shared: ON, target: jsdrv}
+          - {os: windows-latest, shared: OFF, target: ALL_BUILD,
+             jci_platform: windows-x86_64}
+          - {os: windows-latest, shared: ON, target: jsdrv}
+          - {os: windows-11-arm, shared: OFF, target: ALL_BUILD,
+             jci_platform: windows-arm64}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -101,24 +104,24 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: windows-latest-${{ matrix.shared }}
+          name: ${{ matrix.os }}-${{ matrix.shared }}
           path: artifacts/*
           if-no-files-found: error
 
       # Stage under the {os}-{arch}/ platform dir at upload time so
       # push_bench_tools reassembles the full tree with one merged download.
       - name: Stage bench tools for joulescope_ci
-        if: matrix.shared == 'OFF'
+        if: matrix.jci_platform
         shell: bash
         run: |
-          mkdir -p jci/windows-x86_64
-          cp cmake_build/example/Release/minibitty.exe jci/windows-x86_64/
+          mkdir -p jci/${{ matrix.jci_platform }}
+          cp cmake_build/example/Release/minibitty.exe jci/${{ matrix.jci_platform }}/
 
       - name: Upload bench tools for joulescope_ci
-        if: matrix.shared == 'OFF'
+        if: matrix.jci_platform
         uses: actions/upload-artifact@v5
         with:
-          name: jci-windows-x86_64
+          name: jci-${{ matrix.jci_platform }}
           path: jci
           if-no-files-found: error
 
