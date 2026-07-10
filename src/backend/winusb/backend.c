@@ -49,6 +49,21 @@
 #define BULK_IN_TRANSFER_SIZE           (64 * BULK_IN_FRAME_LENGTH)
 #define BULK_IN_TRANSFER_OUTSTANDING    (4)
 
+// A host sleep/resume fails the in-flight bulk IN reads, and so does a device
+// removal.  The completion error code cannot reliably tell them apart, so the
+// pipe is re-armed after a delay rather than abandoned.  A genuine removal is
+// torn down out-of-band: WM_DEVICECHANGE -> device_scan sweeps the device and
+// stops its thread, so re-arming a removed device is a bounded, harmless spin
+// until that sweep fires.  ERROR_OPERATION_ABORTED is our own AbortPipe on
+// close and stays terminal.
+//
+// The delay throttles the re-arm so a still-unavailable device does not spin
+// the device thread.  These values mirror the libusb backend; the Windows
+// sleep/resume error code and timing are not yet characterized on-target, so
+// they are a conservative starting point (see doc/plans).
+#define BULK_IN_RETRY_DELAY_MS          (5U)
+#define BULK_IN_RETRY_DELAY_MAX_MS      (100U)
+
 enum device_mark_e {        // for scan add/remove mark & sweep
     DEVICE_MARK_NONE = 0,
     DEVICE_MARK_FOUND,
@@ -70,6 +85,7 @@ struct endpoint_s {
     HANDLE event;
     ep_process process;
     ep_finalize finalize;
+    ep_process retry;             // NULL when the endpoint has no timed retry
     struct jsdrv_list_s item;     // for in use list
 };
 
@@ -91,6 +107,12 @@ struct bulk_in_s {
     // one of them returns, or bulk_in_transfer_return will UAF.
     uint32_t in_flight;
     bool finalized;
+
+    // Timed re-arm after a transient read failure (host sleep/resume).  delay
+    // is zero when no retry is scheduled and backs off while failures persist.
+    bool retry_pending;
+    uint32_t retry_at_ms;
+    uint32_t retry_delay_ms;
 };
 
 struct bulk_out_s {
@@ -225,6 +247,39 @@ static int32_t bulk_in_pend(struct bulk_in_s * b) {
     return 0;
 }
 
+static void bulk_in_retry_schedule(struct bulk_in_s * b) {
+    b->retry_pending = true;
+    if (0 == b->retry_delay_ms) {
+        b->retry_delay_ms = BULK_IN_RETRY_DELAY_MS;
+    } else if (b->retry_delay_ms < BULK_IN_RETRY_DELAY_MAX_MS) {
+        b->retry_delay_ms *= 2;
+        if (b->retry_delay_ms > BULK_IN_RETRY_DELAY_MAX_MS) {
+            b->retry_delay_ms = BULK_IN_RETRY_DELAY_MAX_MS;
+        }
+    }
+    b->retry_at_ms = jsdrv_time_ms_u32() + b->retry_delay_ms;
+}
+
+// Re-arm the pipe once the retry delay elapses.  Driven by the device thread's
+// timed wakeup, since a torn-down pipe raises no completion event of its own.
+static int32_t bulk_in_retry(struct endpoint_s * ep) {
+    struct bulk_in_s * b = (struct bulk_in_s *) ep;
+    if (!b->retry_pending) {
+        return 0;
+    }
+    if ((int32_t) (jsdrv_time_ms_u32() - b->retry_at_ms) < 0) {
+        return 0;  // not yet
+    }
+    if (0 == bulk_in_pend(b)) {
+        b->retry_pending = false;  // re-armed; a completion clears the backoff
+    } else {
+        // Still unavailable (asleep or removed).  Back off and try again; a
+        // removed device is retired out-of-band by the WM_DEVICECHANGE sweep.
+        bulk_in_retry_schedule(b);
+    }
+    return 0;
+}
+
 static int32_t bulk_in_process(struct endpoint_s * ep) {
     JSDRV_LOGD2("bulk_in_process");
     struct bulk_in_s * b = (struct bulk_in_s *) ep;
@@ -241,6 +296,8 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
         ULONG sz = 0;
         if (WinUsb_GetOverlappedResult(b->ep.dev->winusb, &t->overlapped, &sz, FALSE)) {
             JSDRV_LOGD3("bulk_in_process %p ready, %zu bytes",  &t->overlapped, sz);
+            b->retry_pending = false;  // a completed read proves the pipe is alive
+            b->retry_delay_ms = 0;
             jsdrv_list_remove_head(&b->transfers_pending);
             struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(b->ep.dev->context);
             jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_STREAM_IN_DATA, sizeof(m->topic));
@@ -255,25 +312,32 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
             } else if (ec == ERROR_SEM_TIMEOUT) {
                 JSDRV_LOGD1("bulk_in_process timeout");
                 bulk_in_transfer_free(t);  // timeout ok
-            } else if ((ec == ERROR_OPERATION_ABORTED)     // 995: pending reads aborted (close)
-                       || (ec == ERROR_GEN_FAILURE)        // 31: device stopped functioning (removed)
-                       || (ec == ERROR_NO_SUCH_DEVICE)     // 433: device gone
-                       || (ec == ERROR_DEVICE_NOT_CONNECTED)) {
-                // Expected during a graceful close or device removal: the
-                // outstanding reads are cancelled or the device is gone.
-                // Not an error, so log at debug to avoid close-time noise.
-                JSDRV_LOGD1("bulk_in_process device closing/removed: ec=%d", (int) ec);
-                bulk_in_transfer_free(t);
-                rc = 1;
             } else {
-                WINDOWS_LOG(JSDRV_LOGW, "%s", "bulk_in_process WinUsb_GetOverlappedResult error");
+                // Every other failure schedules a throttled re-arm rather than
+                // killing the pipe.  Host sleep/resume and device removal both
+                // land here (e.g. ERROR_GEN_FAILURE 31, ERROR_NO_SUCH_DEVICE
+                // 433, ERROR_DEVICE_NOT_CONNECTED) and cannot be told apart by
+                // the error code; a genuine removal is retired by the
+                // WM_DEVICECHANGE sweep, which stops this thread.
+                //
+                // ERROR_OPERATION_ABORTED belongs here too: our own close
+                // aborts the pipe from bulk_in_finalize, which drains those
+                // completions itself with the endpoint already off the active
+                // list, so it never reaches this path.  An ABORTED seen here is
+                // an external cancel -- e.g. the OS cancelling pending I/O as
+                // the system suspends -- which must be retried, not treated as
+                // a close.
+                JSDRV_LOGD1("bulk_in_process read failed ec=%d; schedule retry", (int) ec);
                 bulk_in_transfer_free(t);
-                rc = 1;
+                rc = 1;  // stop draining this pass; the timed retry re-arms
             }
         }
     }
 
     if (rc) {
+        // One backoff step per pass, not per errored transfer: a suspend fails
+        // all outstanding reads at once.
+        bulk_in_retry_schedule(b);
         return rc;
     } else {
         return bulk_in_pend(b);
@@ -288,6 +352,7 @@ static struct bulk_in_s * bulk_in_initialize(struct dev_s * dev, uint8_t pipe_id
     b->ep.pipe_id = pipe_id;
     b->ep.process = bulk_in_process;
     b->ep.finalize = bulk_in_finalize;
+    b->ep.retry = bulk_in_retry;
     b->ep.event = CreateEvent(
             NULL,  // default security attributes
             TRUE,  // manual reset event
@@ -696,7 +761,26 @@ static DWORD WINAPI device_thread(LPVOID lpParam) {
             }
             JSDRV_LOGD2("device_thread handle_count=%d", (int) handle_count);
         }
-        WaitForMultipleObjects(handle_count, handles, false, 5000);
+        // Wake no later than the soonest scheduled bulk IN re-arm, so a torn-
+        // down pipe (host sleep/resume) is retried on time rather than waiting
+        // for the next unrelated event.
+        DWORD timeout_ms = 5000;
+        jsdrv_list_foreach(&d->endpoints_active, item) {
+            ep = JSDRV_CONTAINER_OF(item, struct endpoint_s, item);
+            if (ep->retry) {
+                struct bulk_in_s * b = (struct bulk_in_s *) ep;
+                if (b->retry_pending) {
+                    int32_t remaining_ms = (int32_t) (b->retry_at_ms - jsdrv_time_ms_u32());
+                    if (remaining_ms < 0) {
+                        remaining_ms = 0;
+                    }
+                    if ((DWORD) remaining_ms < timeout_ms) {
+                        timeout_ms = (DWORD) remaining_ms;
+                    }
+                }
+            }
+        }
+        WaitForMultipleObjects(handle_count, handles, false, timeout_ms);
         //JSDRV_LOGD3("winusb ll thread %s", d->device.prefix);
         if (WAIT_OBJECT_0 == WaitForSingleObject(handles[0], 0)) {
             // note: ResetEvent handled automatically by msg_queue_pop_immediate
@@ -712,6 +796,9 @@ static DWORD WINAPI device_thread(LPVOID lpParam) {
             ep = JSDRV_CONTAINER_OF(item, struct endpoint_s, item);
             if (WAIT_OBJECT_0 == WaitForSingleObject(ep->event, 0)) {
                 ep->process(ep);
+            }
+            if (ep->retry) {  // no-op unless a re-arm is due
+                ep->retry(ep);
             }
         }
     }

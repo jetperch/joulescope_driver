@@ -4,6 +4,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.3.1
+
+2026 Jul 10 [in progress]
+
+* Fixed USB suspend/resume handling.
+
+
 ## 2.3.0
 
 2026 Jun 26

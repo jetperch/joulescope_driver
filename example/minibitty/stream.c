@@ -188,16 +188,6 @@ static int run(struct app_s * self, const char * device) {
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
     jsdrv_thread_sleep_ms(100);     // todo improved way to detect sensor ready
 
-    PUBLISH_U32("c/led/red", 0);
-    PUBLISH_U32("c/led/green", 0x0f);
-    PUBLISH_U32("c/led/blue", 0xf0);
-    PUBLISH_U32("c/led/en", 1);
-
-    PUBLISH_U32("s/led/red", 0);
-    PUBLISH_U32("s/led/green", 0x0f);
-    PUBLISH_U32("s/led/blue", 0xf0);
-    PUBLISH_U32("s/led/en", 1);
-
     //PUBLISH_U32("v/range/mode", 1);
     //PUBLISH_U32("v/range/select", 1);
 
