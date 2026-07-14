@@ -226,6 +226,78 @@ Still to validate (needs other hardware / hands):
 The mb_device revalidate/replay logic has no host unit-test seam yet; see
 `doc/plans/mb_device_test_harness.md`.
 
+## Windows selective suspend (2026-07-14)
+
+The laptop (Modern Standby) still watchdog-reset with the SLEEP_REQ design: the
+`PBT_APMSUSPEND` broadcast can lose the race against the process freeze, and no
+host-side signal reliably fires last-before-freeze.  Revised approach: enable USB
+selective suspend so Windows itself translates "host stopped using the device"
+into a bus suspend, which the firmware's tested suspend path already handles.
+
+Implemented (minibitty + js320 fw 1.1.5 bcdDevice 0x0001 + jsdrv):
+
+- MS OS descriptors (both 1.0 ext-props and 2.0 sets): `DeviceIdleEnabled=1`,
+  `DefaultIdleState=1` (AUTO_SUSPEND default on), new `DefaultIdleTimeout=2000` ms.
+  Descriptor-driven; no host `WinUsb_SetPowerPolicy` call.  bcdDevice bumped so
+  Windows re-reads the cached MSOS values (usbflags is per VID/PID/bcdDevice).
+  Descriptor layout locked by new unit tests (usbd_test scope 11).
+- Firmware `wd_en` topic (`c/comm/usbd/wd_en`, u8, default 1): user-accessible
+  watchdog inhibit.  0 releases the comm watchdog and blocks all re-registers;
+  1 restores (register only while link CONNECTED).  Unit tested (scope 10).
+  Found on-target: host publishes enter the pubsub THROUGH the usbd task, so the
+  usbd subscription needs `MB_PUBSUB_SFLAG_ALLOW_SAME_TASK` or the no-echo rule
+  silently drops delivery.
+- jsdrv: 1 Hz keep-alive (link PING) while a session is open; `h/link/keep`
+  on/off knob; `WinUsb_GetPowerPolicy` logged at device open (verifies descriptor
+  uptake); new `minibitty publish` and `minibitty suspend_test` commands.
+
+### Measured on the S3 desktop (Windows 11): two vetoes, then success
+
+Selective suspend initially never fired under ANY condition (live-idle, frozen
+process, killed process, no handles) despite `AUTO_SUSPEND=1, SUSPEND_DELAY=2000`
+reading back at open.  Two independent vetoes had to fall:
+
+1. **The power plan**: "USB settings > USB selective suspend setting" was
+   Disabled on this machine, which globally blocks selective suspend no matter
+   what the device requests.  This is a per-host system requirement; "High
+   performance" power plans commonly ship with it Disabled.
+2. **Remote wakeup**: the JS320 does not advertise remote wakeup (config
+   descriptor bmAttributes D5 = 0), and winusb.sys refuses to selectively
+   suspend such a device unless the registry property
+   **`DeviceIdleIgnoreWakeEnable = 1`** is set.  Added to both MS OS
+   descriptor sets (fw 1.1.5, bcdDevice bumped again to 0x0002 for the MSOS
+   cache).  Ignoring wake is correct here: the host resumes the device with
+   its own OUT traffic (keep-alive), so device-initiated wake is unnecessary.
+
+With both fixed, all measured behaviors are exactly the design intent:
+
+- LIVE session (host running): never suspends, even with the keep-alive off --
+  bulk-IN read resubmissions count as WinUSB activity (suspend_test asserts
+  this).  Old keep-alive-less hosts cannot suspend mid-session.
+- FROZEN process (NtSuspendProcess, 20 s, `wd_en=1` fully armed): Windows
+  suspends the device within the 2 s idle timeout, **beating the 3 s IWDG**;
+  the firmware suspend path releases the watchdog; on thaw the session
+  auto-resumes and streaming continues.  **No reset, no re-enumeration, no
+  user action.**  This is the Modern-Standby-freeze emulation passing.
+- KILLED host (`wd_en=1`): handles close -> device suspends ~2 s later ->
+  watchdog released -> device parks suspended and recovers on the next open
+  (resume + CONNECT_REQ).  **Semantic change: a host crash no longer causes a
+  device watchdog reset when selective suspend is operational** -- the device
+  parks cleanly instead.  The watchdog reset remains for device-side wedges
+  (CE) and for hosts where selective suspend is unavailable (power plan
+  Disabled), where crash/freeze behavior is unchanged from before.
+- S3 sleep/wake regression: passes unchanged (SLEEP_REQ ack ~3 ms, resume
+  revalidate -> handshake replay -> stream recovery).
+
+### Laptop acceptance test (remaining)
+
+With fw >= 1.1.5 (bcd 0x0002) and the new jsdrv, and the laptop's power plan
+"USB selective suspend setting" **Enabled**: stream, sleep (lid close), wake.
+Expect: device suspends ~2 s after the DAM freezes the UI (no watchdog reset,
+LEDs steady), and streaming resumes on wake without user action.  If a host
+has selective suspend Disabled in its power plan, sleep still causes a
+watchdog reset; `c/comm/usbd/wd_en=0` is the manual mitigation on such hosts.
+
 ## Unit-testable logic
 
 The retry state machine (schedule, backoff, clear-on-complete, tear-down-on-NO_DEVICE, top-up on

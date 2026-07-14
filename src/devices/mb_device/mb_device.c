@@ -166,6 +166,18 @@ struct state_fetch_s {
 #define REVALIDATE_PING_RETRIES    (4)
 #define REVALIDATE_PING_PAYLOAD    (0x52455641)  // "REVA"
 
+// Session keep-alive.  The device's MS OS descriptors enable Windows USB
+// selective suspend with AUTO_SUSPEND on and a 2000 ms idle timeout, and
+// WinUSB ignores pending bulk IN reads when judging idleness.  This periodic
+// OUT link PING is what holds an open session awake.  When this process is
+// frozen (host sleep), killed, or closes the device, the keep-alives stop
+// and Windows suspends the device; the device firmware's suspend path then
+// releases its comm watchdog, so a sleeping host does not cause a device
+// watchdog reset.  The interval must be comfortably shorter than the
+// device's DefaultIdleTimeout (2000 ms).
+#define KEEPALIVE_INTERVAL         (JSDRV_TIME_SECOND)
+#define KEEPALIVE_PING_PAYLOAD     (0x4B454550)  // "KEEP"
+
 enum events_e {
     EV_INVALID,
     EV_STATE_ENTER,
@@ -233,6 +245,12 @@ struct jsdrvp_mb_dev_s {
     // AWAIT_REQ and it will never transmit), so replay the link handshake.
     uint8_t revalidate_remaining;  // pings left; 0 = revalidation inactive
     int64_t revalidate_utc;        // next ping (or give-up) time
+
+    // Session keep-alive (see KEEPALIVE_INTERVAL).  keepalive_en is a
+    // diagnostic/test knob (topic h/link/keep); disabling it lets
+    // Windows selectively suspend the device ~2 s later.
+    bool    keepalive_en;
+    int64_t keepalive_utc;         // next keep-alive send time
 
     jsdrv_thread_t thread;
     volatile uint8_t state;  // state_e
@@ -1231,6 +1249,7 @@ static void state_set_on_rsp(struct jsdrvp_mb_dev_s * self, uint8_t status) {
 static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     timeout_clear(self);
+    self->keepalive_utc = jsdrv_time_utc();  // first keep-alive immediately
 
     // Notify upper driver
     if (self->drv && self->drv->on_open) {
@@ -1717,6 +1736,16 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         if (0 == strcmp("h/link/!ping", topic)) {
             send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING,
                 (uint32_t *) msg->value.value.bin, (msg->value.size + 3) >> 2);
+            send_return_code_to_frontend(d, topic, 0);
+        } else if (0 == strcmp("h/link/keep", topic)) {  // topic levels max 7 chars
+            // Diagnostic/test knob: 0 stops the session keep-alive, which
+            // lets Windows selectively suspend the device ~2 s later; 1
+            // restores it (the OUT publish itself auto-resumes the device).
+            d->keepalive_en = (0 != msg->value.value.u8);
+            if (d->keepalive_en) {
+                d->keepalive_utc = jsdrv_time_utc();  // resume immediately
+            }
+            JSDRV_LOGI("keepalive_en <= %d", (int) d->keepalive_en);
             send_return_code_to_frontend(d, topic, 0);
         } else if (0 == strcmp("h/in/frecord", topic)) {
             if (NULL != d->file_in) {
@@ -2235,6 +2264,10 @@ static uint32_t thread_timeout_duration_ms(struct jsdrvp_mb_dev_s * d) {
             && ((earliest <= 0) || (d->revalidate_utc < earliest))) {
         earliest = d->revalidate_utc;
     }
+    if ((d->state == ST_OPEN) && d->keepalive_en && (d->keepalive_utc > 0)
+            && ((earliest <= 0) || (d->keepalive_utc < earliest))) {
+        earliest = d->keepalive_utc;
+    }
     if (earliest > 0) {
         int64_t duration = earliest - now;
         if (duration < 0) {
@@ -2295,6 +2328,16 @@ static JSDRV_THREAD_RETURN_TYPE driver_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
             if (d->drv && d->drv->on_timeout) {
                 d->drv->on_timeout(d->drv, d);
             }
+        }
+
+        // Session keep-alive: periodic OUT traffic holds off Windows USB
+        // selective suspend while the session is open and this process is
+        // alive.  See KEEPALIVE_INTERVAL.
+        if ((d->state == ST_OPEN) && d->keepalive_en
+                && (jsdrv_time_utc() >= d->keepalive_utc)) {
+            uint32_t keepalive_payload = KEEPALIVE_PING_PAYLOAD;
+            send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING, &keepalive_payload, 1);
+            d->keepalive_utc = jsdrv_time_utc() + KEEPALIVE_INTERVAL;
         }
 
         // Host resume link revalidation: an unanswered ping either re-pings
@@ -2398,6 +2441,7 @@ int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device, str
     d->context = context;
     d->ll = *ll;
     d->drv = drv;
+    d->keepalive_en = true;
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
     if (jsdrv_thread_create(&d->thread, driver_thread, d, 1)) {

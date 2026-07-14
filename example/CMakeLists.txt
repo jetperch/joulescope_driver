@@ -70,8 +70,10 @@ add_executable(minibitty_exe
         minibitty/loopback.c
         minibitty/mem.c
         minibitty/power_cycle.c
+        minibitty/publish.c
         minibitty/stream.c
         minibitty/stream_test.c
+        minibitty/suspend_test.c
         minibitty/throughput.c
         minibitty/timesync.c
         minibitty/version.c
