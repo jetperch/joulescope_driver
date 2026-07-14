@@ -44,6 +44,7 @@
 #include "minibitty_exe_prv.h"
 #include "jsdrv/time.h"
 #include "jsdrv/topic.h"
+#include "jsdrv_prv/platform.h"
 #include "jsdrv/os_thread.h"
 #include <stdio.h>
 #include <string.h>
