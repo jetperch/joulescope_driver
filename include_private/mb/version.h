@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright 2014-2025 Jetperch LLC
+ * SPDX-FileCopyrightText: Copyright 2014-2026 Jetperch LLC
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,8 +38,8 @@
 
 // DO NOT EDIT DIRECTLY: Edit CHANGELOG.md and then run bin/version_update.py.
 #define MB_VERSION_MAJOR 0
-#define MB_VERSION_MINOR 0
-#define MB_VERSION_PATCH 1
+#define MB_VERSION_MINOR 7
+#define MB_VERSION_PATCH 0
 
 /**
  * \brief The maximum version string length.

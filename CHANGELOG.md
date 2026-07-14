@@ -9,6 +9,18 @@ This file contains the list of changes made to the Joulescope driver.
 2026 Jul 10 [in progress]
 
 * Fixed USB suspend/resume handling.
+* Added Windows host sleep/resume support for MiniBitty-link devices (JS320):
+  * winusb backend forwards WM_POWERBROADCAST suspend/resume to open devices.
+  * mb_device announces host sleep (MB_FRAME_CTRL_SLEEP_REQ) so the firmware
+    releases its host-inactivity watchdog; a crashed host never announces,
+    preserving watchdog crash recovery.
+  * mb_device revalidates the link on resume (ping) and replays the link
+    handshake when the device re-enumerated (Windows resets the bus on
+    resume from S3), restoring streaming without a close/reopen.
+  * Requires JS320 firmware >= 1.1.5 for the sleep announcement; older
+    firmware still recovers via the resume revalidation.
+* Added `--timeout` option to the minibitty stream example and made its
+  no-data monitor host-sleep aware (measures post-wake stream recovery).
 
 
 ## 2.3.0

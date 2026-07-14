@@ -32,6 +32,10 @@
 #define JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN     "bulk/in/s/!open"
 #define JSDRV_USBBK_MSG_BULK_IN_STREAM_CLOSE    "bulk/in/s/!close"
 #define JSDRV_USBBK_MSG_BULK_OUT_DATA           "bulk/out/!data"
+// Host power transition, produced by the backend into the device rsp_q.
+// value: u32 jsdrvbk_power_event_e.  The UL device driver uses this to
+// quiesce before host sleep and to revalidate the link after resume.
+#define JSDRV_USBBK_MSG_POWER                   "@/!power"
 
 JSDRV_CPP_GUARD_START
 
@@ -39,6 +43,12 @@ enum jsdrvbk_status_e {
     JSDRVBK_STATUS_INITIALIZING,
     JSDRVBK_STATUS_READY,
     JSDRVBK_STATUS_FATAL_ERROR,
+};
+
+// value for JSDRV_USBBK_MSG_POWER
+enum jsdrvbk_power_event_e {
+    JSDRVBK_POWER_EVENT_SUSPEND = 0,   // host OS entering sleep
+    JSDRVBK_POWER_EVENT_RESUME = 1,    // host OS resumed from sleep
 };
 
 

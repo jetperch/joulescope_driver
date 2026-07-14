@@ -828,6 +828,8 @@ struct backend_s {
     struct jsdrv_list_s devices_active;
 
     HANDLE discovery;  // discovery event
+    HANDLE power;      // host power transition event
+    volatile LONG power_pending;  // jsdrvbk_power_event_e bit mask
     bool do_exit;
     HANDLE thread;
     DWORD thread_id;
@@ -838,6 +840,43 @@ static void on_device_change(void* cookie) {
     JSDRV_LOGD1("on_device_change");
     if (s->discovery) {
         SetEvent(s->discovery);
+    }
+}
+
+// Runs on the device_change_notifier window thread.  Record the pending
+// transition(s) and wake the backend thread, which forwards to the devices.
+// Suspend and resume can both be pending when the process was frozen
+// between them (Modern Standby); the backend forwards suspend first so the
+// device sequence remains sane.
+static void on_power_event(void * cookie, int event) {
+    struct backend_s * s = (struct backend_s *) cookie;
+    JSDRV_LOGI("on_power_event(%d)", event);
+    InterlockedOr(&s->power_pending, (LONG) (1 << event));
+    if (s->power) {
+        SetEvent(s->power);
+    }
+}
+
+// Forward a host power transition to each device that speaks the MiniBitty
+// link protocol.  The UL driver (mb_device) announces host sleep to the
+// device firmware and revalidates the link on resume.  Devices with other
+// (or no) UL drivers do not understand JSDRV_USBBK_MSG_POWER, so skip them.
+static void power_event_forward(struct backend_s * s, uint32_t event) {
+    struct jsdrv_list_s * item;
+    struct dev_s * d;
+    jsdrv_list_foreach(&s->devices_active, item) {
+        d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
+        if ((NULL == d->device_type) || (NULL == d->thread)) {
+            continue;
+        }
+        if ((d->device_type->device_factory != jsdrvp_mb_device_factory)
+                && (d->device_type->device_factory != jsdrvp_js320_device_factory)) {
+            continue;
+        }
+        JSDRV_LOGI("power event %lu -> %s", (unsigned long) event, d->device.prefix);
+        struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(
+                s->context, JSDRV_USBBK_MSG_POWER, &jsdrv_union_u32(event));
+        msg_queue_push(d->device.rsp_q, m);
     }
 }
 
@@ -1080,7 +1119,8 @@ static DWORD WINAPI backend_thread(LPVOID lpParam) {
     DWORD handle_count = 0;
     handles[0] = s->discovery;
     handles[1] = msg_queue_handle_get(s->backend.cmd_q);
-    handle_count = 2;
+    handles[2] = s->power;
+    handle_count = 3;
 
     device_scan(s);
     backend_ready(s);
@@ -1095,6 +1135,16 @@ static DWORD WINAPI backend_thread(LPVOID lpParam) {
             // note: ResetEvent handled automatically by msg_queue_pop_immediate
             while (handle_msg(s, msg_queue_pop_immediate(s->backend.cmd_q))) {
                 ; //
+            }
+        }
+        if (WAIT_OBJECT_0 == WaitForSingleObject(handles[2], 0)) {
+            ResetEvent(handles[2]);
+            LONG pending = InterlockedExchange(&s->power_pending, 0);
+            if (pending & (1 << JSDRVBK_POWER_EVENT_SUSPEND)) {
+                power_event_forward(s, JSDRVBK_POWER_EVENT_SUSPEND);
+            }
+            if (pending & (1 << JSDRVBK_POWER_EVENT_RESUME)) {
+                power_event_forward(s, JSDRVBK_POWER_EVENT_RESUME);
             }
         }
     }
@@ -1130,6 +1180,10 @@ static void finalize(struct jsdrvbk_s * backend) {
         if (s->discovery) {
             CloseHandle(s->discovery);
             s->discovery = NULL;
+        }
+        if (s->power) {
+            CloseHandle(s->power);
+            s->power = NULL;
         }
 
         JSDRV_LOGI("finalize usb backend: device_free loop start");
@@ -1184,7 +1238,19 @@ int32_t jsdrv_usb_backend_factory(struct jsdrv_context_s * context, struct jsdrv
         return JSDRV_ERROR_UNSPECIFIED;
     }
 
-    if (device_change_notifier_initialize(on_device_change, s)) {
+    s->power = CreateEvent(
+            NULL,  // default security attributes
+            TRUE,  // manual reset event
+            FALSE, // start unsignalled
+            NULL   // no name
+    );
+    if (!s->power) {
+        JSDRV_LOGE("CreateEvent power failed");
+        finalize(&s->backend);
+        return JSDRV_ERROR_UNSPECIFIED;
+    }
+
+    if (device_change_notifier_initialize(on_device_change, on_power_event, s)) {
         JSDRV_LOGE("device_change_notifier_initialize failed");
         finalize(&s->backend);
         return JSDRV_ERROR_UNSPECIFIED;

@@ -44,7 +44,7 @@ MB_CPP_GUARD_START
 /// The frame total maximum data size in bytes
 #define MB_FRAME_MAX_SIZE (\
     MB_FRAME_HEADER_SIZE + \
-    MB_FRAME_PAYLOAD_MAX_SIZE + \
+    MB_FRAME_PAYLOAD_BYTES_MAX + \
     MB_FRAME_FOOTER_SIZE)
 /// The frame link message (ACK) size in bytes
 #define MB_FRAME_LINK_SIZE (8)
@@ -64,12 +64,12 @@ struct mb_msg_s;
  * likelihood that a data frame is detected as an ACK frame.
  */
 enum mb_frame_type_e {
-    MB_FRAME_FT_DATA = 0x00,                // data frame
-    MB_FRAME_FT_ACK_ALL = 0x0F,             // ack all frames through frame_id
-    MB_FRAME_FT_ACK_ONE = 0x17,             // ack just frame_id
-    MB_FRAME_FT_NACK = 0x1B,                // nack just frame_id
-    MB_FRAME_FT_RESERVED = 0x1D,            // reserved for future use
-    MB_FRAME_FT_CONTROL = 0x1E,             // frame_id contains details
+    MB_FRAME_FT_DATA = 0x00,                // 00 data frame
+    MB_FRAME_FT_ACK_ALL = 0x0F,             // 78 ack all frames through frame_id
+    MB_FRAME_FT_ACK_ONE = 0x17,             // b8 ack just frame_id
+    MB_FRAME_FT_NACK = 0x1B,                // d8 nack just frame_id
+    MB_FRAME_FT_RESERVED = 0x1D,            // e8 reserved for future use
+    MB_FRAME_FT_CONTROL = 0x1E,             // f0 frame_id contains details
 };
 
 /**
@@ -143,7 +143,38 @@ enum mb_frame_control_e {
      */
     MB_FRAME_CTRL_DISCONNECT_ACK = 0x05,
 
-    // reserved controls 6 through 255
+    /**
+     * @brief Announce that the transmitter is entering system sleep.
+     *
+     * The transmitter's operating system is about to sleep, which may
+     * freeze the transmitter without any transport-visible indication
+     * (e.g. Windows Modern Standby never issues USB suspend).  The
+     * receiver should suppress link-inactivity recovery (such as a
+     * communication watchdog reset) until link activity resumes.  Any
+     * subsequently received frame indicates that the transmitter is
+     * awake again and restores normal inactivity handling.
+     *
+     * The receiver replies with MB_FRAME_CTRL_SLEEP_ACK.  The
+     * transmitter must NOT depend on the ACK; it may already be frozen
+     * when the ACK arrives, and the system is designed to fully recover
+     * even without SLEEP messages.
+     *
+     * A crashed transmitter never sends this message, so inactivity
+     * recovery for genuine crashes is preserved.
+     */
+    MB_FRAME_CTRL_SLEEP_REQ = 0x06,
+
+    /**
+     * @brief Acknowledge MB_FRAME_CTRL_SLEEP_REQ.
+     *
+     * Sent upon receiving MB_FRAME_CTRL_SLEEP_REQ.  Informational only:
+     * useful for protocol analyzers and for hosts that want to confirm
+     * firmware support.  Delivery is best-effort since the requester
+     * may freeze at any time.
+     */
+    MB_FRAME_CTRL_SLEEP_ACK = 0x07,
+
+    // reserved controls 8 through 255
 };
 
 /**

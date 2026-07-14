@@ -72,6 +72,23 @@ enum mb_comm_link_events_e {
 };
 
 /**
+ * @brief The comm link task config flags (mb_comm_link_task_config_s.flags).
+ */
+enum mb_comm_link_flags_e {
+    /**
+     * @brief Automatically open the link at initialization.
+     *
+     * When set, the task issues MB_EV_OPEN_REQ to its state machine at init so
+     * the link opens (and, for an initiator, starts sending CONNECT_REQ)
+     * without requiring an external "<prefix>/!req"=1 publish.  Use this for
+     * always-on links such as a device that must connect whenever the physical
+     * link is up (e.g. raw Ethernet).  Default (0) preserves the host/app-driven
+     * open behavior.
+     */
+    MB_COMM_LINK_FLAG_AUTO_OPEN = (1u << 0),
+};
+
+/**
  * @brief The link identity information sent on connection.
  */
 struct mb_link_identity_s {
@@ -175,6 +192,34 @@ void mb_comm_link_rx_post(uint8_t task_id, struct mb_msg_s * msg);
  *      frame check as needed.
  */
 struct mb_msg_s * mb_comm_link_identity(struct mb_msg_s * msg);
+
+/**
+ * @brief No-op transmit frame_check function (relies on a lower-layer check).
+ *
+ * Use as tx_frame_check_fn for links whose transport provides its own frame
+ * integrity check (e.g. the Ethernet MAC hardware FCS/CRC-32).  It writes no
+ * software frame_check field, sets msg->event = MB_COMM_LINK_EV_TX_PEND, and
+ * synchronously calls mb_comm_link_tx_pend().
+ *
+ * @param task_id The comm link task id.
+ * @param msg The data frame to transmit.
+ */
+void mb_comm_link_frame_check_none_tx(uint8_t task_id, struct mb_msg_s * msg);
+
+/**
+ * @brief No-op receive frame_check function (relies on a lower-layer check).
+ *
+ * Use as rx_frame_check_fn for links whose transport provides its own frame
+ * integrity check (e.g. the Ethernet MAC hardware FCS/CRC-32).  It marks the
+ * frame as passing by setting msg->app = 0 (NOTE: pass is app == 0, matching
+ * the implementation of mb_comm_link_rx_post; the "app = 1" wording elsewhere
+ * is stale), sets msg->event = MB_COMM_LINK_EV_RX_POST, and synchronously calls
+ * mb_comm_link_rx_post().
+ *
+ * @param task_id The comm link task id.
+ * @param msg The received data frame.
+ */
+void mb_comm_link_frame_check_none_rx(uint8_t task_id, struct mb_msg_s * msg);
 
 // for unit testing only
 void mb_comm_link_topic_setup(uint8_t task_id, const char * topic_prefix);

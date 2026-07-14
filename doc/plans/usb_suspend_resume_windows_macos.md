@@ -16,7 +16,7 @@ Linux dev host.
 |---|---|---|---|
 | Linux | `libusb/backend.c` + `linux_usbfs.c` | landed | yes, `stream-live` 6/6 |
 | macOS | `libusb/backend.c` + `darwin_usb.c` | none needed (see below) | no |
-| Windows | `winusb/backend.c` (native, not libusb) | landed, **unbuilt** | no |
+| Windows | `winusb/backend.c` (native, not libusb) | landed, built | tested 2026-07-13: **insufficient**, see measured behavior |
 
 ## The model, from Linux (what "works well" means)
 
@@ -69,8 +69,8 @@ re-arm (`bulk_in_retry`, backoff `BULK_IN_RETRY_DELAY_MS` -> `..._MAX_MS`) drive
 thread's timed wakeup; a completed read clears the backoff; a real removal is retired out-of-band by
 the existing `WM_DEVICECHANGE` -> `device_scan` sweep.
 
-**This code has not been compiled.** The Linux dev host has no MSVC/WinUSB toolchain.  First step is
-a Windows build.
+This code was built and run on-target 2026-07-13 (Joulescope UI, JS320).  The re-arm behaves as
+designed but is **not sufficient** on Windows; see the measured behavior and revised design below.
 
 ### The one assumption that must be measured first
 
@@ -98,6 +98,133 @@ never reaches `bulk_in_process`.  Still, capture the actual code:
    OS instead cancels-then-refuses submits at a high rate, retune `BULK_IN_RETRY_DELAY_MS` upward
    using the Linux methodology (the 1-2 ms Linux race is Linux-specific; measure the Windows cliff).
 7. Confirm no regression to normal streaming, close, and hot-unplug when no sleep occurs.
+
+## Windows — measured behavior (2026-07-13, on-target)
+
+Two machines, Joulescope UI streaming a JS320, Beagle USB 5000 on the wire.  The bulk IN re-arm
+alone recovers neither.
+
+### Desktop (traditional S3 sleep)
+
+- Sleep: the device sees a normal USB suspend.  Firmware unregisters its link watchdog
+  (minibitty `usbd.c` `USB_EV_SUSPEND`) and waits; control LED stays green.
+- Wake: Windows issues a **full USB bus reset**, not resume signaling, and re-enumerates the
+  device.  The control LED goes blue: the usbd state machine left CONNECTED and only returns on
+  `MB_COMM_LINK_SM_EV_IDENTITY_RECEIVED`, i.e. the host replaying the link handshake, which the
+  host never does.  The sensor LED stays green: no firmware reset.
+- The firmware cannot have initiated this.  Its only soft-disconnect (`DCTL` SDIS, stm32h7rs
+  `usbd_ll.c`) runs during ll init, which only executes after an MCU reset, and no reset
+  occurred.  The reset is host-initiated and is normal Windows behavior when the xHCI controller
+  loses power/context across S3: the hub driver performs *reset-recovery* -- port reset, re-read
+  descriptors, and (descriptors matching) it keeps the same devnode and open handles, so no
+  `WM_DEVICECHANGE` fires.  USB 2.0 permits reset in place of resume; devices must tolerate it.
+- Consequence: the WinUSB handle stays valid and the re-armed reads pend fine, but the firmware
+  link layer is back at AWAIT_REQ and will never transmit.  The session is dead until the UI
+  closes and reopens (which replays the handshake).  Pipe re-arm cannot recover this.
+
+### Laptop (Modern Standby, S0 Low Power Idle)
+
+- Sleep: the device **never sees USB suspend** (Beagle-confirmed).  Modern Standby has no global
+  bus suspend; devices sleep only via USB selective suspend, and our MS OS descriptors disable it
+  (`DeviceIdleEnabled = false`, minibitty `usbd_descriptors.c`).  The bus stays active (SOFs
+  continue) while the Desktop Activity Moderator freezes the UI process.
+- The firmware therefore sees exactly what a host-app crash looks like: an active bus with a
+  silent host.  The link watchdog fires and the device resets -- correct for the CE recovery
+  requirement, wrong for sleep.  The information needed to tell them apart is not on the bus.
+- Confirm the sleep-state split per machine with `powercfg /a` (desktop: S3; laptop:
+  "Standby (S0 Low Power Idle)").
+
+### Diagnosis
+
+The Linux model ("suspend fails the reads; re-arm until they complete") does not transfer:
+
+1. Windows S3 wake resets and re-enumerates the device, wiping firmware link state while keeping
+   host handles alive.  Recovery requires replaying the link connect/identity/open sequence and
+   re-applying device state, not just re-arming pipes.
+2. Windows Modern Standby never suspends the device, so the firmware cannot distinguish host
+   sleep from host crash from the bus alone.  The host must announce sleep explicitly.
+
+## Windows — revised design
+
+Keep the bulk IN re-arm; it is still needed to survive the failed reads at the sleep/wake edges.
+Add three pieces:
+
+1. **Host sleep/resume notifications** (`winusb/backend.c`).  The backend already runs a message
+   window for `WM_DEVICECHANGE`; also handle `WM_POWERBROADCAST`:
+   - `PBT_APMSUSPEND` (sent on both S3 and Modern Standby entry): quiesce streaming and send the
+     firmware a "host sleeping" link message for each open device.  Measure the time budget --
+     the handler must finish before the process is frozen (expect < 2 s; keep it to one small
+     transfer per device).
+   - `PBT_APMRESUMEAUTOMATIC`: trigger link revalidation for each open device.
+2. **Firmware "host sleeping" link message** (minibitty).  A link control frame that mirrors
+   `USB_EV_SUSPEND`: `mb_task_watchdog_unregister()` until the next RX activity (or USB
+   suspend/reset).  A crashed host never sends it, so the CE watchdog-recovery requirement is
+   preserved.  Fixes the laptop watchdog reset.
+3. **Link revalidate/re-establish** (`mb_device.c`).  On resume notification, ping the link; if
+   the device re-enumerated (desktop reset-on-resume leaves it at AWAIT_REQ), replay the
+   connect -> identity -> open sequence on the same client-facing device and re-apply streaming
+   state.  Fixes the desktop dead session.  The Linux ideal of "no reopen" holds at the client
+   API, not on the wire: after a bus reset the wire session is necessarily new.
+
+### Alternative considered: enable selective suspend
+
+Setting `DeviceIdleEnabled = 1` plus WinUSB AUTO_SUSPEND power policy would let Modern Standby
+actually suspend the device, making the laptop look like the desktop.  Rejected for now:
+
+- WinUSB treats pending bulk IN reads as idle, so the device could selective-suspend during any
+  quiet moment of an open session -- a much larger behavior change than sleep handling.
+- Windows caches the MS OS registry properties per device (usbflags); changing them needs a
+  `bcdDevice` bump or devnode deletion to take effect, which is painful to roll out.
+- It does not address the desktop case: reset-on-resume still wipes the link.
+
+### Validation (revised)
+
+1. Laptop, Modern Standby: sleep/wake while streaming.  Device must not watchdog-reset (both
+   LEDs stay green through sleep) and the stream resumes without user action.
+2. Desktop, S3: sleep/wake while streaming.  Control LED returns to green after wake without
+   close/reopen; stream resumes at full rate.
+3. Host crash (kill the UI process): device still watchdog-resets and re-enumerates within its
+   timeout (CE requirement intact).
+4. Unplug while asleep: on wake, revalidation fails and the `WM_DEVICECHANGE` sweep (or a
+   revalidate timeout) tears the device down cleanly; no permanent retry spin.
+5. Regression: normal open/stream/close and hot-unplug with no sleep are unaffected.
+
+### Implementation and validation results (2026-07-13)
+
+Implemented across three repos and validated on the S3 desktop with a JS320 (fw 1.1.5):
+
+- minibitty: `MB_FRAME_CTRL_SLEEP_REQ`/`SLEEP_ACK` (frame.h), usbd.c watchdog release on
+  SLEEP_REQ, re-register on next RX; unit-tested (usbd_test.c scope 9, 41/41 pass).
+- joulescope_driver: `device_change_notifier` WM_POWERBROADCAST -> backend power event ->
+  `JSDRV_USBBK_MSG_POWER` into each mb-protocol device rsp_q; mb_device sends SLEEP_REQ on
+  suspend, revalidates on resume (4 pings @ 500 ms), replays the handshake via new
+  `EV_LINK_REVALIDATE_FAILED` -> ST_LINK_REQUEST on silence.  `on_link_request` now resets
+  host frame ids to match the device's `reset_buffers`.
+- js320: firmware 1.1.5 built and flashed.
+
+Measured, desktop S3 (`minibitty stream` with `--timeout 30` across a scripted sleep/wake):
+
+- PBT_APMSUSPEND -> SLEEP_REQ -> SLEEP_ACK round trip: **3.5 ms** -- comfortably inside the
+  pre-freeze window (process froze ~24 s after broadcast on this machine; USB streaming stopped
+  ~5 s before actual S3 entry, which is Windows suspending the USB stack early -- unavoidable).
+- Wake: PBT_APMRESUMEAUTOMATIC at t+0; 4 unanswered pings -> replay at t+2.0 s; CONNECT_REQ
+  retried every 250 ms until the re-enumeration completed at t+7.0 s; handshake + open restore
+  completed and **streaming resumed with no close/reopen**.  No firmware reset (boot history
+  clean).  Bulk OUT writes queued while the device was gone all flush at once when the pipe
+  returns, so the device sees a CONNECT_REQ burst; OUT FIFO ordering guarantees the host
+  IDENTITY still lands after the last queued CONNECT_REQ, so the handshake converges.
+- Host crash: `Stop-Process` on the streaming app -> device watchdog reset (boot history
+  `reset=WATCHDOG`) and re-enumeration.  CE recovery intact.
+
+Still to validate (needs other hardware / hands):
+
+- Laptop, Modern Standby (item 1): the SLEEP_REQ path is the fix; confirm PBT_APMSUSPEND is
+  delivered before the DAM freeze and the device rides through host sleep without reset.
+- Unplug while asleep (item 4) and physical hot-unplug regression (item 5 unplug half).
+- macOS (unchanged plan above).
+
+The mb_device revalidate/replay logic has no host unit-test seam yet; see
+`doc/plans/mb_device_test_harness.md`.
 
 ## Unit-testable logic
 

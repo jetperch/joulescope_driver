@@ -38,6 +38,7 @@ enum loopback_location_e {
 
 static volatile time_t last_data_time_ = 0;
 static bool stats_enable_ = false;  // --stats: display the sys utilization report
+static uint32_t stream_timeout_s_ = STREAM_TIMEOUT_S;  // --timeout override
 
 // mb_sys_util_v1_s feature bits (see minibitty mb/tasks/sys.h).
 #define UTIL_FEATURE_CPU   (1u << 0)
@@ -260,12 +261,26 @@ static int run(struct app_s * self, const char * device) {
     time_t end_time = self->duration_ms
         ? (time(NULL) + (self->duration_ms + 999) / 1000)
         : 0;
+    time_t poll_time = time(NULL);
 
     while (!quit_) {
         jsdrv_thread_sleep_ms(100);
         time_t now = time(NULL);
-        if ((now - last_data_time_) >= STREAM_TIMEOUT_S) {
-            printf("ERROR: no data received for %d seconds\n", STREAM_TIMEOUT_S);
+        time_t gap = now - poll_time;
+        poll_time = now;
+        if (gap >= 2) {
+            // The wall clock jumped across a ~100 ms sleep: the host slept
+            // (this process was frozen).  Restart the no-data timer so it
+            // measures post-wake stream recovery, and extend the duration
+            // so slept time does not count against it.
+            printf("host sleep detected (%d s); awaiting stream recovery\n", (int) gap);
+            last_data_time_ = now;
+            if (end_time) {
+                end_time += gap;
+            }
+        }
+        if ((now - last_data_time_) >= (time_t) stream_timeout_s_) {
+            printf("ERROR: no data received for %d seconds\n", (int) stream_timeout_s_);
             rc = 1;
             break;
         }
@@ -291,7 +306,11 @@ static int usage(void) {
         "usage: minibitty stream [--duration <ms>] [--stats] device_path\n"
         "\n"
         "  --duration <ms>  Run for duration then exit 0. If no data\n"
-        "                   received for 5 seconds, exit with error.\n"
+        "                   received for the timeout, exit with error.\n"
+        "  --timeout <s>    The no-data timeout in seconds [5].\n"
+        "                   Use a larger value across a host sleep test:\n"
+        "                   streaming stops several seconds before the\n"
+        "                   host actually sleeps.\n"
         "  --stats          Also display the sys utilization report\n"
         "                   (CPU / stack / heap) during streaming.\n"
         );
@@ -302,6 +321,7 @@ int on_stream(struct app_s * self, int argc, char * argv[]) {
     char *device_filter = NULL;
     self->duration_ms = 0;
     stats_enable_ = false;
+    stream_timeout_s_ = STREAM_TIMEOUT_S;
 
     while (argc) {
         if (argv[0][0] != '-') {
@@ -314,6 +334,11 @@ int on_stream(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
             ARG_REQUIRE();
             self->duration_ms = (uint32_t) strtoul(argv[0], NULL, 10);
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--timeout")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            stream_timeout_s_ = (uint32_t) strtoul(argv[0], NULL, 10);
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--stats")) {
             stats_enable_ = true;

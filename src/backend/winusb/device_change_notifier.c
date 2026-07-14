@@ -22,6 +22,7 @@
 
 
 static device_change_notifier_callback callback_ = NULL;
+static device_power_notifier_callback power_callback_ = NULL;
 static void * cookie_ = NULL;
 static HANDLE thread_ = NULL;
 static HWND    window_ = NULL;
@@ -84,6 +85,31 @@ static LRESULT CALLBACK window_callback(HWND hwnd, UINT nMsg, WPARAM wParam, LPA
                 callback_(cookie_);
             }
             break;
+        }
+
+        case WM_POWERBROADCAST: {
+            // The host is entering or leaving system sleep.  Windows Modern
+            // Standby freezes this process with no USB-visible indication,
+            // so this broadcast is the only reliable sleep signal.  Forward
+            // immediately (no debounce timer): the OS proceeds to sleep
+            // shortly after the broadcast completes.
+            switch (wParam) {
+                case PBT_APMSUSPEND:
+                    JSDRV_LOGI("WM_POWERBROADCAST PBT_APMSUSPEND");
+                    if (NULL != power_callback_) {
+                        power_callback_(cookie_, DEVICE_POWER_EVENT_SUSPEND);
+                    }
+                    break;
+                case PBT_APMRESUMEAUTOMATIC:
+                    JSDRV_LOGI("WM_POWERBROADCAST PBT_APMRESUMEAUTOMATIC");
+                    if (NULL != power_callback_) {
+                        power_callback_(cookie_, DEVICE_POWER_EVENT_RESUME);
+                    }
+                    break;
+                default:
+                    break;
+            }
+            return TRUE;
         }
     }
 
@@ -169,7 +195,9 @@ static DWORD WINAPI window_create(LPVOID lpParam) {
     return rc;
 }
 
-int device_change_notifier_initialize(device_change_notifier_callback callback, void * cookie) {
+int device_change_notifier_initialize(device_change_notifier_callback callback,
+                                       device_power_notifier_callback power_callback,
+                                       void * cookie) {
     if ((NULL != callback_) || (NULL != thread_) || (NULL != window_) || (NULL != running_event_)) {
         JSDRV_LOGE("already initialized");
         return 1;
@@ -190,6 +218,7 @@ int device_change_notifier_initialize(device_change_notifier_callback callback, 
     }
 
     callback_ = callback;
+    power_callback_ = power_callback;
     cookie_ = cookie;
     thread_ = CreateThread(NULL, 0, window_create, NULL, 0, NULL);
     if (NULL == thread_) {
@@ -219,6 +248,7 @@ int device_change_notifier_finalize() {
     CloseHandle(running_event_);
     thread_ = NULL;
     callback_ = NULL;
+    power_callback_ = NULL;
     running_event_ = NULL;
     return rc;
 }

@@ -73,6 +73,9 @@ enum mb_stdmsg_type_e {
     MB_STDMSG_COMM_STATS = 0x05,      // see mb_comm_stats_v1_s in mb/comm/stats.h
     MB_STDMSG_THROUGHPUT = 0x06,      // raw data
     MB_STDMSG_MEM = 0x07,             // see mb_stdmsg_mem_s
+    MB_STDMSG_STATE = 0x08,           // see mb_stdmsg_state_header_s
+    MB_STDMSG_PUBSUB_INFO = 0x09,    // see mb_pubsub_info_s in mb/pubsub.h
+    MB_STDMSG_UTILIZATION = 0x0a,    // see mb_sys_util_v1_s in mb/tasks/sys.h
 
     MB_STDMSG_USER = 0x80,
     MB_STDMSG_USER_LAST = 0xff,
@@ -136,6 +139,10 @@ struct mb_stdmsg_publish_s {
     char topic[MB_TOPIC_LENGTH_MAX];    ///< The null terminated topic string.
     union mb_value_u value;             ///< The published value for topic of type hdr.meta.
 };
+
+#define MB_STDMSG_PUBLISH_TRACKING_ID(meta) ((uint16_t) ((meta) >> 16))
+#define MB_STDMSG_PUBLISH_SIZE_LSB(meta)    ((uint8_t) (((meta) >> 6) & 0x03))
+#define MB_STDMSG_PUBLISH_VALUE_TYPE(meta)  ((uint8_t) ((meta) & MB_VALUE_TYPE_MASK))
 
 /**
  * PubSub response message.
@@ -265,6 +272,61 @@ struct mb_msg_s * mb_stdmsg_mem_respond_data(
         const struct mb_stdmsg_header_s * hdr,
         uint8_t status,
         uint32_t data_alloc_length);
+
+/**
+ * @brief The pubsub state message type.
+ */
+enum mb_stdmsg_state_type_e {
+    MB_STDMSG_STATE_TYPE_INVALID  = 0,
+    MB_STDMSG_STATE_TYPE_GET_INIT = 1,
+    MB_STDMSG_STATE_TYPE_GET_RSP  = 2,
+    MB_STDMSG_STATE_TYPE_GET_NEXT = 3,
+    MB_STDMSG_STATE_TYPE_SET_CMD  = 4,
+    MB_STDMSG_STATE_TYPE_SET_RESP = 5,
+};
+
+/**
+ * @brief The pubsub state message flags.
+ */
+enum mb_stdmsg_state_flags_e {
+    MB_STDMSG_STATE_FLAG_START = (1 << 0),  // first state data block
+    MB_STDMSG_STATE_FLAG_END   = (1 << 1),  // last state data block
+};
+
+/**
+ * @brief The header format for all pubsub state messages.
+ *
+ * The mb_stdmsg_header_s.metadata field is reserved
+ * and must be set to 0.
+ */
+struct mb_stdmsg_state_header_s {
+    uint32_t transaction_id;    ///< Arbitrary transaction id, provided by initiator.
+    uint8_t type;               ///< mb_stdmsg_state_type_e
+    uint8_t flags;              ///< mb_stdmsg_state_flags_e
+    uint8_t status;             ///< 0 = success, else error code
+    uint8_t rsv;                ///< reserved, set to 0
+    // payload varies by type
+    // GET_INIT: target_topic[MB_TOPIC_LENGTH_MAX] (null = all)
+    // GET_RSP:  list of mb_stdmsg_state_entry_s
+    // GET_NEXT: no payload
+    // SET_CMD:  list of mb_stdmsg_state_entry_s
+    // SET_RESP: no payload
+};
+
+/**
+ * @brief The TLV entry format for GET_RSP and SET_CMD.
+ */
+struct mb_stdmsg_state_entry_s {
+    char topic[MB_TOPIC_LENGTH_MAX];    ///< The null-terminated topic string.
+    uint8_t value_type;                 ///< mb_value_e value type
+    uint8_t rsv1;                       ///< reserved, set to 0
+    uint16_t size;                      ///< value size in bytes
+    uint32_t rsv2;                      ///< align value to u64 boundary, set to 0
+    union mb_value_u value;             ///< actual value data
+    // entry size rounded up to next multiple of 8
+    // entry total = 40 + ((size + 7) & ~7)
+    // min entry (scalar) = 48 bytes
+};
 
 MB_CPP_GUARD_END
 

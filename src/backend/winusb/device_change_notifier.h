@@ -42,6 +42,26 @@ JSDRV_CPP_GUARD_START
  */
 typedef void (*device_change_notifier_callback)(void* cookie);
 
+/// The system power event for device_power_notifier_callback.
+enum device_power_event_e {
+    DEVICE_POWER_EVENT_SUSPEND = 0,   ///< PBT_APMSUSPEND: host entering sleep
+    DEVICE_POWER_EVENT_RESUME = 1,    ///< PBT_APMRESUMEAUTOMATIC: host awake
+};
+
+/**
+ * @brief Function called on system power transitions (WM_POWERBROADCAST).
+ *
+ * @param cookie The associated data provided to
+ *      device_change_notifier_initialize().
+ * @param event The device_power_event_e value.
+ *
+ * PBT_APMSUSPEND is delivered on both traditional (S3) sleep entry and
+ * Windows Modern Standby (S0 low-power idle) entry.  The callback runs on
+ * the internal window thread and must return quickly: the OS proceeds to
+ * sleep shortly after the broadcast completes.
+ */
+typedef void (*device_power_notifier_callback)(void * cookie, int event);
+
 
 /**
  * @brief Initialize the device change system.
@@ -50,16 +70,20 @@ typedef void (*device_change_notifier_callback)(void* cookie);
  *      called from an internal thread without any synchronization.  Any
  *      required synchronization is the responsibility of the callback.
  *      The callback must remain valid until device_change_notifier_finalize().
- * @param cookie The associated data to pass to callback.
+ * @param power_callback Function to call on system power transitions
+ *      (suspend/resume).  NULL to ignore power transitions.  Same threading
+ *      and lifetime rules as callback.
+ * @param cookie The associated data to pass to both callbacks.
  * @return 0 on success, 1 if already initialized or other error code on
  *      failure.
  *
  * This module only services a single callback.  Attempting to register another
- * callback without first calling device_change_notifier_finalize() is an 
+ * callback without first calling device_change_notifier_finalize() is an
  * error, and the new callback will not be registered.
  */
 int device_change_notifier_initialize(
         device_change_notifier_callback callback,
+        device_power_notifier_callback power_callback,
         void * cookie);
 
 

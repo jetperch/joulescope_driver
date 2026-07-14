@@ -42,7 +42,9 @@ MB_CPP_GUARD_START
 /// The maximum string length in bytes for a topic, including the null terminator.
 #define MB_TOPIC_LENGTH_MAX (32U)
 
-/// The maximum string length in bytes for each hierarchical topic level.
+/// The storage size in bytes for each hierarchical topic level, including
+/// the null terminator.  The maximum number of characters per level is
+/// therefore MB_TOPIC_LENGTH_PER_LEVEL - 1.
 #define MB_TOPIC_LENGTH_PER_LEVEL (8U)
 
 /// The maximum number of hierarchical topic levels.
