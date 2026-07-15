@@ -169,6 +169,12 @@ struct worker_s {
     volatile bool done;
     volatile bool do_exit;
     volatile bool device_present;
+    // Latched by on_device_remove.  The ctrl fw reboot can be faster than
+    // worker_close() (the device is off the bus for only ~0.5 s), so the
+    // DEVICE_REMOVE and DEVICE_ADD events may BOTH arrive before
+    // worker_wait_reconnect() first samples device_present.  The sticky
+    // latch preserves the removal edge; cleared before the ctrl fw update.
+    volatile bool device_removed_seen;
     int32_t result;
     enum worker_state_e state;
     uint16_t pct;                       ///< Overall progress in tenths (0-1000).
@@ -314,6 +320,7 @@ static void on_device_remove(void * user_data, const char * topic,
     const char * prefix = device_event_prefix(value);
     if (prefix && jsdrv_cstr_starts_with(prefix, w->device_prefix)) {
         w->device_present = false;
+        w->device_removed_seen = true;
         jsdrv_os_event_signal(w->event);
     }
 }
@@ -426,6 +433,9 @@ static int32_t worker_ctrl_fw(struct worker_s * w) {
     w->state = WST_CTRL_FW;
     w->pct = PCT_CTRL_FW_END;
     worker_publish_status(w, "updating ctrl firmware");
+    // Arm the removal latch: the device reboot (100 ms after the UPDATE
+    // response) may complete before worker_wait_reconnect() runs.
+    w->device_removed_seen = false;
 
     uint8_t * buf = NULL;
     uint32_t buf_size = 0;
@@ -450,9 +460,18 @@ static int32_t worker_wait_reconnect(struct worker_s * w) {
     w->pct = PCT_WAIT_REMOVE_END;
     worker_publish_status(w, "waiting for device removal");
 
-    for (uint32_t i = 0; i < 100 && w->device_present && !worker_cancelled(w); ++i) {
+    // device_removed_seen latches the removal edge: the reboot bounce is
+    // ~0.5 s and worker_close() can take ~1 s against the resetting device,
+    // so remove + add may both have fired already (device_present true
+    // again).  The 10 s cap remains the fallback for the case where the
+    // remove/add bounce fits inside the WM_DEVICECHANGE debounce and no
+    // events are published at all.
+    for (uint32_t i = 0;
+         i < 100 && !w->device_removed_seen && w->device_present
+             && !worker_cancelled(w);
+         ++i) {
         jsdrv_os_event_reset(w->event);
-        if (w->device_present) {
+        if (!w->device_removed_seen && w->device_present) {
             jsdrv_os_event_wait(w->event, 100);
         }
     }

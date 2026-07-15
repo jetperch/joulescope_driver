@@ -4,7 +4,7 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
-## 2.3.1
+## 2.3.2
 
 2026 Jul 15
 
@@ -16,7 +16,7 @@ This file contains the list of changes made to the Joulescope driver.
   * mb_device revalidates the link on resume (ping) 
     handshake when the device re-enumerated (Windows resets the bus on
     resume from S3), restoring streaming without a close/reopen.
-  * Bundled JS320 firmware 1.1.4, which supports SLEEP_REQ.
+  * Bundled JS320 firmware 1.1.5, which supports SLEEP_REQ.
 * Added `--timeout` option to the minibitty stream example and made its
   no-data monitor host-sleep aware (measures post-wake stream recovery).
 
