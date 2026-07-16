@@ -78,6 +78,16 @@
 #define BULK_IN_RETRY_DELAY_MS          (5U)
 #define BULK_IN_RETRY_DELAY_MAX_MS      (100U)
 
+// A device can die without a hotplug event: a host-sleep reset-resume
+// force-unbinds usbfs, so transfers fail with NO_DEVICE while the device
+// never leaves the bus and udev/libusb never report LEFT or ARRIVED.
+// After tearing down such a device, rescan on a timer so the (still
+// present, kernel-rebound) device is re-announced through the normal
+// device_add path and clients can reconnect.  Bounded so a device that
+// was genuinely unplugged while the host slept does not scan forever.
+#define RESCAN_INTERVAL_MS              (500U)
+#define RESCAN_COUNT                    (60U)   // 60 * 500 ms = 30 s
+
 
 enum device_mark_e {
     DEVICE_MARK_NONE = 0,
@@ -156,6 +166,12 @@ struct backend_s {
     struct jsdrv_list_s devices_active;
 
     jsdrv_os_event_t hotplug_event;
+
+    // Timed rescan after a silent (no hotplug event) device death.
+    // rescan_remaining is 0 when inactive; see RESCAN_INTERVAL_MS.
+    uint32_t rescan_remaining;
+    uint32_t rescan_at_ms;
+
     volatile bool do_exit;
     pthread_t thread_id;
 };
@@ -805,6 +821,7 @@ static int32_t device_add(struct backend_s * s, libusb_device * usb_device, stru
             jsdrv_list_add_tail(&s->devices_active, &d->item);
             d->mode = DEVICE_MODE_CLOSED;
             device_add_announce(s, d);
+            s->rescan_remaining = 0;  // silent-death rescan found its device
             return 0;
         }
         ++dt;
@@ -843,6 +860,26 @@ static void device_remove_begin(struct backend_s * s, struct dev_s * d) {
     }
     if (d->mode == DEVICE_MODE_OPEN) {
         d->mode = DEVICE_MODE_CLOSING;
+    }
+}
+
+// Detect devices that died without a hotplug event: the NO_DEVICE
+// transfer-completion and submit-retry paths set DEVICE_MODE_UNASSIGNED
+// but cannot initiate removal from libusb callback context.  Convert
+// them to a normal removal here (thread context) and arm the timed
+// rescan, since no hotplug ARRIVED will ever re-announce the device.
+static void process_silent_removals(struct backend_s * s) {
+    struct jsdrv_list_s * item;
+    struct dev_s * d;
+    jsdrv_list_foreach(&s->devices_active, item) {
+        d = JSDRV_CONTAINER_OF(item, struct dev_s, item);
+        if ((d->mode == DEVICE_MODE_UNASSIGNED) && !d->removing) {
+            JSDRV_LOGI("silent device death (no hotplug): %s; remove + rescan",
+                       d->ll_device.prefix);
+            device_remove_begin(s, d);
+            s->rescan_remaining = RESCAN_COUNT;
+            s->rescan_at_ms = jsdrv_time_ms_u32() + RESCAN_INTERVAL_MS;
+        }
     }
 }
 
@@ -1092,6 +1129,15 @@ void * backend_thread(void * arg) {
         // poll() must not outlast a scheduled bulk IN retry, or the pipe stays
         // dead until the next unrelated event wakes the thread.
         int timeout_ms = 5000;
+        if (s->rescan_remaining) {
+            int32_t rescan_ms = (int32_t) (s->rescan_at_ms - jsdrv_time_ms_u32());
+            if (rescan_ms < 0) {
+                rescan_ms = 0;
+            }
+            if (rescan_ms < timeout_ms) {
+                timeout_ms = rescan_ms;
+            }
+        }
         struct jsdrv_list_s * retry_item;
         jsdrv_list_foreach(&s->devices_active, retry_item) {
             struct dev_s * d = JSDRV_CONTAINER_OF(retry_item, struct dev_s, item);
@@ -1113,7 +1159,16 @@ void * backend_thread(void * arg) {
             ; //
         }
         process_devices(s);
+        process_silent_removals(s);
         if (fds[1].revents) {
+            handle_hotplug(s);
+        } else if (s->rescan_remaining
+                && (((int32_t) (jsdrv_time_ms_u32() - s->rescan_at_ms)) >= 0)) {
+            --s->rescan_remaining;
+            s->rescan_at_ms = jsdrv_time_ms_u32() + RESCAN_INTERVAL_MS;
+            if (0 == s->rescan_remaining) {
+                JSDRV_LOGI("silent-death rescan: giving up (device not found)");
+            }
             handle_hotplug(s);
         }
         handle_device_close(s);

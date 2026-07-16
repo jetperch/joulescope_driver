@@ -4,6 +4,35 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.3.3
+
+2026 Jul 16
+
+* Fixed host sleep/resume recovery on Linux (and unclean-close recovery
+  on all platforms).
+  * Fixed mb_device open-time `!state` restore: full SET_CMD chunks
+    exceeded the frame payload limit after the publish wrapper was added
+    and were silently dropped, so device state leaked from a prior
+    session survived open.  This caused the "only power displays until a
+    second restart" symptom after an unclean session end.  Oversized
+    publishes now log an error instead of vanishing.
+  * libusb backend: a device that dies without a hotplug event (Linux
+    reset-resume after host sleep force-unbinds usbfs; no LEFT/ARRIVED
+    fires) is now torn down properly and re-discovered by a bounded
+    timed rescan, so clients can reconnect without an app restart.
+  * mb_device link-silence supervision: sustained RX silence while the
+    keep-alive is active now triggers the same link revalidation and
+    handshake replay as the Windows host-resume power event, recovering
+    a session whose device link was wiped by a resume bus reset.  This
+    is OS-agnostic and also covers macOS sleep.  `h/link/keep=0`
+    disables it together with the keep-alive.
+  * Host-crash recovery is unchanged: a killed host with an active bus
+    still causes the device comm-watchdog reset and re-enumeration.
+* Added `jsdrv stream_watch` example: watch i/v/p streams and log
+  per-second JSON evidence for sleep/resume and recovery testing.
+* Added mb_device unit tests (state chunking, silence supervision).
+
+
 ## 2.3.2
 
 2026 Jul 15

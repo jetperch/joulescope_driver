@@ -90,5 +90,6 @@ int on_scan(struct app_s * self, int argc, char * argv[]);
 int on_set(struct app_s * self, int argc, char * argv[]);
 int on_statistics(struct app_s * self, int argc, char * argv[]);
 int on_stream_buffer(struct app_s * self, int argc, char * argv[]);
+int on_stream_watch(struct app_s * self, int argc, char * argv[]);
 int on_threads(struct app_s * self, int argc, char * argv[]);
 int on_version(struct app_s * self, int argc, char * argv[]);

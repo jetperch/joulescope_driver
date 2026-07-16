@@ -27,6 +27,7 @@ add_executable(jsdrv_exe
         jsdrv/set.c
         jsdrv/statistics.c
         jsdrv/stream_buffer.c
+        jsdrv/stream_watch.c
         jsdrv/threads.c
         jsdrv/version.c
 )

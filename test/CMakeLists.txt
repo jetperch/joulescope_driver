@@ -104,6 +104,15 @@ add_dependencies(js320_drv_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(js320_drv_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(js320_drv_test ${CMAKE_CURRENT_BINARY_DIR}/js320_drv_test)
 
+# mb_device_test includes the device source directly (js320_drv_test
+# pattern) and stubs the frontend services; msg_queue, cstr/topic/union,
+# meta, and posix come real from jsdrv_support_objlib.  The clock is
+# test-owned via a jsdrv_time_utc rename at include time.
+add_executable(mb_device_test devices/mb_device/mb_device_test.c)
+add_dependencies(mb_device_test jsdrv_support_objlib tinyprintf cmocka)
+target_link_libraries(mb_device_test jsdrv_support_objlib tinyprintf cmocka)
+add_test(mb_device_test ${CMAKE_CURRENT_BINARY_DIR}/mb_device_test)
+
 add_executable(frontend_test frontend_test.c
         ../src/buffer.c
         ../src/devices.c

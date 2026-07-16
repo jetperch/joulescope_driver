@@ -135,6 +135,7 @@ const struct command_s COMMANDS[] = {
         {"set",  on_set,  "Set parameters"},
         {"statistics",  on_statistics,  "Display statistics from all connected devices"},
         {"stream_buffer",  on_stream_buffer,  "Demonstrate stream buffer"},
+        {"stream_watch",  on_stream_watch,  "Watch i/v/p streams, log JSON evidence"},
         {"threads", on_threads, "Demonstrate multi-thread access"},
         {"version", on_version, "Display version and platform information"},
         {"help", on_help, "Display help"},

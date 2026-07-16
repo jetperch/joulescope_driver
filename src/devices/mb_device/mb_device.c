@@ -47,6 +47,19 @@
 #define PAYLOAD_SIZE_MAX_U8     (FRAME_SIZE_U8 - FRAME_OVERHEAD_U8)
 #define PAYLOAD_SIZE_MAX_U32    (PAYLOAD_SIZE_MAX_U8 >> 2)
 #define MB_TOPIC_SIZE_MAX       (32U)
+// Budget for a value published via publish_to_device_confirmed(), which
+// wraps the value in an outer PUBLISH stdmsg header plus a fixed-size
+// topic field before framing:
+//   length_u8 = sizeof(struct mb_stdmsg_header_s) + MB_TOPIC_SIZE_MAX + value_size
+// A value larger than this budget produces a frame payload over
+// PAYLOAD_SIZE_MAX_U32 that msg_alloc_send_to_device() rejects.
+#define PUBLISH_VALUE_SIZE_MAX_U8 \
+    (PAYLOAD_SIZE_MAX_U8 - sizeof(struct mb_stdmsg_header_s) - MB_TOPIC_SIZE_MAX)
+JSDRV_STATIC_ASSERT(8 == sizeof(struct mb_stdmsg_header_s), stdmsg_header_size);
+JSDRV_STATIC_ASSERT(
+    ((sizeof(struct mb_stdmsg_header_s) + MB_TOPIC_SIZE_MAX + PUBLISH_VALUE_SIZE_MAX_U8 + 3U) >> 2)
+        <= PAYLOAD_SIZE_MAX_U32,
+    publish_value_budget_fits_frame);
 #define PUBSUB_DISCONNECT_STR   "h|disconnect"
 
 // One time_map slot per possible pubsub-instance prefix (top-level
@@ -178,6 +191,16 @@ struct state_fetch_s {
 #define KEEPALIVE_INTERVAL         (JSDRV_TIME_SECOND)
 #define KEEPALIVE_PING_PAYLOAD     (0x4B454550)  // "KEEP"
 
+// Link-silence supervision.  While a session is open and the keep-alive
+// is enabled, the device answers every 1 Hz keep-alive PING with a PONG,
+// so sustained RX silence means the link died without an OS notification
+// (e.g. a Linux resume whose bus reset wiped the device link back to
+// AWAIT_REQ while this process kept its handles).  Escalate to the same
+// revalidation used for the host-resume power event; continued silence
+// then replays the handshake.  3x the keep-alive interval tolerates two
+// consecutive lost or late pongs before escalating.
+#define LINK_SILENCE_TIMEOUT       (3 * KEEPALIVE_INTERVAL)
+
 enum events_e {
     EV_INVALID,
     EV_STATE_ENTER,
@@ -251,6 +274,7 @@ struct jsdrvp_mb_dev_s {
     // Windows selectively suspend the device ~2 s later.
     bool    keepalive_en;
     int64_t keepalive_utc;         // next keep-alive send time
+    int64_t rx_utc;                // last frame received from the device
 
     jsdrv_thread_t thread;
     volatile uint8_t state;  // state_e
@@ -1178,7 +1202,9 @@ static uint8_t state_set_send_chunk(struct jsdrvp_mb_dev_s * self, bool first) {
         uint16_t padded = (e->value_size + 7u) & ~7u;
         if (padded < 8) { padded = 8; }
         uint32_t entry_size = 40u + padded;
-        if (off + entry_size > sizeof(buf)) {
+        // Budget against the post-wrap frame limit, not sizeof(buf): the
+        // publish adds an outer header + topic on top of this payload.
+        if (off + entry_size > PUBLISH_VALUE_SIZE_MAX_U8) {
             break;  // frame full; remaining entries go in the next chunk
         }
         uint8_t * ent = buf + off;
@@ -1250,6 +1276,7 @@ static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     timeout_clear(self);
     self->keepalive_utc = jsdrv_time_utc();  // first keep-alive immediately
+    self->rx_utc = self->keepalive_utc;      // fresh silence window per session
 
     // Notify upper driver
     if (self->drv && self->drv->on_open) {
@@ -1564,7 +1591,7 @@ static const char * prefix_match_and_strip(const char * prefix, const char * top
  */
 static struct jsdrvp_msg_s * msg_alloc_send_to_device(struct jsdrvp_mb_dev_s * d, enum mb_frame_service_type_e service_type, uint8_t length_u32, uint16_t metadata) {
     if ((length_u32 == 0) || (length_u32 > PAYLOAD_SIZE_MAX_U32)) {
-        JSDRV_LOGE("send_to_device: invalid length %ul", length_u32);
+        JSDRV_LOGE("send_to_device: invalid length %u", (unsigned) length_u32);
         return NULL;
     }
 
@@ -1615,10 +1642,16 @@ static uint16_t tracking_id_alloc(struct jsdrvp_mb_dev_s * d) {
 static void publish_to_device_confirmed(struct jsdrvp_mb_dev_s * d, const char * topic,
                                         const struct jsdrv_union_s * value, bool confirmed) {
     uint32_t value_size = (value->size < 8) ? 8 : value->size;  // keep things simple
+    if (value_size > PUBLISH_VALUE_SIZE_MAX_U8) {
+        JSDRV_LOGE("publish_to_device(%s): value size %u exceeds max %u; dropped",
+                   topic, (unsigned) value_size, (unsigned) PUBLISH_VALUE_SIZE_MAX_U8);
+        return;
+    }
     uint32_t length_u8 = sizeof(struct mb_stdmsg_header_s) + MB_TOPIC_SIZE_MAX + value_size;  // topic and value
     uint32_t length_u32 = (length_u8 + 3) >> 2;  // round up
     struct jsdrvp_msg_s * m = msg_alloc_send_to_device(d, MB_FRAME_ST_STDMSG, length_u32, 0);
     if (!m) {
+        JSDRV_LOGE("publish_to_device(%s): frame alloc failed; dropped", topic);
         return;
     }
 
@@ -2146,6 +2179,7 @@ static void handle_stream_in_frame(struct jsdrvp_mb_dev_s * d, uint32_t * p_u32)
 
 static void handle_stream_in(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_BIN);
+    d->rx_utc = jsdrv_time_utc();  // any RX proves the link is alive
     uint32_t frame_count = (msg->value.size + FRAME_SIZE_U8 - 1) / FRAME_SIZE_U8;
     for (uint32_t i = 0; i < frame_count; ++i) {
         uint32_t * p_u32 = (uint32_t *) &msg->value.value.bin[i * FRAME_SIZE_U8];
@@ -2281,6 +2315,69 @@ static uint32_t thread_timeout_duration_ms(struct jsdrvp_mb_dev_s * d) {
 }
 
 
+// The timed portion of the driver thread loop: state and driver
+// timeouts, session keep-alive, link-silence supervision, and the
+// revalidation ping/replay ladder.  Factored out of driver_thread so
+// unit tests can drive it with a mocked clock.
+static void driver_thread_timed_work(struct jsdrvp_mb_dev_s * d) {
+    if ((d->timeout_utc > 0) && (jsdrv_time_utc() >= d->timeout_utc)) {
+        d->timeout_utc = 0;
+        state_machine_process(d, EV_TIMEOUT);
+    }
+    if ((d->drv_timeout_utc > 0) && (jsdrv_time_utc() >= d->drv_timeout_utc)) {
+        d->drv_timeout_utc = 0;
+        if (d->drv && d->drv->on_timeout) {
+            d->drv->on_timeout(d->drv, d);
+        }
+    }
+
+    // Session keep-alive: periodic OUT traffic holds off Windows USB
+    // selective suspend while the session is open and this process is
+    // alive.  See KEEPALIVE_INTERVAL.
+    if ((d->state == ST_OPEN) && d->keepalive_en
+            && (jsdrv_time_utc() >= d->keepalive_utc)) {
+        uint32_t keepalive_payload = KEEPALIVE_PING_PAYLOAD;
+        send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING, &keepalive_payload, 1);
+        d->keepalive_utc = jsdrv_time_utc() + KEEPALIVE_INTERVAL;
+    }
+
+    // Link-silence supervision: the keep-alive elicits a PONG, so RX
+    // silence past LINK_SILENCE_TIMEOUT means the link died without
+    // an OS notification (e.g. Linux resume bus reset).  Revalidate
+    // exactly as for a host-resume power event; continued silence
+    // escalates to a handshake replay below.  h/link/keep=0 disables
+    // this supervision together with the keep-alive.
+    if ((d->state == ST_OPEN) && d->keepalive_en
+            && (0 == d->revalidate_remaining) && (d->rx_utc > 0)
+            && ((jsdrv_time_utc() - d->rx_utc) > LINK_SILENCE_TIMEOUT)) {
+        JSDRV_LOGW("link silent > %d ms: revalidate",
+                   (int) JSDRV_TIME_TO_MILLISECONDS(LINK_SILENCE_TIMEOUT));
+        on_host_power_resume(d);
+    }
+
+    // Host resume link revalidation: an unanswered ping either re-pings
+    // or, when the retries are exhausted, declares the link dead and
+    // replays the handshake (the device re-enumerated across the sleep).
+    if (d->revalidate_remaining && (jsdrv_time_utc() >= d->revalidate_utc)) {
+        if (ST_OPEN != d->state) {
+            d->revalidate_remaining = 0;  // left ST_OPEN; stand down
+        } else if (--d->revalidate_remaining) {
+            JSDRV_LOGI("link revalidate: ping retry (%u left)",
+                       (unsigned) d->revalidate_remaining);
+            d->revalidate_utc = jsdrv_time_utc() + REVALIDATE_PING_INTERVAL;
+            uint32_t payload = REVALIDATE_PING_PAYLOAD;
+            send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING, &payload, 1);
+        } else {
+            JSDRV_LOGW("link revalidate failed: re-establish link session");
+            state_machine_process(d, EV_LINK_REVALIDATE_FAILED);
+        }
+    }
+
+    if (d->state == ST_LL_CLOSE_PEND) {
+        state_machine_process(d, EV_ADVANCE);
+    }
+}
+
 static JSDRV_THREAD_RETURN_TYPE driver_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
     struct jsdrvp_mb_dev_s *d = (struct jsdrvp_mb_dev_s *) lpParam;
     JSDRV_LOGI("MB USB upper-level thread started for %s d=%p", d->ll.prefix, (void *) d);
@@ -2319,48 +2416,7 @@ static JSDRV_THREAD_RETURN_TYPE driver_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
             ;
         }
 
-        if ((d->timeout_utc > 0) && (jsdrv_time_utc() >= d->timeout_utc)) {
-            d->timeout_utc = 0;
-            state_machine_process(d, EV_TIMEOUT);
-        }
-        if ((d->drv_timeout_utc > 0) && (jsdrv_time_utc() >= d->drv_timeout_utc)) {
-            d->drv_timeout_utc = 0;
-            if (d->drv && d->drv->on_timeout) {
-                d->drv->on_timeout(d->drv, d);
-            }
-        }
-
-        // Session keep-alive: periodic OUT traffic holds off Windows USB
-        // selective suspend while the session is open and this process is
-        // alive.  See KEEPALIVE_INTERVAL.
-        if ((d->state == ST_OPEN) && d->keepalive_en
-                && (jsdrv_time_utc() >= d->keepalive_utc)) {
-            uint32_t keepalive_payload = KEEPALIVE_PING_PAYLOAD;
-            send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING, &keepalive_payload, 1);
-            d->keepalive_utc = jsdrv_time_utc() + KEEPALIVE_INTERVAL;
-        }
-
-        // Host resume link revalidation: an unanswered ping either re-pings
-        // or, when the retries are exhausted, declares the link dead and
-        // replays the handshake (the device re-enumerated across the sleep).
-        if (d->revalidate_remaining && (jsdrv_time_utc() >= d->revalidate_utc)) {
-            if (ST_OPEN != d->state) {
-                d->revalidate_remaining = 0;  // left ST_OPEN; stand down
-            } else if (--d->revalidate_remaining) {
-                JSDRV_LOGI("link revalidate: ping retry (%u left)",
-                           (unsigned) d->revalidate_remaining);
-                d->revalidate_utc = jsdrv_time_utc() + REVALIDATE_PING_INTERVAL;
-                uint32_t payload = REVALIDATE_PING_PAYLOAD;
-                send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING, &payload, 1);
-            } else {
-                JSDRV_LOGW("link revalidate failed: re-establish link session");
-                state_machine_process(d, EV_LINK_REVALIDATE_FAILED);
-            }
-        }
-
-        if (d->state == ST_LL_CLOSE_PEND) {
-            state_machine_process(d, EV_ADVANCE);
-        }
+        driver_thread_timed_work(d);
     }
 
     if (NULL != d->file_in) {
