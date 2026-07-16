@@ -23,6 +23,11 @@
 // d->ll.cmd_q.  Time is controlled by renaming jsdrv_time_utc to a
 // test-owned clock before including the source.
 
+// Define before any jsdrv header so jsdrv_prv/log.h does not apply its
+// default first; matches mb_device.c's own definition exactly, so the
+// re-definition inside the included source is identical (no C4005).
+#define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
+
 #include <stdarg.h>
 #include <stddef.h>
 #include <setjmp.h>

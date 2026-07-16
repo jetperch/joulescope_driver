@@ -28,33 +28,36 @@
 #include "jsdrv_prv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
+#include "jsdrv/time.h"
 #include "jsdrv/union.h"
+#include "jsdrv_prv/platform.h"  // jsdrv_time_utc
 #include "jsdrv_prv/thread.h"
 #include <inttypes.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #define CHANNEL_COUNT (3U)
 #define EXIT_RATE_FAIL (2)
 #define EXIT_REMOVED (3)
 
+// Counters are written only by the single jsdrv frontend pubsub thread
+// (one writer) and read by the main loop; volatile suffices for this
+// diagnostic tool (see example/minibitty/stream.c for the same pattern).
 struct channel_s {
     const char * name;             // "i", "v", "p"
-    atomic_uint_fast64_t samples;  // cumulative samples received
-    atomic_uint_fast64_t msgs;     // cumulative !data messages received
-    atomic_uint_fast64_t sample_id_last;
+    volatile uint64_t samples;     // cumulative samples received
+    volatile uint64_t msgs;        // cumulative !data messages received
+    volatile uint64_t sample_id_last;
     uint64_t samples_prev;         // start-of-window snapshot (main thread)
 };
 
 struct stream_watch_s {
     struct app_s * app;
     struct channel_s channels[CHANNEL_COUNT];
-    atomic_uint_fast32_t device_add_count;
-    atomic_uint_fast32_t device_remove_count;
-    atomic_bool device_removed;    // our device is currently removed
+    volatile uint32_t device_add_count;
+    volatile uint32_t device_remove_count;
+    volatile bool device_removed;    // our device is currently removed
     FILE * out;
 };
 
@@ -73,10 +76,11 @@ static int usage(void) {
     return 1;
 }
 
+// Wall time as UNIX epoch seconds, portable via the jsdrv clock
+// (MSVC has no clock_gettime).
 static double time_now(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (double) ts.tv_sec + ((double) ts.tv_nsec) * 1e-9;
+    return ((double) jsdrv_time_utc()) / ((double) JSDRV_TIME_SECOND)
+        + (double) JSDRV_TIME_EPOCH_UNIX_OFFSET_SECONDS;
 }
 
 static void on_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
@@ -87,29 +91,28 @@ static void on_data(void * user_data, const char * topic, const struct jsdrv_uni
     }
     const struct jsdrv_stream_signal_s * s =
         (const struct jsdrv_stream_signal_s *) value->value.bin;
-    atomic_fetch_add(&ch->samples, (uint_fast64_t) s->element_count);
-    atomic_fetch_add(&ch->msgs, 1U);
-    atomic_store(&ch->sample_id_last,
-                 s->sample_id + (uint64_t) s->element_count * s->decimate_factor);
+    ch->samples += s->element_count;
+    ++ch->msgs;
+    ch->sample_id_last = s->sample_id + (uint64_t) s->element_count * s->decimate_factor;
 }
 
 static void on_device_add(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) topic;
     struct stream_watch_s * self = (struct stream_watch_s *) user_data;
-    atomic_fetch_add(&self->device_add_count, 1U);
+    ++self->device_add_count;
     if ((value->type == JSDRV_UNION_STR)
             && (0 == strcmp(value->value.str, self->app->device.topic))) {
-        atomic_store(&self->device_removed, false);
+        self->device_removed = false;
     }
 }
 
 static void on_device_remove(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) topic;
     struct stream_watch_s * self = (struct stream_watch_s *) user_data;
-    atomic_fetch_add(&self->device_remove_count, 1U);
+    ++self->device_remove_count;
     if ((value->type == JSDRV_UNION_STR)
             && (0 == strcmp(value->value.str, self->app->device.topic))) {
-        atomic_store(&self->device_removed, true);
+        self->device_removed = true;
     }
 }
 
@@ -145,7 +148,7 @@ static bool window_emit(struct stream_watch_s * self, double t_start, double t_e
     fprintf(self->out, "{\"t\":%.3f,\"dt\":%.3f", t_end, dt);
     for (uint32_t idx = 0; idx < CHANNEL_COUNT; ++idx) {
         struct channel_s * ch = &self->channels[idx];
-        uint64_t samples = (uint64_t) atomic_load(&ch->samples);
+        uint64_t samples = ch->samples;
         uint64_t window = samples - ch->samples_prev;
         ch->samples_prev = samples;
         double rate = (dt > 0.0) ? ((double) window / dt) : 0.0;
@@ -155,15 +158,15 @@ static bool window_emit(struct stream_watch_s * self, double t_start, double t_e
         fprintf(self->out, ",\"%s\":{\"window\":%" PRIu64 ",\"total\":%" PRIu64
                 ",\"sample_id\":%" PRIu64 "}",
                 ch->name, window, samples,
-                (uint64_t) atomic_load(&ch->sample_id_last));
+                ch->sample_id_last);
     }
-    bool removed = atomic_load(&self->device_removed);
+    bool removed = self->device_removed;
     if (removed) {
         ok = false;
     }
     fprintf(self->out, ",\"adds\":%u,\"removes\":%u,\"removed\":%s,\"ok\":%s}\n",
-            (unsigned) atomic_load(&self->device_add_count),
-            (unsigned) atomic_load(&self->device_remove_count),
+            (unsigned) self->device_add_count,
+            (unsigned) self->device_remove_count,
             removed ? "true" : "false",
             ok ? "true" : "false");
     fflush(self->out);
@@ -281,7 +284,7 @@ int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
-    if (atomic_load(&watch.device_removed)) {
+    if (watch.device_removed) {
         rc = EXIT_REMOVED;
     } else if (ok_streak >= eval_s) {
         rc = 0;
