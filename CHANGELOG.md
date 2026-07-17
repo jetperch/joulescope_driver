@@ -4,9 +4,9 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
-## 2.3.3
+## 2.3.4
 
-2026 Jul 16
+2026 Jul 17
 
 * Fixed host sleep/resume recovery on Linux (and unclean-close recovery
   on all platforms).
