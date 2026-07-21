@@ -35,23 +35,6 @@ add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
-add_definitions(
-        -DTRACY_ENABLE=1
-        -DTRACY_ON_DEMAND=1
-        -DTRACY_NO_CALLSTACK=1
-        -DTRACY_NO_CODE_TRANSFER=1
-        -DTRACY_NO_CONTEXT_SWITCH=1
-        -DTRACY_NO_EXIT=1
-        -DTRACY_NO_SAMPLING=1
-        -DTRACY_NO_VERIFY=1
-        -DTRACY_NO_VSYNC_CAPTURE=1
-        -DTRACY_NO_FRAME_IMAGE=1
-        -DTRACY_NO_SYSTEM_TRACING=1
-        -DTRACY_DELAYED_INIT=out.dat
-        -DTRACY_MANUAL_LIFETIME=1
-        -DTRACY_NO_CRASH_HANDLER=1
-        -DTRACY_VERBOSE=1
-)
 add_executable(minibitty_exe
         minibitty/main.cpp
         minibitty/adapter.c
