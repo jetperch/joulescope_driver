@@ -311,8 +311,10 @@ int32_t meta_binary_parse(
             pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"detail\": \"%s\"", escaped);
         }
 
-        // Default value
-        if (entry->flags & MB_PUBSUB_META_FLAG_HAS_DEFAULT) {
+        // Default value: the 8-byte value follows the entry header, so the
+        // entry must actually be large enough to hold it.
+        if ((entry->flags & MB_PUBSUB_META_FLAG_HAS_DEFAULT)
+                && (entry->entry_size >= MB_PUBSUB_META_ENTRY_HEADER_SIZE + 8)) {
             const uint8_t * def_bytes = (const uint8_t *)(entry + 1);
             char def_str[64];
             format_default(def_str, sizeof(def_str), entry->dtype, def_bytes);
@@ -326,8 +328,21 @@ int32_t meta_binary_parse(
                 (const struct meta_options_header_s *)
                 ((const uint8_t *)entry + entry->options_offset);
             const uint8_t * opt_data = (const uint8_t *)(opts + 1);
+            // Each option is an 8-byte value plus alts_per_option u16 string
+            // indices.  count and alts_per_option come from the device, so
+            // clamp the walk to what the entry actually contains.
+            const uint8_t * opt_end = (const uint8_t *)entry + entry->entry_size;
+            uint32_t opt_stride = 8u + 2u * opts->alts_per_option;
+            uint32_t opt_avail = (uint32_t) (opt_end - opt_data);
+            uint32_t opt_count = opt_avail / opt_stride;
+            if (opt_count > opts->count) {
+                opt_count = opts->count;
+            } else if (opt_count < opts->count) {
+                JSDRV_LOGW("meta_binary: %s options truncated %u -> %u",
+                           topic, (unsigned) opts->count, (unsigned) opt_count);
+            }
             pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"options\": [");
-            for (uint8_t j = 0; j < opts->count; ++j) {
+            for (uint32_t j = 0; j < opt_count; ++j) {
                 if (j > 0) {
                     pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", ");
                 }
@@ -401,7 +416,14 @@ int32_t meta_binary_parse(
 
         pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "}");
 
-        if (on_topic) {
+        if (pos >= json_sz) {
+            // Truncated JSON is invalid JSON: the object, array, and string
+            // delimiters are all missing.  Consumers such as the Python
+            // binding drop unparsable metadata entirely, so publishing it
+            // would silently lose the topic.  Skip it loudly instead.
+            JSDRV_LOGW("meta_binary: %s metadata needs %d bytes, skipped",
+                       topic, pos + 1);
+        } else if (on_topic) {
             on_topic(user_data, topic, json);
         }
 

@@ -21,7 +21,10 @@
 #include <string.h>
 
 #include "jsdrv_prv/meta_binary.h"
+#include "jsdrv_prv/json.h"
 #include "jsdrv/error_code.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include "test.inc"
 
 
@@ -288,53 +291,268 @@ static void on_topic_capture(void * user_data, const char * topic,
     ++topic_count_;
 }
 
+// Mirrors the private layout constants in src/meta_binary.c.
+#define META_HEADER_SIZE        (32U)
+#define META_ENTRY_HEADER_SIZE  (16U)
+#define META_STR_NONE           (0xFFFFU)
+#define META_FLAG_RO            (0x01U)
+#define META_FLAG_HAS_DEFAULT   (0x08U)
+
+struct blob_spec_s {
+    const char * topic;
+    const char * brief;
+    const char * detail;
+    uint8_t flags;          // META_FLAG_*
+    uint8_t option_count;   // 0 for no options block
+    const char * option_alt;  // alt string shared by every option
+    uint16_t entry_size_override;  // 0 to compute
+};
+
+// Build a valid single-topic blob so that the emitted JSON can be inspected.
+// Layout: header | entry | string table | check32.  Free the result.
+static uint8_t * blob_build(const struct blob_spec_s * spec, uint32_t * blob_size) {
+    const char * strings[4] = {spec->topic, spec->brief, spec->detail, spec->option_alt};
+    uint16_t str_idx[4];
+    uint16_t string_count = 0;
+    uint32_t data_sz = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (strings[i] != NULL) {
+            str_idx[i] = string_count++;
+            data_sz += (uint32_t) strlen(strings[i]) + 1;
+        } else {
+            str_idx[i] = META_STR_NONE;
+        }
+    }
+
+    uint32_t has_default = (spec->flags & META_FLAG_HAS_DEFAULT) ? 8 : 0;
+    uint32_t options_off = META_ENTRY_HEADER_SIZE + has_default;
+    uint32_t options_sz = spec->option_count ? (4 + spec->option_count * 10) : 0;
+    uint32_t entry_size = options_off + options_sz;
+    uint32_t st_off = (META_HEADER_SIZE + entry_size + 3) & ~3u;
+    uint32_t data_off = st_off + 8 + ((string_count * 2 + 3) & ~3u);
+    uint32_t total = (data_off + data_sz + 4 + 3) & ~3u;  // + check32, 4-byte aligned
+
+    uint8_t * blob = calloc(1, total);
+    assert_non_null(blob);
+    memcpy(blob, "MBtm_1.0", 8);
+    memcpy(blob + 12, &total, 4);
+    uint16_t u16 = 1;
+    memcpy(blob + 16, &u16, 2);                // topic_count
+    u16 = (uint16_t) st_off;
+    memcpy(blob + 18, &u16, 2);                // string_table_offset
+
+    uint8_t * entry = blob + META_HEADER_SIZE;
+    memcpy(entry + 0, &str_idx[0], 2);         // topic_str_offset
+    memcpy(entry + 2, &str_idx[1], 2);         // brief_str_offset
+    memcpy(entry + 4, &str_idx[2], 2);         // detail_str_offset
+    entry[6] = 0x08;                           // dtype = MB_VALUE_U8
+    entry[7] = spec->flags;
+    u16 = META_STR_NONE;
+    memcpy(entry + 8, &u16, 2);                // format_str_offset
+    u16 = spec->entry_size_override ? spec->entry_size_override : (uint16_t) entry_size;
+    memcpy(entry + 10, &u16, 2);               // entry_size
+    if (spec->option_count) {
+        u16 = (uint16_t) options_off;
+        memcpy(entry + 12, &u16, 2);           // options_offset
+        uint8_t * opts = entry + options_off;
+        opts[0] = spec->option_count;          // count
+        opts[1] = 1;                           // alts_per_option
+        for (uint8_t j = 0; j < spec->option_count; ++j) {
+            uint8_t * opt = opts + 4 + j * 10;
+            opt[0] = j;                        // u8 value, remaining 7 bytes zero
+            memcpy(opt + 8, &str_idx[3], 2);   // alt string index
+        }
+    }
+
+    u16 = string_count;
+    memcpy(blob + st_off, &u16, 2);            // string_count
+    u16 = (uint16_t) data_sz;
+    memcpy(blob + st_off + 2, &u16, 2);        // total_length
+    uint16_t char_off = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (strings[i] == NULL) {
+            continue;
+        }
+        memcpy(blob + st_off + 8 + str_idx[i] * 2, &char_off, 2);
+        memcpy(blob + data_off + char_off, strings[i], strlen(strings[i]) + 1);
+        char_off = (uint16_t) (char_off + strlen(strings[i]) + 1);
+    }
+
+    compute_check32(blob, total);
+    *blob_size = total;
+    return blob;
+}
+
+static int32_t json_count_fn(void * user_data, const struct jsdrv_union_s * token) {
+    (void) token;
+    ++*((int *) user_data);
+    return 0;
+}
+
+// The emitted metadata must survive a real JSON parse, not merely look right.
+// This is the property the Python binding depends on: json.loads() failures
+// are what turned device metadata into None.
+static void assert_json_parses(const char * json) {
+    int token_count = 0;
+    assert_int_equal(0, jsdrv_json_parse(json, json_count_fn, &token_count));
+    assert_true(token_count > 0);
+}
+
 static void test_control_char_escaping(void ** state) {
     (void) state;
     // One topic whose detail contains a raw newline (multi-line YAML
     // detail blocks store raw newlines in the blob string table).
     // The reconstructed JSON must escape it.
-    uint8_t buf[72];
-    memset(buf, 0, sizeof(buf));
-    memcpy(buf, "MBtm_1.0", 8);
-    uint32_t total = sizeof(buf);
-    memcpy(buf + 12, &total, 4);
-    uint16_t topics = 1;
-    memcpy(buf + 16, &topics, 2);
-    uint16_t str_off = 48;
-    memcpy(buf + 18, &str_off, 2);
-
-    // Entry at offset 32: topic=str[0], brief=NONE, detail=str[1],
-    // dtype=u8, entry_size=16
-    uint16_t none = 0xFFFF;
-    uint16_t str_idx;
-    str_idx = 0;
-    memcpy(buf + 32 + 0, &str_idx, 2);   // topic_str_offset
-    memcpy(buf + 32 + 2, &none, 2);      // brief_str_offset
-    str_idx = 1;
-    memcpy(buf + 32 + 4, &str_idx, 2);   // detail_str_offset
-    buf[32 + 6] = 0x08;                  // dtype = u8
-    memcpy(buf + 32 + 8, &none, 2);      // format_str_offset
-    uint16_t entry_size = 16;
-    memcpy(buf + 32 + 10, &entry_size, 2);
-
-    // String table at offset 48: count=2, then offsets, then chars
-    uint16_t str_count = 2;
-    memcpy(buf + 48, &str_count, 2);
-    uint16_t char_off;
-    char_off = 0;
-    memcpy(buf + 48 + 8, &char_off, 2);  // "t"
-    char_off = 2;
-    memcpy(buf + 48 + 10, &char_off, 2); // "a\nb"
-    memcpy(buf + 60, "t\0a\nb\0", 6);    // string data at data_start=60
-
-    compute_check32(buf, total);
+    struct blob_spec_s spec = {.topic = "t", .detail = "a\nb"};
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
 
     topic_count_ = 0;
     json_meta_[0] = '\0';
-    assert_int_equal(0, meta_binary_parse(buf, sizeof(buf), on_topic_capture, NULL));
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
     assert_int_equal(1, topic_count_);
-    assert_non_null(strstr(json_meta_, "\"detail\": \"a\\nb\""));
+    assert_string_equal("{\"dtype\": \"u8\", \"detail\": \"a\\nb\"}", json_meta_);
     assert_null(strchr(json_meta_, '\n'));  // no raw control characters
+    assert_json_parses(json_meta_);
+    free(blob);
+}
+
+static void test_escape_every_class(void ** state) {
+    (void) state;
+    // Quote and backslash need escaping per RFC 8259, as does every
+    // character below 0x20 whether or not it has a short form.
+    struct blob_spec_s spec = {
+        .topic = "t",
+        .brief = "q=\" b=\\",
+        .detail = "\n\r\t\b\f\x01\x1f",
+    };
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    assert_string_equal(
+        "{\"dtype\": \"u8\", \"brief\": \"q=\\\" b=\\\\\""
+        ", \"detail\": \"\\n\\r\\t\\u0008\\u000c\\u0001\\u001f\"}",
+        json_meta_);
+    assert_json_parses(json_meta_);
+    free(blob);
+}
+
+static void test_escape_preserves_utf8(void ** state) {
+    (void) state;
+    // UTF-8 lead and continuation bytes are >= 0x80 and must pass through
+    // unchanged; "180 uA" option labels use the micro sign.
+    struct blob_spec_s spec = {.topic = "t", .brief = "180 \xc2\xb5""A"};
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    assert_string_equal("{\"dtype\": \"u8\", \"brief\": \"180 \xc2\xb5""A\"}", json_meta_);
+    assert_json_parses(json_meta_);
+    free(blob);
+}
+
+static void test_option_alt_escaping(void ** state) {
+    (void) state;
+    // Option alt strings go through the same escape path as brief/detail.
+    struct blob_spec_s spec = {
+        .topic = "t", .option_count = 2, .option_alt = "a\"b",
+    };
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    assert_string_equal(
+        "{\"dtype\": \"u8\", \"options\": [[0, \"a\\\"b\"], [1, \"a\\\"b\"]]}",
+        json_meta_);
+    assert_json_parses(json_meta_);
+    free(blob);
+}
+
+static void test_oversize_metadata_not_published(void ** state) {
+    (void) state;
+    // Enough options to overrun the 2048-byte JSON buffer.  Truncated JSON
+    // is invalid JSON and reintroduces the None-metadata failure, so the
+    // topic must be dropped rather than published malformed.
+    struct blob_spec_s spec = {
+        .topic = "t", .option_count = 200,
+        .option_alt = "a reasonably long option label",
+    };
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    json_meta_[0] = '\0';
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(0, topic_count_);
+    free(blob);
+}
+
+static void test_options_overrun_entry(void ** state) {
+    (void) state;
+    // A corrupt blob claiming more options than the entry holds must not
+    // walk the option array past the end of the entry.
+    struct blob_spec_s spec = {
+        .topic = "t", .option_count = 8, .option_alt = "opt",
+    };
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+    // Shrink entry_size so the declared 8 options no longer fit.
+    uint16_t entry_size = META_ENTRY_HEADER_SIZE + 4 + 2 * 10;
+    memcpy(blob + META_HEADER_SIZE + 10, &entry_size, 2);
+    compute_check32(blob, blob_size);
+
+    topic_count_ = 0;
+    json_meta_[0] = '\0';
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    // Only the 2 options the shrunken entry can hold, not the claimed 8.
+    assert_string_equal(
+        "{\"dtype\": \"u8\", \"options\": [[0, \"opt\"], [1, \"opt\"]]}",
+        json_meta_);
+    assert_json_parses(json_meta_);
+    free(blob);
+}
+
+static void test_default_overruns_entry(void ** state) {
+    (void) state;
+    // HAS_DEFAULT with an entry too small to hold the 8-byte value must not
+    // read past the entry.
+    struct blob_spec_s spec = {
+        .topic = "t",
+        .flags = META_FLAG_HAS_DEFAULT,
+        .entry_size_override = META_ENTRY_HEADER_SIZE,  // no room for the default
+    };
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    json_meta_[0] = '\0';
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    assert_null(strstr(json_meta_, "\"default\""));
+    assert_json_parses(json_meta_);
+    free(blob);
+}
+
+static void test_flags_ro_emitted(void ** state) {
+    (void) state;
+    struct blob_spec_s spec = {.topic = "t", .flags = META_FLAG_RO};
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    assert_string_equal("{\"dtype\": \"u8\", \"flags\": [\"ro\"]}", json_meta_);
+    assert_json_parses(json_meta_);
+    free(blob);
 }
 
 int main(void) {
@@ -355,6 +573,13 @@ int main(void) {
         cmocka_unit_test(test_partially_written_blob),
         cmocka_unit_test(test_last_page_unpadded),
         cmocka_unit_test(test_control_char_escaping),
+        cmocka_unit_test(test_escape_every_class),
+        cmocka_unit_test(test_escape_preserves_utf8),
+        cmocka_unit_test(test_option_alt_escaping),
+        cmocka_unit_test(test_oversize_metadata_not_published),
+        cmocka_unit_test(test_options_overrun_entry),
+        cmocka_unit_test(test_default_overruns_entry),
+        cmocka_unit_test(test_flags_ro_emitted),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

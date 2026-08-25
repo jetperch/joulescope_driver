@@ -6,11 +6,15 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.4.1
 
-2026 Aug 7 [in progress]
+2026 Aug 25
 
 * Added JS320 support to "pyjoulescope_driver measure".
 * Added "metadata" entry point to pyjoulescope_driver.
 * Fixed metadata parsing.
+  * Skip a topic whose reconstructed JSON exceeds the 2048-byte buffer
+    rather than publishing the truncated, unparsable remainder.
+  * Bounded the option array walk and the default value read by the
+    entry size; a corrupt blob could read past the entry.
 
 
 ## 2.4.0
