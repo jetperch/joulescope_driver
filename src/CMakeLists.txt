@@ -73,6 +73,7 @@ set(SUPPORT_SOURCES
 
 set(SOURCES
         buffer.c
+        buffer_params.c
         devices.c
         devices/js110/js110_usb.c
         devices/js220/js220_usb.c
@@ -80,6 +81,7 @@ set(SOURCES
         devices/js320/firmware.c
         devices/js320/js320_cal.c
         devices/js320/js320_drv.c
+        devices/js320/js320_params.c
         devices/js320/js320_fwup.c
         devices/js320/js320_fwup_mgr.c
         devices/js320/js320_jtag.c

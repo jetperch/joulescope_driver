@@ -37,7 +37,7 @@ endfunction (ADD_CMOCKA_DEVICE_TEST)
 
 ADD_CMOCKA_TEST(buffer_signal_test)
 
-add_executable(buffer_test buffer_test.c ../src/buffer.c)
+add_executable(buffer_test buffer_test.c ../src/buffer.c ../src/buffer_params.c)
 add_dependencies(buffer_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(buffer_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(buffer_test ${CMAKE_CURRENT_BINARY_DIR}/buffer_test)
@@ -127,6 +127,7 @@ add_test(mb_device_test ${CMAKE_CURRENT_BINARY_DIR}/mb_device_test)
 
 add_executable(frontend_test frontend_test.c
         ../src/buffer.c
+        ../src/buffer_params.c
         ../src/devices.c
         ../src/devices/js110/js110_usb.c
         ../src/devices/js220/js220_usb.c
@@ -134,6 +135,7 @@ add_executable(frontend_test frontend_test.c
         ../src/devices/js320/firmware.c
         ../src/devices/js320/js320_cal.c
         ../src/devices/js320/js320_drv.c
+        ../src/devices/js320/js320_params.c
         ../src/devices/js320/js320_fwup.c
         ../src/devices/js320/js320_fwup_mgr.c
         ../src/devices/js320/js320_jtag.c

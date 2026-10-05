@@ -125,67 +125,7 @@ static const struct js320_port_def_s PORT_DEFS[JS320_CH_COUNT] = {
     // ch 3, 4, 14, 15 unused (data_topic NULL); 14 (statistics) is dispatched separately.
 };
 
-static const char * js320_sampling_frequency_meta = "{"
-    "\"dtype\": \"u32\","
-    "\"brief\": \"The sampling frequency.\","
-    "\"default\": 1000000,"
-    "\"options\": ["
-        "[1000000, \"1 MHz\"],"
-        "[200000, \"200 kHz\"],"
-        "[100000, \"100 kHz\"],"
-        "[50000, \"50 kHz\"],"
-        "[20000, \"20 kHz\"],"
-        "[10000, \"10 kHz\"],"
-        "[5000, \"5 kHz\"],"
-        "[2000, \"2 kHz\"],"
-        "[1000, \"1 kHz\"],"  // lowest on-instrument output rate
-        "[500, \"500 Hz\"],"
-        "[200, \"200 Hz\"],"
-        "[100, \"100 Hz\"],"
-        "[50, \"50 Hz\"],"
-        "[20, \"20 Hz\"],"
-        "[10, \"10 Hz\"],"
-        "[5, \"5 Hz\"],"
-        "[2, \"2 Hz\"],"
-        "[1, \"1 Hz\"]"
-    "]"
-"}";
-
-static const char * js320_publish_rate_meta = "{"
-    "\"dtype\": \"u32\","
-    "\"brief\": \"The approximate sample publish frequency.\","
-    "\"default\": 20,"
-    "\"options\": ["
-        "[100000, \"100 kHz\"],"
-        "[50000, \"50 kHz\"],"
-        "[20000, \"20 kHz\"],"
-        "[10000, \"10 kHz\"],"
-        "[5000, \"5 kHz\"],"
-        "[2000, \"2 kHz\"],"
-        "[1000, \"1 kHz\"],"
-        "[500, \"500 Hz\"],"
-        "[200, \"200 Hz\"],"
-        "[100, \"100 Hz\"],"
-        "[50, \"50 Hz\"],"
-        "[20, \"20 Hz\"],"
-        "[10, \"10 Hz\"],"
-        "[5, \"5 Hz\"],"
-        "[2, \"2 Hz\"],"
-        "[1, \"1 Hz\"]"
-    "]"
-"}";
-
-static const char * js320_i_scale_meta = "{"
-    "\"dtype\": \"f32\","
-    "\"brief\": \"The current signal scale factor.\","
-    "\"default\": 1.0"
-"}";
-
-static const char * js320_v_scale_meta = "{"
-    "\"dtype\": \"f32\","
-    "\"brief\": \"The voltage signal scale factor.\","
-    "\"default\": 1.0"
-"}";
+extern const struct jsdrvp_param_s js320_params[];
 
 // Sentinel for last_sent_ctrl entries that have never been forwarded.
 // Picked outside the [0, 1] range so the first reconcile always sends.
@@ -806,10 +746,11 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
     // RAW mode is link-only (recovery fwup); skip frontend-facing metadata
     // publishes that assume the device-side pubsub / streaming will come up.
     if (0xFF != jsdrvp_mb_dev_open_mode(dev)) {
-        jsdrvp_mb_dev_send_to_frontend(dev, "h/fs$", &jsdrv_union_cjson_r(js320_sampling_frequency_meta));
-        jsdrvp_mb_dev_send_to_frontend(dev, "h/fp$", &jsdrv_union_cjson_r(js320_publish_rate_meta));
-        jsdrvp_mb_dev_send_to_frontend(dev, "h/i_scale$", &jsdrv_union_cjson_r(js320_i_scale_meta));
-        jsdrvp_mb_dev_send_to_frontend(dev, "h/v_scale$", &jsdrv_union_cjson_r(js320_v_scale_meta));
+        char topic[JSDRV_TOPIC_LENGTH_MAX];
+        for (const struct jsdrvp_param_s * p = js320_params; p->topic; ++p) {
+            jsdrv_cstr_join(topic, p->topic, "$", sizeof(topic));
+            jsdrvp_mb_dev_send_to_frontend(dev, topic, &jsdrv_union_cjson_r(p->meta));
+        }
     }
     JSDRV_LOGI("JS320 driver opened: vendor=0x%04x product=0x%04x",
                identity->vendor_id, identity->product_id);

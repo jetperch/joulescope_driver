@@ -39,31 +39,7 @@ JSDRV_STATIC_ASSERT(32 == sizeof(struct jsdrv_summary_entry_s[2]), entry_size_tw
 JSDRV_STATIC_ASSERT(JSDRV_BUFSIG_COUNT_MAX <= 256, bufsig_fits_in_u8); // assumed for add/remove/list operations
 
 
-static const char * action_add_meta = "{"
-    "\"dtype\": \"u32\","
-    "\"brief\": \"Add a memory buffer.\""  // any u8 value between 1 and 16, inclusive
-"}";
-
-static const char * action_remove_meta = "{"
-    "\"dtype\": \"u32\","
-    "\"brief\": \"Remove a memory buffer.\""
-"}";
-
-static const char * action_list_meta = "{"
-    "\"brief\": \"The list of available buffers, 0 terminated.\""
-"}";
-
-/*
-static const char * event_signal_add_meta = "{"
-    "\"dtype\": \"str\","
-    "\"brief\": \"Add a signal.\","
-"}";
-
-static const char * event_signal_remove_meta = "{"
-    "\"dtype\": \"str\","
-    "\"brief\": \"Remove a signal.\","
-"}";
-*/
+extern const struct jsdrvp_param_s buffer_mgr_params[];
 
 enum buffer_state_s {
     ST_IDLE = 0,
@@ -737,9 +713,11 @@ int32_t jsdrv_buffer_initialize(struct jsdrv_context_s * context) {
     memset(self, 0, sizeof(*self));
     self->context = context;
 
-    send_to_frontend(self, JSDRV_BUFFER_MGR_MSG_ACTION_ADD "$", &jsdrv_union_cjson_r(action_add_meta));
-    send_to_frontend(self, JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE "$", &jsdrv_union_cjson_r(action_remove_meta));
-    send_to_frontend(self, JSDRV_BUFFER_MGR_MSG_ACTION_LIST "$", &jsdrv_union_cjson_r(action_list_meta));
+    char topic[JSDRV_TOPIC_LENGTH_MAX];
+    for (const struct jsdrvp_param_s * p = buffer_mgr_params; p->topic; ++p) {
+        jsdrv_cstr_join(topic, p->topic, "$", sizeof(topic));
+        send_to_frontend(self, topic, &jsdrv_union_cjson_r(p->meta));
+    }
 
     subscribe(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, JSDRV_SFLAG_PUB, _buffer_add, NULL);
     subscribe(self->context, JSDRV_BUFFER_MGR_MSG_ACTION_REMOVE, JSDRV_SFLAG_PUB, _buffer_remove, NULL);

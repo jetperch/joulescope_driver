@@ -56,6 +56,12 @@ struct return_code_s {
     int32_t rc;
 };
 
+struct frontend_send_s {
+    char topic[64];
+    uint8_t type;
+    const char * str;
+};
+
 struct test_capture_s {
     struct jsdrvp_msg_s * backend_sends[CAPTURE_MAX];
     uint32_t backend_send_count;
@@ -65,6 +71,9 @@ struct test_capture_s {
 
     struct return_code_s return_codes[CAPTURE_MAX];
     uint32_t return_code_count;
+
+    struct frontend_send_s frontend_sends[CAPTURE_MAX];
+    uint32_t frontend_send_count;
 
     struct jsdrv_time_map_s time_map;
 };
@@ -126,7 +135,13 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m) 
 void jsdrvp_mb_dev_send_to_frontend(struct jsdrvp_mb_dev_s * dev,
                                      const char * subtopic,
                                      const struct jsdrv_union_s * value) {
-    (void) dev; (void) subtopic; (void) value;
+    (void) dev;
+    if (g_cap.frontend_send_count < CAPTURE_MAX) {
+        struct frontend_send_s * f = &g_cap.frontend_sends[g_cap.frontend_send_count++];
+        jsdrv_cstr_copy(f->topic, subtopic, sizeof(f->topic));
+        f->type = value->type;
+        f->str = value->value.str;
+    }
 }
 
 void jsdrvp_mb_dev_publish_to_device(struct jsdrvp_mb_dev_s * dev,
@@ -298,6 +313,7 @@ int32_t jsdrvp_ul_mb_device_usb_factory(struct jsdrvp_ul_device_s ** device,
 // since the test file may have pulled in log.h transitively already.
 #undef JSDRV_LOG_LEVEL
 #include "../../../src/devices/js320/js320_drv.c"
+#include "../../../src/devices/js320/js320_params.c"
 
 
 // --- Test fixtures ---
@@ -377,6 +393,22 @@ static void enable_signal_stream(struct js320_drv_s * self) {
 // drop-until-ack window.
 static void enable_gpi_stream(struct js320_drv_s * self) {
     self->ports[8].enabled = true;
+}
+
+
+// --- Tests: host metadata ---
+
+static void test_on_open_publishes_param_meta(void ** state) {
+    struct js320_drv_s * self = *state;
+    struct mb_link_identity_s identity = {.vendor_id = 0x1234, .product_id = 0x0003};
+    self->drv.on_open(&self->drv, NULL, &identity);
+    static const char * expect[] = {"h/fs$", "h/fp$", "h/i_scale$", "h/v_scale$"};
+    assert_int_equal(JSDRV_ARRAY_SIZE(expect), g_cap.frontend_send_count);
+    for (uint32_t i = 0; i < JSDRV_ARRAY_SIZE(expect); ++i) {
+        assert_string_equal(expect[i], g_cap.frontend_sends[i].topic);
+        assert_int_equal(JSDRV_UNION_JSON, g_cap.frontend_sends[i].type);
+        assert_ptr_equal(js320_params[i].meta, g_cap.frontend_sends[i].str);
+    }
 }
 
 
@@ -1286,6 +1318,7 @@ static void test_dwnN_signal_ack_independent_of_gpi(void ** state) {
 
 int main(void) {
     const struct CMUnitTest tests[] = {
+        cmocka_unit_test_setup_teardown(test_on_open_publishes_param_meta,   test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_h_fp_default,                   test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_h_fp_set,                       test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_h_fp_clamp_zero,                test_setup, test_teardown),
