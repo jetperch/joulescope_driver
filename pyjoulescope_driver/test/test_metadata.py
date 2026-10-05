@@ -18,8 +18,11 @@ Test the metadata entry point.
 
 import html
 import json
+import os
 import re
+import tempfile
 import unittest
+import zipfile
 from pyjoulescope_driver.entry_points import metadata
 
 
@@ -171,6 +174,83 @@ class TestToHtml(unittest.TestCase):
         self.assertNotIn('http://', self.html.replace('http://www.apache.org', ''))
         self.assertNotIn('https://', self.html)
         self.assertNotIn('src=', self.html)
+
+
+
+_FW_C = {
+    'schema': {'name': 'MiniBitty.pubsub', 'version': '1.0.0'},
+    'project': {'name': '__unknown__', 'version': '0.0.0', 'prefix': 'c'},
+    'topics': {
+        './comm/state': {'dtype': 'u8', 'brief': 'Link state.', 'flags': 'ro'},
+        '././info': {'dtype': 'str', 'brief': 'Info.', 'flags': 'no_traverse'},
+        './list': {'dtype': 'u8', 'brief': 'List.', 'flags': ['hide', 'ro', 'no_traverse']},
+    },
+}
+
+_FW_S = {
+    'schema': {'name': 'MiniBitty.pubsub', 'version': '1.0.0'},
+    'project': {'name': '__unknown__', 'version': '0.0.0', 'prefix': 's'},
+    'topics': {
+        './i/ctrl': {'dtype': 'bool', 'brief': 'Enable current.', 'default': 0},
+    },
+}
+
+
+class TestFirmware(unittest.TestCase):
+
+    def test_meta_to_device(self):
+        meta = metadata.firmware_meta_to_device(_FW_C)
+        self.assertEqual({
+            'c/comm/state': {'dtype': 'u8', 'brief': 'Link state.', 'flags': ['ro']},
+            'c/./info': {'dtype': 'str', 'brief': 'Info.'},
+            'c/list': {'dtype': 'u8', 'brief': 'List.', 'flags': ['ro', 'hide']},
+        }, meta)
+        self.assertEqual('ro', _FW_C['topics']['./comm/state']['flags'])  # input unmodified
+
+    def test_load_json_and_zip(self):
+        with tempfile.TemporaryDirectory() as d:
+            json_path = os.path.join(d, 'pubsub_metadata.json')
+            with open(json_path, 'w') as f:
+                json.dump(_FW_C, f)
+            zip_path = os.path.join(d, 'fw.zip')
+            with zipfile.ZipFile(zip_path, 'w') as z:
+                z.writestr('1/0/app/pubsub_metadata.json', json.dumps(_FW_S))
+                z.writestr('1/0/app/pubsub_metadata.bin', b'ignored')
+            meta = metadata.firmware_load([json_path, zip_path])
+        self.assertEqual({'c/comm/state', 'c/./info', 'c/list', 's/i/ctrl'}, set(meta.keys()))
+
+    def test_load_zip_without_metadata(self):
+        with tempfile.TemporaryDirectory() as d:
+            zip_path = os.path.join(d, 'fw.zip')
+            with zipfile.ZipFile(zip_path, 'w') as z:
+                z.writestr('manifest.yaml', 'x')
+            with self.assertRaisesRegex(ValueError, 'contains no'):
+                metadata.firmware_load([zip_path])
+
+    def test_offline_load_merges_host(self):
+        with tempfile.TemporaryDirectory() as d:
+            zip_path = os.path.join(d, 'fw.zip')
+            with zipfile.ZipFile(zip_path, 'w') as z:
+                z.writestr('0/0/app/pubsub_metadata.json', json.dumps(_FW_C))
+                z.writestr('1/0/app/pubsub_metadata.json', json.dumps(_FW_S))
+            meta = metadata.offline_load([zip_path], 'js320')
+        for topic in ['c/comm/state', 's/i/ctrl', 'h/fs', 'm/@/!add', 'm/{buf}/g/size']:
+            self.assertIn(topic, meta)
+
+
+class TestMetaDiff(unittest.TestCase):
+
+    def test_equal(self):
+        self.assertEqual([], metadata.meta_diff(_META, json.loads(json.dumps(_META))))
+
+    def test_differences(self):
+        expected = {'a': {'dtype': 'u8'}, 'b': {'dtype': 'u8', 'brief': 'x'}, 'c': None}
+        actual = {'b': {'dtype': 'u16', 'brief': 'x'}, 'c': None, 'd': {}}
+        self.assertEqual([
+            '- a',
+            "~ b dtype: 'u16' != 'u8'",
+            '+ d',
+        ], metadata.meta_diff(actual, expected))
 
 
 if __name__ == '__main__':

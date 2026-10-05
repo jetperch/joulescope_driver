@@ -15,6 +15,13 @@ This file contains the list of changes made to the Joulescope driver.
   "flags": [].
 * Improved Claude guidance.
 * Bumped JS320 firmware from 1.1.8 to 1.1.10
+* Added offline topic metadata for documentation.
+  * Moved JS320 host-side and buffer manager metadata into declarative
+    jsdrvp_param_s tables, extracted into the packaged host_params.json.
+  * Added metadata for the per-buffer and per-signal m/ topics.
+  * Added "metadata --firmware" to generate the topic reference from firmware
+    build outputs without a device, and "metadata --diff" to verify it
+    against a connected device.
 
 
 ## 2.4.1

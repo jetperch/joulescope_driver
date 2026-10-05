@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pyjoulescope_driver import Driver
+from pyjoulescope_driver import Driver, __version__
+from pyjoulescope_driver.metadata_extract import host_metadata
 import html
 import json
 import os
+import zipfile
 
 
 _FORMATS = ['json', 'yaml', 'html']
@@ -28,6 +30,8 @@ _EXTENSIONS = {
 }
 _COLUMN_ORDER = ['dtype', 'brief', 'detail', 'default', 'options', 'range', 'format', 'flags']
 _COLUMNS_HIDDEN = ['detail']
+_FIRMWARE_METADATA_FILENAME = 'pubsub_metadata.json'
+_DEVICE_FLAGS = ['ro', 'hide', 'dev']  # the flags meta_binary.c publishes
 
 
 def parser_config(p):
@@ -45,6 +49,19 @@ def parser_config(p):
                    choices=['defaults', 'restore'],
                    default='restore',
                    help='The device open mode.  Defaults to "restore".')
+    p.add_argument('--firmware',
+                   nargs='+',
+                   help='Generate offline, without a device, from firmware build '
+                        + f'{_FIRMWARE_METADATA_FILENAME} files or firmware zip files, '
+                        + 'combined with the host-side metadata for --model.')
+    p.add_argument('--model',
+                   default='js320',
+                   help='The device model for --firmware host-side metadata.  Defaults to js320.')
+    p.add_argument('--title',
+                   help='The HTML title.')
+    p.add_argument('--diff',
+                   help='Compare against this JSON metadata file, instead of writing output.  '
+                        + 'Returns 1 when different.')
     return on_cmd
 
 
@@ -103,6 +120,93 @@ def metadata_load(driver, device_path):
     driver.subscribe(device_path, 'metadata_rsp_retain', on_metadata)
     driver.unsubscribe(device_path, on_metadata)
     return meta
+
+
+def firmware_meta_to_device(doc):
+    """Convert a firmware pubsub_metadata.json document to device form.
+
+    Matches the device metadata the driver publishes on open: see
+    meta_fetch_on_topic() in mb_device.c and meta_binary.c.
+
+    :param doc: The parsed pubsub_metadata.json document.
+    :return: The dict mapping device-relative topic to metadata dict.
+    """
+    prefix = doc['project']['prefix']
+    meta = {}
+    for topic, value in doc['topics'].items():
+        if topic.startswith('./'):
+            topic = prefix + topic[1:]
+        value = dict(value)
+        flags = value.pop('flags', None) or []
+        if isinstance(flags, str):
+            flags = [flags]
+        flags = [f for f in _DEVICE_FLAGS if f in flags]
+        if flags:
+            value['flags'] = flags
+        meta[topic] = value
+    return meta
+
+
+def firmware_load(paths):
+    """Load device metadata from firmware build outputs.
+
+    :param paths: The list of pubsub_metadata.json or firmware zip paths.
+        Zip files contribute every contained pubsub_metadata.json.
+    :return: The dict mapping device-relative topic to metadata dict.
+    """
+    docs = []
+    for path in paths:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as z:
+                names = sorted(n for n in z.namelist()
+                               if n.split('/')[-1] == _FIRMWARE_METADATA_FILENAME)
+                if not names:
+                    raise ValueError(f'{path}: contains no {_FIRMWARE_METADATA_FILENAME}')
+                docs.extend(json.loads(z.read(n)) for n in names)
+        else:
+            with open(path, 'r', encoding='utf-8') as f:
+                docs.append(json.load(f))
+    meta = {}
+    for doc in docs:
+        meta.update(firmware_meta_to_device(doc))
+    return meta
+
+
+def offline_load(paths, model):
+    """Load the complete metadata without a device.
+
+    :param paths: The firmware paths for :func:`firmware_load`.
+    :param model: The device model for the host-side metadata.
+    :return: The dict mapping topic to metadata dict.  Device topics are
+        device-relative, and global driver topics, such as m/, follow.
+    """
+    device, driver = host_metadata(model)
+    meta = firmware_load(paths)
+    meta.update(device)
+    meta.update(driver)
+    return meta
+
+
+def meta_diff(actual, expected):
+    """Compare two metadata dicts.
+
+    :param actual: The metadata dict under test.
+    :param expected: The reference metadata dict.
+    :return: The list of difference description strings, empty when equal.
+    """
+    diffs = []
+    for topic in sorted(set(actual) | set(expected)):
+        if topic not in expected:
+            diffs.append(f'+ {topic}')
+        elif topic not in actual:
+            diffs.append(f'- {topic}')
+        else:
+            a = actual[topic] or {}
+            e = expected[topic] or {}
+            for key in sorted(set(a) | set(e)):
+                if a.get(key) != e.get(key):
+                    diffs.append(f'~ {topic} {key}: {a.get(key)!r} != {e.get(key)!r}')
+    return diffs
 
 
 def to_json(meta):
@@ -211,24 +315,43 @@ def on_cmd(args):
         except ImportError:
             print('YAML output requires pyyaml: pip install pyyaml')
             return 1
-    with Driver() as d:
-        d.log_level = args.jsdrv_log_level
+    if args.firmware:
         try:
-            device_path = device_select(d.device_paths(), args.device)
-        except ValueError as ex:
+            meta = offline_load(args.firmware, args.model)
+        except (OSError, ValueError, KeyError) as ex:
             print(ex)
             return 1
-        d.open(device_path, mode=args.open)
-        try:
-            meta = metadata_load(d, device_path)
-        finally:
-            d.close(device_path)
+        title = f'{args.model} metadata, pyjoulescope_driver {__version__}'
+    else:
+        with Driver() as d:
+            d.log_level = args.jsdrv_log_level
+            try:
+                device_path = device_select(d.device_paths(), args.device)
+            except ValueError as ex:
+                print(ex)
+                return 1
+            d.open(device_path, mode=args.open)
+            try:
+                meta = metadata_load(d, device_path)
+            finally:
+                d.close(device_path)
+        title = f'{device_path} metadata'
+    if args.diff:
+        with open(args.diff, 'r', encoding='utf-8') as f:
+            expected = json.load(f)
+        if not args.firmware:  # live devices do not include global driver topics
+            _, driver = host_metadata(args.model)
+            expected = {k: v for k, v in expected.items() if k not in driver}
+        diffs = meta_diff(meta, expected)
+        for line in diffs:
+            print(line)
+        return 1 if diffs else 0
     if fmt == 'json':
         out = to_json(meta)
     elif fmt == 'yaml':
         out = to_yaml(meta)
     else:
-        out = to_html(meta, f'{device_path} metadata')
+        out = to_html(meta, args.title or title)
     if args.out is None:
         print(out, end='')
     else:

@@ -10,3 +10,4 @@ recursive-include pyjoulescope_driver/test/release *.*
 include pyjoulescope_driver/img_alpha.img
 include pyjoulescope_driver/img_beta.img
 include pyjoulescope_driver/img_stable.img
+include pyjoulescope_driver/host_params.json

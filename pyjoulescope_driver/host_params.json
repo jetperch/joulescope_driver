@@ -1,0 +1,253 @@
+{
+  "devices": {
+    "js220": {
+      "h/state": {
+        "dtype": "u32",
+        "brief": "The current device state.",
+        "options": [
+          [
+            0,
+            "not present"
+          ],
+          [
+            1,
+            "closed"
+          ],
+          [
+            2,
+            "opening"
+          ],
+          [
+            3,
+            "open"
+          ]
+        ],
+        "flags": [
+          "ro",
+          "hide"
+        ]
+      }
+    },
+    "js320": {
+      "h/fs": {
+        "dtype": "u32",
+        "brief": "The sampling frequency.",
+        "default": 1000000,
+        "options": [
+          [
+            1000000,
+            "1 MHz"
+          ],
+          [
+            200000,
+            "200 kHz"
+          ],
+          [
+            100000,
+            "100 kHz"
+          ],
+          [
+            50000,
+            "50 kHz"
+          ],
+          [
+            20000,
+            "20 kHz"
+          ],
+          [
+            10000,
+            "10 kHz"
+          ],
+          [
+            5000,
+            "5 kHz"
+          ],
+          [
+            2000,
+            "2 kHz"
+          ],
+          [
+            1000,
+            "1 kHz"
+          ],
+          [
+            500,
+            "500 Hz"
+          ],
+          [
+            200,
+            "200 Hz"
+          ],
+          [
+            100,
+            "100 Hz"
+          ],
+          [
+            50,
+            "50 Hz"
+          ],
+          [
+            20,
+            "20 Hz"
+          ],
+          [
+            10,
+            "10 Hz"
+          ],
+          [
+            5,
+            "5 Hz"
+          ],
+          [
+            2,
+            "2 Hz"
+          ],
+          [
+            1,
+            "1 Hz"
+          ]
+        ]
+      },
+      "h/fp": {
+        "dtype": "u32",
+        "brief": "The approximate sample publish frequency.",
+        "default": 20,
+        "options": [
+          [
+            100000,
+            "100 kHz"
+          ],
+          [
+            50000,
+            "50 kHz"
+          ],
+          [
+            20000,
+            "20 kHz"
+          ],
+          [
+            10000,
+            "10 kHz"
+          ],
+          [
+            5000,
+            "5 kHz"
+          ],
+          [
+            2000,
+            "2 kHz"
+          ],
+          [
+            1000,
+            "1 kHz"
+          ],
+          [
+            500,
+            "500 Hz"
+          ],
+          [
+            200,
+            "200 Hz"
+          ],
+          [
+            100,
+            "100 Hz"
+          ],
+          [
+            50,
+            "50 Hz"
+          ],
+          [
+            20,
+            "20 Hz"
+          ],
+          [
+            10,
+            "10 Hz"
+          ],
+          [
+            5,
+            "5 Hz"
+          ],
+          [
+            2,
+            "2 Hz"
+          ],
+          [
+            1,
+            "1 Hz"
+          ]
+        ]
+      },
+      "h/i_scale": {
+        "dtype": "f32",
+        "brief": "The current signal scale factor.",
+        "default": 1.0
+      },
+      "h/v_scale": {
+        "dtype": "f32",
+        "brief": "The voltage signal scale factor.",
+        "default": 1.0
+      }
+    }
+  },
+  "driver": {
+    "m/@/!add": {
+      "dtype": "u32",
+      "brief": "Add a memory buffer."
+    },
+    "m/@/!remove": {
+      "dtype": "u32",
+      "brief": "Remove a memory buffer."
+    },
+    "m/@/list": {
+      "brief": "The list of available buffers, 0 terminated."
+    },
+    "m/{buf}/a/!add": {
+      "dtype": "u8",
+      "brief": "Add a signal to this buffer.",
+      "detail": "The signal id, 1 to 254.  Then publish the source data topic to s/{sig}/topic."
+    },
+    "m/{buf}/a/!remove": {
+      "dtype": "u8",
+      "brief": "Remove a signal from this buffer."
+    },
+    "m/{buf}/g/!clear": {
+      "brief": "Clear the buffer contents."
+    },
+    "m/{buf}/g/list": {
+      "dtype": "bin",
+      "brief": "The list of active signal ids, 0 terminated.",
+      "flags": [
+        "ro"
+      ]
+    },
+    "m/{buf}/g/size": {
+      "dtype": "u64",
+      "brief": "The buffer memory size in bytes.",
+      "detail": "Changing the size clears the buffer.  0 releases the buffer memory."
+    },
+    "m/{buf}/g/hold": {
+      "dtype": "bool",
+      "brief": "Hold the buffer contents.",
+      "detail": "When true, discard new samples.  The buffer clears on the true to false transition.",
+      "default": 0
+    },
+    "m/{buf}/s/{sig}/topic": {
+      "dtype": "str",
+      "brief": "The source data topic for this signal."
+    },
+    "m/{buf}/s/{sig}/info": {
+      "dtype": "bin",
+      "brief": "The signal buffer information, jsdrv_buffer_info_s.",
+      "flags": [
+        "ro"
+      ]
+    },
+    "m/{buf}/s/{sig}/!req": {
+      "dtype": "bin",
+      "brief": "Request samples or summary data, jsdrv_buffer_request_s.",
+      "detail": "The response is published to the request's rsp_topic."
+    }
+  }
+}
