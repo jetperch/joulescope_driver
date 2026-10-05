@@ -267,6 +267,29 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
     expect_string(msg_send_process_next, topic, topic_)
 
 
+// Consume the metadata published when buffer 3 is added.
+static void process_buffer3_meta(struct jsdrv_context_s * context) {
+    static const char * topics[] = {
+        "m/003/a/!add$", "m/003/a/!remove$", "m/003/g/!clear$",
+        "m/003/g/list$", "m/003/g/size$", "m/003/g/hold$",
+    };
+    for (size_t i = 0; i < sizeof(topics) / sizeof(topics[0]); ++i) {
+        expect_meta(topics[i]);
+        msg_send_process_next(context, TIMEOUT_MS);
+    }
+}
+
+// Consume the metadata published when signal 5 is added to buffer 3.
+static void process_buffer3_signal5_meta(struct jsdrv_context_s * context) {
+    static const char * topics[] = {
+        "m/003/s/005/topic$", "m/003/s/005/info$", "m/003/s/005/!req$",
+    };
+    for (size_t i = 0; i < sizeof(topics) / sizeof(topics[0]); ++i) {
+        expect_meta(topics[i]);
+        msg_send_process_next(context, TIMEOUT_MS);
+    }
+}
+
 struct jsdrv_context_s * initialize() {
     uint8_t ex_list_buffer[] = {0};
     struct jsdrv_context_s * context = malloc(sizeof(struct jsdrv_context_s));
@@ -349,6 +372,7 @@ static void test_add_remove(void **state) {
 
     expect_subscribe("m/003");
     msg_send_process_next(context, TIMEOUT_MS);
+    process_buffer3_meta(context);
     expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
     msg_send_process_next(context, TIMEOUT_MS);
 
@@ -413,6 +437,7 @@ static void test_unsupported_element_type_removes_signal(void **state) {
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, &jsdrv_union_u8(buffer_id)));
     expect_subscribe("m/003");
     msg_send_process_next(context, TIMEOUT_MS);
+    process_buffer3_meta(context);
     expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
     msg_send_process_next(context, TIMEOUT_MS);
 
@@ -420,6 +445,7 @@ static void test_unsupported_element_type_removes_signal(void **state) {
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD);
     publish(context, msg);
+    process_buffer3_signal5_meta(context);
     expect_sig_list(ex_list_sig1, sizeof(ex_list_sig1));
     msg_send_process_next(context, TIMEOUT_MS);
 
@@ -468,12 +494,14 @@ static void test_hold_release_clears(void **state) {
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, &jsdrv_union_u8(buffer_id)));
     expect_subscribe("m/003");
     msg_send_process_next(context, TIMEOUT_MS);
+    process_buffer3_meta(context);
     expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
     msg_send_process_next(context, TIMEOUT_MS);
 
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD);
     publish(context, msg);
+    process_buffer3_signal5_meta(context);
     expect_sig_list(ex_list_sig1, sizeof(ex_list_sig1));
     msg_send_process_next(context, TIMEOUT_MS);
 
@@ -536,6 +564,7 @@ static void test_one_signal(void **state) {
     publish(context, jsdrvp_msg_alloc_value(context, JSDRV_BUFFER_MGR_MSG_ACTION_ADD, &jsdrv_union_u8(buffer_id)));
     expect_subscribe("m/003");
     msg_send_process_next(context, TIMEOUT_MS);
+    process_buffer3_meta(context);
     expect_buf_list(ex_list_buffer1, sizeof(ex_list_buffer1));
     msg_send_process_next(context, TIMEOUT_MS);
 
@@ -543,6 +572,7 @@ static void test_one_signal(void **state) {
     msg = jsdrvp_msg_alloc_value(context, "", &jsdrv_union_u8(signal_id));
     tfp_snprintf(msg->topic, sizeof(msg->topic), "m/%03u/%s", buffer_id, JSDRV_BUFFER_MSG_ACTION_SIGNAL_ADD);
     publish(context, msg);
+    process_buffer3_signal5_meta(context);
     expect_sig_list(ex_list_sig1, sizeof(ex_list_sig1));
     msg_send_process_next(context, TIMEOUT_MS);
 
