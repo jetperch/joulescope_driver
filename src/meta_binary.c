@@ -37,6 +37,7 @@
 #define MB_PUBSUB_META_FLAG_HIDE        0x02
 #define MB_PUBSUB_META_FLAG_DEV         0x04
 #define MB_PUBSUB_META_FLAG_HAS_DEFAULT 0x08
+#define MB_PUBSUB_META_DTYPE_BOOL       0x80  // entry dtype bit 7
 
 #define MB_VALUE_TYPE_MASK 0x0F
 #define MB_VALUE_STR    0x01
@@ -294,8 +295,15 @@ int32_t meta_binary_parse(
 
         // Build JSON metadata
         int pos = 0;
+        // bool is stored as u8 with dtype bit 7 set, which restores the
+        // dtype so that jsdrv_meta_value accepts "on", "true", etc.
+        const char * dtype_str = dtype_to_str(entry->dtype);
+        if ((entry->dtype & MB_PUBSUB_META_DTYPE_BOOL)
+                && ((entry->dtype & MB_VALUE_TYPE_MASK) == MB_VALUE_U8)) {
+            dtype_str = "bool";
+        }
         pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "{\"dtype\": \"%s\"",
-                        dtype_to_str(entry->dtype));
+                        dtype_str);
 
         const char * brief = str_get(blob, blob_size, hdr, entry->brief_str_offset);
         if (brief) {
@@ -396,7 +404,7 @@ int32_t meta_binary_parse(
         }
 
         // Flags
-        uint8_t flags = entry->flags & ~MB_PUBSUB_META_FLAG_HAS_DEFAULT;
+        uint8_t flags = entry->flags & (MB_PUBSUB_META_FLAG_RO | MB_PUBSUB_META_FLAG_HIDE | MB_PUBSUB_META_FLAG_DEV);
         if (flags) {
             pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"flags\": [");
             int first = 1;

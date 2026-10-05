@@ -4,6 +4,18 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.4.2
+
+2026 Oct 5
+
+* Fixed MiniBitty bool topics (JS320 s/i/ctrl, s/gpi/0/ctrl, ...) rejecting
+  "on"/"off".  The metadata parser now reports dtype "bool" for u8 entries
+  with dtype bit 7 (MB_PUBSUB_META_DTYPE_BOOL) set, so values accept
+  case-insensitive true/false strings.  Unknown entry flags no longer emit
+  "flags": [].
+* Improved Claude guidance.
+
+
 ## 2.4.1
 
 2026 Aug 25

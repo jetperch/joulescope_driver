@@ -297,12 +297,14 @@ static void on_topic_capture(void * user_data, const char * topic,
 #define META_STR_NONE           (0xFFFFU)
 #define META_FLAG_RO            (0x01U)
 #define META_FLAG_HAS_DEFAULT   (0x08U)
+#define META_DTYPE_BOOL         (0x80U)
 
 struct blob_spec_s {
     const char * topic;
     const char * brief;
     const char * detail;
     uint8_t flags;          // META_FLAG_*
+    uint8_t dtype;          // 0 for MB_VALUE_U8
     uint8_t option_count;   // 0 for no options block
     const char * option_alt;  // alt string shared by every option
     uint16_t entry_size_override;  // 0 to compute
@@ -345,7 +347,7 @@ static uint8_t * blob_build(const struct blob_spec_s * spec, uint32_t * blob_siz
     memcpy(entry + 0, &str_idx[0], 2);         // topic_str_offset
     memcpy(entry + 2, &str_idx[1], 2);         // brief_str_offset
     memcpy(entry + 4, &str_idx[2], 2);         // detail_str_offset
-    entry[6] = 0x08;                           // dtype = MB_VALUE_U8
+    entry[6] = spec->dtype ? spec->dtype : 0x08;  // dtype, default MB_VALUE_U8
     entry[7] = spec->flags;
     u16 = META_STR_NONE;
     memcpy(entry + 8, &u16, 2);                // format_str_offset
@@ -555,6 +557,49 @@ static void test_flags_ro_emitted(void ** state) {
     free(blob);
 }
 
+static void test_dtype_bool_emits_bool_dtype(void ** state) {
+    (void) state;
+    // bool is stored as u8 with dtype bit 7 set.
+    struct blob_spec_s spec = {.topic = "t", .flags = META_FLAG_HAS_DEFAULT,
+                               .dtype = 0x08 | META_DTYPE_BOOL};
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    assert_string_equal("{\"dtype\": \"bool\", \"default\": 0}", json_meta_);
+    assert_json_parses(json_meta_);
+    free(blob);
+}
+
+static void test_dtype_bool_bit_ignored_for_non_u8(void ** state) {
+    (void) state;
+    // Only u8 bools are defined; other base types keep their dtype.
+    struct blob_spec_s spec = {.topic = "t", .dtype = 0x0A | META_DTYPE_BOOL};  // u32
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    assert_string_equal("{\"dtype\": \"u32\"}", json_meta_);
+    free(blob);
+}
+
+static void test_unknown_flag_not_emitted(void ** state) {
+    (void) state;
+    struct blob_spec_s spec = {.topic = "t", .flags = 0x80};
+    uint32_t blob_size = 0;
+    uint8_t * blob = blob_build(&spec, &blob_size);
+
+    topic_count_ = 0;
+    assert_int_equal(0, meta_binary_parse(blob, blob_size, on_topic_capture, NULL));
+    assert_int_equal(1, topic_count_);
+    assert_string_equal("{\"dtype\": \"u8\"}", json_meta_);
+    free(blob);
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_null_blob),
@@ -580,6 +625,9 @@ int main(void) {
         cmocka_unit_test(test_options_overrun_entry),
         cmocka_unit_test(test_default_overruns_entry),
         cmocka_unit_test(test_flags_ro_emitted),
+        cmocka_unit_test(test_dtype_bool_emits_bool_dtype),
+        cmocka_unit_test(test_dtype_bool_bit_ignored_for_non_u8),
+        cmocka_unit_test(test_unknown_flag_not_emitted),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

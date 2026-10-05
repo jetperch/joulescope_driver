@@ -80,6 +80,41 @@ static void test_float_dtype(void **state) {
     assert_int_equal(0, jsdrv_meta_value(META_F64, &value));
 }
 
+// As emitted by meta_binary.c for a MiniBitty bool topic.
+static const char META_BOOL[] = "{\"dtype\": \"bool\", \"default\": 0}";
+
+static void test_bool_dtype(void **state) {
+    (void) state;
+    uint8_t dtype = 0;
+    struct jsdrv_union_s value;
+    assert_int_equal(0, jsdrv_meta_dtype(META_BOOL, &dtype));
+    assert_int_equal(JSDRV_UNION_U8, dtype);
+    assert_int_equal(0, jsdrv_meta_default(META_BOOL, &value));
+    assert_true(jsdrv_union_equiv(&jsdrv_union_u8(0), &value));
+
+    const char * true_str[] = {"on", "ON", "True", "yes", "Enable", "1", NULL};
+    for (const char ** s = true_str; *s; ++s) {
+        value = cstr(*s);
+        assert_int_equal(0, jsdrv_meta_value(META_BOOL, &value));
+        assert_true(jsdrv_union_eq(&jsdrv_union_u8(1), &value));
+    }
+    const char * false_str[] = {"off", "OFF", "False", "no", "disabled", "0", NULL};
+    for (const char ** s = false_str; *s; ++s) {
+        value = cstr(*s);
+        assert_int_equal(0, jsdrv_meta_value(META_BOOL, &value));
+        assert_true(jsdrv_union_eq(&jsdrv_union_u8(0), &value));
+    }
+    value = jsdrv_union_u32(1);
+    assert_int_equal(0, jsdrv_meta_value(META_BOOL, &value));
+    assert_true(jsdrv_union_eq(&jsdrv_union_u8(1), &value));
+    value = jsdrv_union_u32(0);
+    assert_int_equal(0, jsdrv_meta_value(META_BOOL, &value));
+    assert_true(jsdrv_union_eq(&jsdrv_union_u8(0), &value));
+
+    value = cstr("maybe");
+    assert_int_equal(JSDRV_ERROR_PARAMETER_INVALID, jsdrv_meta_value(META_BOOL, &value));
+}
+
 static void test_basic(void **state) {
     (void) state;
     uint8_t dtype = 0;
@@ -257,6 +292,7 @@ int main(void) {
             cmocka_unit_test(test_basic),
             cmocka_unit_test(test_value),
             cmocka_unit_test(test_float_dtype),
+            cmocka_unit_test(test_bool_dtype),
             cmocka_unit_test(test_range_too_long_rejected),
             cmocka_unit_test(test_no_default),
             cmocka_unit_test(test_flags_none),
