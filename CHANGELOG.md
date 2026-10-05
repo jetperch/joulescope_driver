@@ -14,6 +14,7 @@ This file contains the list of changes made to the Joulescope driver.
   case-insensitive true/false strings.  Unknown entry flags no longer emit
   "flags": [].
 * Improved Claude guidance.
+* Bumped JS320 firmware from 1.1.8 to 1.1.10
 
 
 ## 2.4.1
