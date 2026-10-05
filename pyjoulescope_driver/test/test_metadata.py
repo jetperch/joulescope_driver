@@ -184,6 +184,10 @@ _FW_C = {
         './comm/state': {'dtype': 'u8', 'brief': 'Link state.', 'flags': 'ro'},
         '././info': {'dtype': 'str', 'brief': 'Info.', 'flags': 'no_traverse'},
         './list': {'dtype': 'u8', 'brief': 'List.', 'flags': ['hide', 'ro', 'no_traverse']},
+        './fw/version': {'dtype': 'u32', 'brief': 'Version.', 'default': 'MBDEF__VERSION_U32'},
+        './name': {'dtype': 'str', 'brief': 'Name.', 'default': 'MBDEF__NAME'},
+        './mode': {'dtype': 'u8', 'brief': 'Mode.', 'default': '2',
+                   'options': [[0, 'off', 1, 'x'], [1, 'on']]},
     },
 }
 
@@ -204,6 +208,10 @@ class TestFirmware(unittest.TestCase):
             'c/comm/state': {'dtype': 'u8', 'brief': 'Link state.', 'flags': ['ro']},
             'c/./info': {'dtype': 'str', 'brief': 'Info.'},
             'c/list': {'dtype': 'u8', 'brief': 'List.', 'flags': ['ro', 'hide']},
+            'c/fw/version': {'dtype': 'u32', 'brief': 'Version.', 'default': 0},
+            'c/name': {'dtype': 'str', 'brief': 'Name.', 'default': 'MBDEF__NAME'},
+            'c/mode': {'dtype': 'u8', 'brief': 'Mode.', 'default': '2',
+                       'options': [[0, 'off', '1', 'x'], [1, 'on']]},
         }, meta)
         self.assertEqual('ro', _FW_C['topics']['./comm/state']['flags'])  # input unmodified
 
@@ -217,7 +225,8 @@ class TestFirmware(unittest.TestCase):
                 z.writestr('1/0/app/pubsub_metadata.json', json.dumps(_FW_S))
                 z.writestr('1/0/app/pubsub_metadata.bin', b'ignored')
             meta = metadata.firmware_load([json_path, zip_path])
-        self.assertEqual({'c/comm/state', 'c/./info', 'c/list', 's/i/ctrl'}, set(meta.keys()))
+        self.assertEqual({'c/comm/state', 'c/./info', 'c/list', 'c/fw/version', 'c/name', 'c/mode',
+                          's/i/ctrl'}, set(meta.keys()))
 
     def test_load_zip_without_metadata(self):
         with tempfile.TemporaryDirectory() as d:

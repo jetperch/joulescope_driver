@@ -32,6 +32,7 @@ _COLUMN_ORDER = ['dtype', 'brief', 'detail', 'default', 'options', 'range', 'for
 _COLUMNS_HIDDEN = ['detail']
 _FIRMWARE_METADATA_FILENAME = 'pubsub_metadata.json'
 _DEVICE_FLAGS = ['ro', 'hide', 'dev']  # the flags meta_binary.c publishes
+_NON_NUMERIC_DTYPES = ['str', 'json', 'bin', 'std', 'stdmsg', 'frm', 'frame']
 
 
 def parser_config(p):
@@ -137,6 +138,15 @@ def firmware_meta_to_device(doc):
         if topic.startswith('./'):
             topic = prefix + topic[1:]
         value = dict(value)
+        default = value.get('default')
+        if isinstance(default, str) and value.get('dtype') not in _NON_NUMERIC_DTYPES:
+            # unresolved build symbol: the binary blob encodes 0 (pyminibitty _encode_value)
+            try:
+                float(default)
+            except ValueError:
+                value['default'] = 0
+        if 'options' in value:  # the binary blob stores aliases as strings
+            value['options'] = [o[:2] + [str(a) for a in o[2:]] for o in value['options']]
         flags = value.pop('flags', None) or []
         if isinstance(flags, str):
             flags = [flags]
@@ -339,9 +349,10 @@ def on_cmd(args):
     if args.diff:
         with open(args.diff, 'r', encoding='utf-8') as f:
             expected = json.load(f)
-        if not args.firmware:  # live devices do not include global driver topics
-            _, driver = host_metadata(args.model)
-            expected = {k: v for k, v in expected.items() if k not in driver}
+        # live devices do not publish the global driver topics
+        _, driver = host_metadata(args.model)
+        meta = {k: v for k, v in meta.items() if k not in driver}
+        expected = {k: v for k, v in expected.items() if k not in driver}
         diffs = meta_diff(meta, expected)
         for line in diffs:
             print(line)
