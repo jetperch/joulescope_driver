@@ -86,7 +86,7 @@ def on_cmd(args):
                     if 'js110' in device_path:
                         d.publish(f'{device_path}/s/i/range/select', 'auto')
                         d.publish(f'{device_path}/s/v/range/select', '15 V')
-                    elif 'js220' in device_path:
+                    elif 'js220' in device_path or 'js320' in device_path:
                         d.publish(f'{device_path}/s/i/range/mode', 'auto')
                         d.publish(f'{device_path}/s/v/range/mode', 'auto')
                     # other devices record with their existing range configuration

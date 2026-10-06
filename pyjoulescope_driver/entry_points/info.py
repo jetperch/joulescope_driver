@@ -28,8 +28,8 @@ def parser_config(p):
                    help='Display verbose information.')
     p.add_argument('--open', '-o',
                    choices=['defaults', 'restore'],
-                   default='defaults',
-                   help='The device open mode.  Defaults to "defaults".')
+                   default='restore',
+                   help='The device open mode.  Defaults to "restore".')
     p.add_argument('device_path',
                    nargs='*',
                    help='The target device for this command. ' +
