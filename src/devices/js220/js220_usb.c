@@ -968,7 +968,9 @@ static int32_t handle_cmd_mem(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             JSDRV_LOGW("write size too big: %d > %d", (int) msg->value.size, (int) MEM_SIZE_MAX);
             --d->out_frame_id;
             jsdrvp_msg_free(d->context, msg_bk);
-            return mem_complete(d, JSDRV_ERROR_PARAMETER_INVALID);
+            // no operation started, so mem_complete would not report
+            jsdrv_topic_clear(&d->mem_topic);
+            return send_return_code_to_frontend(d, topic, JSDRV_ERROR_PARAMETER_INVALID);
         }
         m->hdr.op = JS220_PORT3_OP_WRITE_START;
         m->hdr.length = msg->value.size;

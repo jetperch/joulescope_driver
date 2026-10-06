@@ -50,10 +50,11 @@ add_dependencies(dbc_test cmocka)
 target_link_libraries(dbc_test cmocka)
 add_test(dbc_test ${CMAKE_CURRENT_BINARY_DIR}/dbc_test)
 
-# built in example/, registered here (enable_testing scope);
-# the NAME/COMMAND form resolves the target to its executable path
-add_test(NAME boot_info_test COMMAND boot_info_test)
-add_test(NAME device_match_test COMMAND device_match_test)
+# built in example/, registered here (enable_testing scope).  Use the
+# path form like the other tests: ctest searches the config subdirectory
+# (Debug, Release) itself, so multi-config builds run without "-C".
+add_test(boot_info_test ${CMAKE_BINARY_DIR}/example/boot_info_test)
+add_test(device_match_test ${CMAKE_BINARY_DIR}/example/device_match_test)
 
 ADD_CMOCKA_TEST(downsample_test)
 ADD_CMOCKA_TEST(downsample_sinc_test)
@@ -125,6 +126,14 @@ add_executable(mb_device_test devices/mb_device/mb_device_test.c)
 add_dependencies(mb_device_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(mb_device_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(mb_device_test ${CMAKE_CURRENT_BINARY_DIR}/mb_device_test)
+
+# js220_usb_test includes the device source directly (mb_device_test
+# pattern) and stubs the frontend services.  js220_params.c provides the
+# host-side parameter table that the device thread publishes.
+add_executable(js220_usb_test devices/js220/js220_usb_test.c ../src/devices/js220/js220_params.c)
+add_dependencies(js220_usb_test jsdrv_support_objlib tinyprintf cmocka)
+target_link_libraries(js220_usb_test jsdrv_support_objlib tinyprintf cmocka)
+add_test(js220_usb_test ${CMAKE_CURRENT_BINARY_DIR}/js220_usb_test)
 
 add_executable(frontend_test frontend_test.c
         ../src/buffer.c

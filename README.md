@@ -1,5 +1,5 @@
 <!--
-# Copyright 2014-2023 Jetperch LLC
+# Copyright 2014-2026 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ For macOS, install homebrew, then:
     brew install pkgconfig python3
 
 
-### Ubuntu 22.04 LTS
+### Ubuntu 26.04 LTS
 
 For Ubuntu:
 
