@@ -13,6 +13,8 @@ This file contains the list of changes made to the Joulescope driver.
   * Added "metadata --firmware" to generate the topic reference from firmware
     build outputs without a device, and "metadata --diff" to verify it
     against a connected device.
+* Fixed pyjoulescope_driver "info" entry point to use open restore by default.
+* Fixed pyjoulescope_driver "record" entry point to support the JS320.
 
 
 ## 2.4.2
