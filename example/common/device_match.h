@@ -27,6 +27,8 @@
 #define JSDRV_EXAMPLE_DEVICE_MATCH_H_
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,6 +60,29 @@ bool device_match(const char * device_path, const char * filter);
  *      a MiniBitty at "u/mb/1".
  */
 bool device_is_joulescope(const char * device_path);
+
+/**
+ * @brief Check if a device path has a model.
+ *
+ * @param device_path The device path, such as "u/js320/31NB".
+ * @param model The case-insensitive model, such as "js320".
+ * @return true when the device path's model equals model.
+ */
+bool device_is_model(const char * device_path, const char * model);
+
+/**
+ * @brief Find the devices in a list that match a device filter.
+ *
+ * @param devices The comma-separated device path list, such as
+ *      "u/js220/000415,u/js320/31NB".  NULL is an empty list.
+ * @param filter The device filter.  See device_match().
+ * @param[out] match The buffer for the first matching device path.
+ *      The buffer is set to "" when no device matches.  NULL to skip.
+ * @param match_size The size of match in bytes, including the terminator.
+ * @return The number of matching devices.
+ */
+uint32_t device_match_list(const char * devices, const char * filter,
+                           char * match, size_t match_size);
 
 #ifdef __cplusplus
 }

@@ -153,23 +153,38 @@ int on_force_remove(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--iterations") && argc > 1) {
             ARG_CONSUME();
-            iterations_ = (int32_t) atoi(argv[0]);
+            if (jsdrv_cstr_to_i32(argv[0], &iterations_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--stream-ms") && argc > 1) {
             ARG_CONSUME();
-            stream_ms_ = (uint32_t) atoi(argv[0]);
+            if (jsdrv_cstr_to_u32(argv[0], &stream_ms_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--settle-ms") && argc > 1) {
             ARG_CONSUME();
-            settle_ms_ = (uint32_t) atoi(argv[0]);
+            if (jsdrv_cstr_to_u32(argv[0], &settle_ms_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--remove-timeout-ms") && argc > 1) {
             ARG_CONSUME();
-            remove_timeout_ms_ = (uint32_t) atoi(argv[0]);
+            if (jsdrv_cstr_to_u32(argv[0], &remove_timeout_ms_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--open-timeout-ms") && argc > 1) {
             ARG_CONSUME();
-            open_timeout_ms_ = (uint32_t) atoi(argv[0]);
+            if (jsdrv_cstr_to_u32(argv[0], &open_timeout_ms_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else {
             printf("Unknown argument: %s\n", argv[0]);
@@ -184,12 +199,13 @@ int on_force_remove(struct app_s * self, int argc, char * argv[]) {
 
     struct jsdrv_topic_s power_topic;
     jsdrv_topic_clear(&power_topic);
-    ROE(app_match(self, power_device_));
+    ROE(app_match_ex(self, power_device_, APP_MATCH_EXPLICIT));
     jsdrv_topic_set(&power_topic, self->device.topic);
     printf("Power device: %s\n", power_topic.topic);
+    ROE(app_power_target_check(power_topic.topic, target_device_));
     printf("Target filter: %s\n", target_device_);
 
-    target_present_ = (0 == app_match(self, target_device_));
+    target_present_ = (0 == app_match_ex(self, target_device_, APP_MATCH_EXPLICIT));
 
     ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_ADD,
                         JSDRV_SFLAG_PUB, on_device_add, self, 0));
@@ -231,7 +247,7 @@ int on_force_remove(struct app_s * self, int argc, char * argv[]) {
         }
 
         // Re-resolve the full topic (handles port/serial rebinding)
-        rc = app_match(self, target_device_);
+        rc = app_match_ex(self, target_device_, APP_MATCH_EXPLICIT);
         if (rc) {
             printf("  [%u] WARN: app_match failed after enumerate\n",
                    iteration);
@@ -264,9 +280,10 @@ int on_force_remove(struct app_s * self, int argc, char * argv[]) {
         jsdrv_subscribe(self->context, v_topic.topic,
                         JSDRV_SFLAG_PUB, on_stream_data, NULL, 0);
 
-        // Enable streams
+        // Enable streams.  The current range defaults to off.
         uint64_t data_count_start = data_count_;
         last_data_time_ = time(NULL);
+        publish_str(self, dut.topic, "s/i/range/mode", "auto");
         publish_u32(self, dut.topic, "s/i/ctrl", 1);
         publish_u32(self, dut.topic, "s/v/ctrl", 1);
 
@@ -300,6 +317,8 @@ int on_force_remove(struct app_s * self, int argc, char * argv[]) {
 
         // Let teardown finish (or crash) before next iteration
         jsdrv_thread_sleep_ms(500);
+        jsdrv_unsubscribe(self->context, i_topic.topic, on_stream_data, NULL, 0);
+        jsdrv_unsubscribe(self->context, v_topic.topic, on_stream_data, NULL, 0);
 
         ++successes;
     }

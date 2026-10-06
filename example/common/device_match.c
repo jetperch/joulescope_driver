@@ -17,6 +17,7 @@
 #include "device_match.h"
 #include <ctype.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 
@@ -88,4 +89,45 @@ bool device_is_joulescope(const char * device_path) {
         return false;
     }
     return (tolower((unsigned char) model[0]) == 'j') && (tolower((unsigned char) model[1]) == 's');
+}
+
+bool device_is_model(const char * device_path, const char * model) {
+    const char * p_model;
+    const char * serial;
+    if (!device_path || !model || !split(device_path, &p_model, &serial)) {
+        return false;
+    }
+    return eq_n(p_model, (size_t) (serial - p_model - 1), model);
+}
+
+uint32_t device_match_list(const char * devices, const char * filter,
+                           char * match, size_t match_size) {
+    char path[256];
+    uint32_t count = 0;
+    if (match && match_size) {
+        match[0] = 0;
+    }
+    if (!devices) {
+        return 0;
+    }
+    const char * d = devices;
+    while (*d) {
+        const char * end = strchr(d, ',');
+        size_t sz = end ? (size_t) (end - d) : strlen(d);
+        if (sz && (sz < sizeof(path))) {
+            memcpy(path, d, sz);
+            path[sz] = 0;
+            if (device_match(path, filter)) {
+                if (!count && match && match_size) {
+                    snprintf(match, match_size, "%s", path);
+                }
+                ++count;
+            }
+        }
+        if (!end) {
+            break;
+        }
+        d = end + 1;
+    }
+    return count;
 }

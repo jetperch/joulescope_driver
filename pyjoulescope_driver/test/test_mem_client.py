@@ -81,7 +81,7 @@ class MockDriver:
         self.response_fn = None
 
     def publish_and_wait(self, publish_topic, publish_value,
-                         response_topic, timeout=None):
+                         response_topic, timeout=None, match=None):
         msg_bytes = bytes(publish_value)
         self.published.append((publish_topic, msg_bytes))
         if self.response_fn is None:
@@ -90,6 +90,13 @@ class MockDriver:
                 f'publish={publish_topic}, '
                 f'response={response_topic}')
         rsp = self.response_fn(publish_topic, msg_bytes)
+        # response_fn may return a list to deliver several responses.
+        rsps = rsp if isinstance(rsp, list) else [rsp]
+        rsp = None
+        for r in rsps:
+            if r is not None and (match is None or match(r)):
+                rsp = r
+                break
         if rsp is None:
             raise TimeoutError(
                 f'publish_and_wait timed out: '
@@ -170,6 +177,23 @@ class TestMemClient(unittest.TestCase):
         msg2 = _parse_published(self.driver.published[-1][1])
         self.assertEqual(msg1['transaction_id'] + 1,
                          msg2['transaction_id'])
+
+    def test_cmd_ignores_other_transaction(self):
+        def response_fn(topic, msg_bytes):
+            parsed = _parse_published(msg_bytes)
+            txn_id = parsed['transaction_id']
+            return [_make_rsp(status=1, transaction_id=txn_id + 100),
+                    _make_rsp(data=b'ok', transaction_id=txn_id)]
+        self.driver.response_fn = response_fn
+        self.assertEqual(b'ok', self.mem.cmd(MEM_OP_READ, length=2))
+
+    def test_cmd_only_other_transaction_times_out(self):
+        def response_fn(topic, msg_bytes):
+            parsed = _parse_published(msg_bytes)
+            return [_make_rsp(transaction_id=parsed['transaction_id'] + 1)]
+        self.driver.response_fn = response_fn
+        with self.assertRaises(TimeoutError):
+            self.mem.cmd(MEM_OP_READ, length=2)
 
     def test_read_single_page(self):
         test_data = bytes(range(64))

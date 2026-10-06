@@ -51,15 +51,27 @@ static uint32_t rd_le_u32(const uint8_t * p) {
     return v;
 }
 
+// Get the stream signal from a value, or NULL if it has no samples.
+static const struct jsdrv_stream_signal_s * stream_signal(const struct jsdrv_union_s * value) {
+    if ((value->type != JSDRV_UNION_BIN) || (value->size < sizeof(struct jsdrv_stream_signal_s))) {
+        return NULL;
+    }
+    const struct jsdrv_stream_signal_s * signal = (const struct jsdrv_stream_signal_s *) value->value.bin;
+    if (0 == signal->element_count) {
+        return NULL;
+    }
+    return signal;
+}
+
 void on_u4_data(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     static uint32_t counter = 0;
     (void) user_data;
     (void) topic;
     (void) value;
     last_data_time_ = time(NULL);
-    if (counter == 1000) {
-        const uint32_t * p32 = &value->value.u32;
-        printf("%d\n", p32[32] & 0x0f);
+    const struct jsdrv_stream_signal_s * signal = stream_signal(value);
+    if ((counter >= 1000) && signal) {
+        printf("%d\n", signal->data[0] & 0x0f);
         counter = 0;
     } else {
         ++counter;
@@ -72,9 +84,11 @@ void on_i32_data(void * user_data, const char * topic, const struct jsdrv_union_
     (void) topic;
     (void) value;
     last_data_time_ = time(NULL);
-    if (counter == 1000) {
-        const uint32_t * p32 = &value->value.u32;
-        printf("0x%08x %d\n", p32[32], p32[32]);
+    const struct jsdrv_stream_signal_s * signal = stream_signal(value);
+    if ((counter >= 1000) && signal && (signal->element_size_bits == 32)) {
+        int32_t i32;
+        memcpy(&i32, signal->data, sizeof(i32));
+        printf("0x%08x %d\n", (uint32_t) i32, i32);
         counter = 0;
     } else {
         ++counter;
@@ -333,12 +347,18 @@ int on_stream(struct app_s * self, int argc, char * argv[]) {
         } else if (0 == strcmp(argv[0], "--duration")) {
             ARG_CONSUME();
             ARG_REQUIRE();
-            self->duration_ms = (uint32_t) strtoul(argv[0], NULL, 10);
+            if (jsdrv_cstr_to_u32(argv[0], &self->duration_ms)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--timeout")) {
             ARG_CONSUME();
             ARG_REQUIRE();
-            stream_timeout_s_ = (uint32_t) strtoul(argv[0], NULL, 10);
+            if (jsdrv_cstr_to_u32(argv[0], &stream_timeout_s_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--stats")) {
             stats_enable_ = true;

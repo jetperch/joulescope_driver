@@ -54,7 +54,7 @@ bool js220_is_mem_region_valid(const char * region) {
 }
 
 static int usage() {
-    printf("usage: jsdrv_util mem_read [--device {device_path}] {region} [--size {sz}] [--out {file}]\n");
+    printf("usage: jsdrv mem_read [--device {device_path}] {region} [--size {sz}] [--out {file}]\n");
     return 1;
 }
 
@@ -129,21 +129,26 @@ int on_mem_read(struct app_s * self, int argc, char * argv[]) {
     ROE(app_match(self, device));
 
     struct jsdrv_topic_s topic;
+    struct jsdrv_topic_s rdata_topic;
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_OPEN);
     ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(JSDRV_DEVICE_OPEN_MODE_RESUME), JSDRV_TIMEOUT_MS_DEFAULT));
 
-    jsdrv_topic_set(&topic, self->device.topic);
-    jsdrv_topic_append(&topic, "h/mem");
-    jsdrv_topic_append(&topic, region);
-    jsdrv_topic_append(&topic, "!rdata");
-    ROE(jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_mem_rdata, self, JSDRV_TIMEOUT_MS_DEFAULT));
-    jsdrv_topic_remove(&topic);
-    jsdrv_topic_append(&topic, "!read");
-    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_u32(size), JSDRV_TIMEOUT_MS_DEFAULT));
+    jsdrv_topic_set(&rdata_topic, self->device.topic);
+    jsdrv_topic_append(&rdata_topic, "h/mem");
+    jsdrv_topic_append(&rdata_topic, region);
+    jsdrv_topic_append(&rdata_topic, "!rdata");
+    int32_t rc = jsdrv_subscribe(self->context, rdata_topic.topic, JSDRV_SFLAG_PUB, on_mem_rdata, self, JSDRV_TIMEOUT_MS_DEFAULT);
+    if (!rc) {
+        jsdrv_topic_set(&topic, rdata_topic.topic);
+        jsdrv_topic_remove(&topic);
+        jsdrv_topic_append(&topic, "!read");
+        rc = jsdrv_publish(self->context, topic.topic, &jsdrv_union_u32(size), JSDRV_TIMEOUT_MS_DEFAULT);
+        jsdrv_unsubscribe(self->context, rdata_topic.topic, on_mem_rdata, self, JSDRV_TIMEOUT_MS_DEFAULT);
+    }
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_CLOSE);
-    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
-    return 0;
+    int32_t close_rc = jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT);
+    return rc ? rc : close_rc;
 }

@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
-const JoulescopeDriver = require("joulescope_driver");
+const JoulescopeDriver = require("..");
 
 function initialize(){
     const drv = new JoulescopeDriver();
-    const device_paths = drv.device_paths();
+    // Skip other devices, such as a MiniBitty at u/mb/{serial_number}.
+    const device_paths = drv.device_paths().filter((p) => /^[^/]+\/js\d+\//.test(p));
     console.log('device_paths: ' + device_paths);
     if (0 == device_paths.length) {
         drv.finalize()
@@ -60,4 +61,6 @@ function initialize(){
 }
 
 finalize_cbk = initialize();
-process.on('SIGINT', finalize_cbk);
+if (finalize_cbk) {
+    process.on('SIGINT', finalize_cbk);
+}

@@ -85,6 +85,33 @@ int32_t app_scan(struct app_s * self);
  */
 int32_t app_match(struct app_s * self, const char * filter);
 
+/// app_match_ex() flag: refuse the JS110 and JS220, which are not MiniBitty devices.
+#define APP_MATCH_MB        (1U << 0)
+/// app_match_ex() flag: require a filter that matches exactly one device.
+#define APP_MATCH_EXPLICIT  (1U << 1)
+
+/**
+ * @brief Match a specified device, with restrictions.
+ *
+ * @param self The application instance.
+ * @param filter The device filter specification or NULL.
+ * @param flags The APP_MATCH_* bitmask.  Use APP_MATCH_EXPLICIT for
+ *      destructive operations, so they never act on the first device found.
+ * @return 0 or error code.
+ *
+ * Same as app_match() when flags is 0.
+ */
+int32_t app_match_ex(struct app_s * self, const char * filter, uint32_t flags);
+
+/**
+ * @brief Refuse a target filter that matches the power device.
+ *
+ * @param power_device The matched power device path.
+ * @param target_filter The target device filter.
+ * @return 0 when the target filter does not match the power device, 1 otherwise.
+ */
+int32_t app_power_target_check(const char * power_device, const char * target_filter);
+
 typedef int (*command_fn)(struct app_s * self, int argc, char * argv[]);
 
 int on_adapter(struct app_s * self, int argc, char * argv[]);

@@ -943,7 +943,7 @@ cdef class Driver:
         return _jsdrv_union_to_py(&v)
 
     def publish_and_wait(self, publish_topic, publish_value,
-                         response_topic, timeout=None):
+                         response_topic, timeout=None, match=None):
         """Publish a value and wait for a response on another topic.
 
         :param publish_topic: The topic to publish to.
@@ -952,6 +952,10 @@ cdef class Driver:
             the response.
         :param timeout: The timeout in float seconds.
             None (default) uses the default timeout.
+        :param match: The optional callable(value) that returns True
+            for the expected response.  Other responses, such as those
+            for another transaction, are ignored.  None (default)
+            accepts the first response.
         :return: The value received on response_topic.
         :raises TimeoutError: If no response arrives in time.
         """
@@ -961,6 +965,10 @@ cdef class Driver:
         result = [None]
 
         def on_response(topic, value):
+            if event.is_set():
+                return
+            if match is not None and not match(value):
+                return
             result[0] = value
             event.set()
 

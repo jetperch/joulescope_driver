@@ -1,6 +1,6 @@
 # JS320 support across examples and entry points
 
-**Status**: Phase 1 done; Phase 2+ deferred
+**Status**: complete
 **Created**: 2026-10-03
 
 ## Context
@@ -216,89 +216,143 @@ all of them.
 These tools erase, write or burn fuses on whichever device they find
 first.
 
-- [ ] `example/minibitty/fpga_mem.c:791-819`: `aes_key` burns OTP fuses on
+**Outcome** (2026-10-06): done.  `example/minibitty/main.cpp` adds
+`app_match_ex(self, filter, flags)`.  `APP_MATCH_EXPLICIT` requires a
+filter that matches exactly one device, and `APP_MATCH_MB` refuses the
+JS110 and JS220.  `app_power_target_check` refuses a target filter that
+matches the power device.  Both use the new `device_is_model` and
+`device_match_list` in `example/common/device_match.c`, which
+`device_match_test` covers.  Each refusal was checked on hardware with a
+JS110, JS220 and JS320 attached.
+
+- [x] `example/minibitty/fpga_mem.c:791-819`: `aes_key` burns OTP fuses on
       the first device with no confirmation; it only prints a warning at
       `:594`.  Require a full `u/js320/<serial>` and `--yes`.
-- [ ] `example/minibitty/fuzz_fwup.c:1038`: `target_prefix_` defaults to
+- [x] `example/minibitty/fuzz_fwup.c:1038`: `target_prefix_` defaults to
       `u/js320/`, but `app_match` runs with a NULL filter and takes the
       first device.  With a JS220 bench supply attached, the supply can
       receive the erase, power-cycle and firmware-update sequence.  Set
       the filter to `u/js320/` when none is given, and refuse when the
       target and power devices are the same.
-- [ ] `fpga_mem erase/write`, `mem erase/write`, `firmware erase`,
+      Also refuses a target filter that matches more than one device.
+- [x] `fpga_mem erase/write`, `mem erase/write`, `firmware erase`,
       `power_cycle` and `force_remove`: require an explicit filter for
       destructive operations, and refuse when the power and target devices
-      match.
-- [ ] JS320-only commands (`cal.c:242`, `fwup.c:134`, `firmware.c`,
-      `fpga_mem.c`, `mem.c`): check for a `u/js320/` path before acting.
+      match.  `fpga_mem program` also requires one.  The `--power`
+      filter must match exactly one device.
+- [x] JS320-only commands (`cal.c:242`, `fwup.c:134`, `firmware.c`,
+      `fpga_mem.c`, `mem.c`): fail on `u/js110/` or `u/js220` path before acting.
       `cal` can also wait forever on another model (`cal.c:217`); add a
-      timeout to `run_cmd`.
-- [ ] `pyjoulescope_driver/entry_points/mem_test.py:101`: it defaults to
+      timeout to `run_cmd`.  `run_cmd` now times out after
+      `CAL_CMD_TIMEOUT_MS` (60 s).
+- [x] `pyjoulescope_driver/entry_points/mem_test.py:101`: it defaults to
       `devices[0]` and then erases and writes flash.  Require `--device`
       when more than one device is present, and make `--device` a filter,
       as its help text says, rather than an exact match.
+      Tested by `pyjoulescope_driver/test/test_mem_test.py`.
 
 ## Phase 3: JS320 branches in the `jsdrv` examples
 
-- [ ] `example/jsdrv/demo.c:144` and `stream_buffer.c:193`: there are only
+- [x] `example/jsdrv/demo.c:144` and `stream_buffer.c:193`: there are only
       `u/js220` and `u/js110` branches, so a JS320 gets "Unsupported
       device" (**HW**).  Add a JS320 branch with range "auto".  The Node
       examples handle this by testing for "not JS110".
-- [ ] `example/jsdrv/capture.c`: unsubscribe every channel before
+      The JS320 shares the JS220 branch.  Both commands also gained
+      `--device`, since they otherwise use the first Joulescope (**HW**:
+      both run on the JS320 without errors).
+- [x] `example/jsdrv/capture.c`: unsubscribe every channel before
       disabling any of them.  `channel_finalize(i)` disables current while
       voltage is still recording, so the current file came out 49,938
       samples (about 50 ms) shorter than voltage (**HW**).  Also publish
       `h/fs` and `h/filter` with the default timeout instead of 0, so a
       rejected value is reported.
-- [ ] `example/minibitty/stream_test.c` and `force_remove.c`: set
+      `capture` also subscribes to every channel before enabling any, and
+      gained `--device`.  **HW**: current and voltage now differ by 123 of
+      1,950,042 samples (0.006%).
+- [x] `example/minibitty/stream_test.c` and `force_remove.c`: set
       `s/i/range/mode` "auto", so that current samples mean something.
+      **HW**: `stream_test` passes 10 of 10.
 
 ## Phase 4: crashes and broken options
 
-- [ ] `example/minibitty/stream.c:61-62,76-77`: `&value->value.u32` takes
+- [x] `example/minibitty/stream.c:61-62,76-77`: `&value->value.u32` takes
       the address of the union's inline storage, not the payload, and
       `p32[32]` reads 128 bytes past it.  Use `value->value.bin` cast to
       `struct jsdrv_stream_signal_s`.
-- [ ] `example/jsdrv/jsdrv.c:236`: `jsdrv --log-level info` with no
+- [x] `example/jsdrv/jsdrv.c:236`: `jsdrv --log-level info` with no
       command calls `strcmp(NULL)`.  Require a command first.
-- [ ] `example/jsdrv/mem_write.c:97` and `mem_erase.c:57`: `--timeout`
+      Also fixed `--log-level` with no level, and the same two crashes in
+      `example/minibitty/main.cpp`.
+- [x] `example/jsdrv/mem_write.c:97` and `mem_erase.c:57`: `--timeout`
       sets `device = argv[0]`, which replaces the device filter with the
       timeout value.  Delete the line.
-- [ ] `example/jsdrv/stream_watch.c:240-244,301`: the add and remove
+- [x] `example/jsdrv/stream_watch.c:240-244,301`: the add and remove
       callbacks point at the stack variable `watch` and are never
       unsubscribed, including on the early `ROE` returns.  Unsubscribe
       before every return, and close `--out`.
-- [ ] `example/jsdrv/reset.c:83`: `while (!counter)` ignores `quit_`, and
+      The `!data` subscriptions, which also point at `watch`, are now
+      unsubscribed too.
+- [x] `example/jsdrv/reset.c:83`: `while (!counter)` ignores `quit_`, and
       `counter` is not volatile.  `:76` publishes a NULL target.  The
       JS320 does not support `h/!reset`: refuse with a message, or map to
       `c/sys/!reset`.
-- [ ] `example/jsdrv/threads.c`: `h/timeout` is JS220-only, and on a JS320
+      Refuses the JS320 (use `minibitty firmware launch`) and a missing
+      target, and stops waiting when the reset publish fails.
+- [x] `example/jsdrv/threads.c`: `h/timeout` is JS220-only, and on a JS320
       it prints errors in a tight loop.  Gate it on the JS220.
+      It now selects the first JS220 and fails without one.
 
 ## Phase 5: wrong output
 
-- [ ] `example/minibitty/timesync.c:179`: `history_push` stores c maps
+- [x] `example/minibitty/timesync.c:179`: `history_push` stores c maps
       (about 99.997 MHz) and s maps (about 16.004 MHz) in one history.  So
       the default run reports a 72 MHz mean with 673,518 ppm stddev
       (**HW**).  Keep one history per source and report each.  Also apply
       `CONVERGE_TIME_MS` (`:35`), which is defined but never used.
-- [ ] Investigate the s map's steady -63 ms skew with `--source s`, at
+      The history excludes maps before the convergence time, which
+      `--converge <ms>` overrides.  **HW**: c reports 99,998,752 Hz at
+      0.4 ppm and s reports 16,000,724 Hz at 1.8 ppm.
+- [x] Investigate the s map's steady -63 ms skew with `--source s`, at
       2.2 ppm rate stability (**HW**).  The metric is a self-consistency
       residual, so a steady 63 ms suggests a real offset in the sensor
       map's UTC anchor.  That would affect multi-instrument time sync.
-- [ ] `pyjoulescope_driver/entry_points/info.py:105`: `version_to_str` is
+      **Outcome** (2026-10-06): not a fixed offset.  The skew decays
+      exponentially with a time constant of about 275 s (**HW**:
+      -12.4 ms to -8.0 ms over 120 s, and the c map behaves the same).
+      `update()` in `minibitty/src/tasks/timesync.c` never steps the map
+      while the device is open.  It slews the rate by
+      `dc_adj = -dc_err >> 8`, an error decay rate of 1/256 per second,
+      so a 63 ms error takes about 20 minutes to fall below 1 ms.  The
+      changing correction term is also part of the published rate, which
+      explains the rate spread.  The error builds up while no host is
+      syncing the device, because the map then free-runs on its last
+      rate.  So a freshly opened instrument can be tens of ms off UTC for
+      several minutes, which does affect multi-instrument time sync.
+      Suggested firmware fix, for the minibitty repo: step `map.utc`
+      when `|du_err|` exceeds a threshold, such as 1 ms, or on the first
+      sync after a host connects.  Then keep the slew for small errors.
+      Tracked in `minibitty/doc/plans/timesync_recovery.md`.
+- [x] `pyjoulescope_driver/entry_points/info.py:105`: `version_to_str` is
       applied to `c/hw/version`, which is a u8 on the JS320, so it prints
       `hw=0.0.1` (**HW**).  Format by the metadata `format`, as
       `Info.run` already does at `:160-162`.  Also default `--open`
       (`:31`) to "restore", because "defaults" turns the JS320 current
       range off just to print information.
-- [ ] `example/minibitty/throughput.c:116`: the exit cleanup reuses
+      Both paths now use `format_value`, tested by
+      `pyjoulescope_driver/test/test_info.py`.  `--open` already
+      defaulted to "restore".  **HW**: prints `hw=1, fw=1.1.10`.
+- [x] `example/minibitty/throughput.c:116`: the exit cleanup reuses
       `topic`, which still holds `comm/tpt/0/tx/task`, so it sets the task
       to 0 instead of `tx/cnt`.
-- [ ] `node_api/example/statistics.js:17`: `require("joulescope_driver")`
+      It also unsubscribes from the `!stat` topics now.
+- [x] `node_api/example/statistics.js:17`: `require("joulescope_driver")`
       fails from a checkout (**HW**).  Use `require("..")`, as
       `samples.js` does.  Both examples also miss "no devices":
       `"".split(',')` returns `['']`.
+      Fixed at the source: `device_paths()` in `node_api/index.js` returns
+      `[]`, and `test/test_binding.js` checks for empty paths.  Both
+      examples also skip non-Joulescopes and no longer register a null
+      SIGINT handler.  **HW**: `statistics.js` reports the JS320.
 
 ## Phase 6: firmware metadata (js320 repo)
 
@@ -317,38 +371,62 @@ first.
 
 ## Phase 7: tests
 
-- [ ] `test/hw/`: add a JS320 hardware-in-the-loop test, next to
+- [x] `test/hw/`: add a JS320 hardware-in-the-loop test, next to
       `test_open_state_js320.py`, that runs `statistics`, `record` and
       `capture`.  It should fail when current is not finite, or is
       identically zero on a DUT drawing current, and when current and
       voltage sample counts differ by more than 1%.
+      Done in `test/hw/test_examples_js320.py`.  "Identically zero" is
+      a mean below `JSDRV_HW_MIN_CURRENT` (default 1e-7 A), since a JS320
+      with its range off reads about 1e-11 A, not 0.
 - [x] `pyjoulescope_driver/test/`: unit-test the entry-point device filter
       (MiniBitty ignored, exact serial-number match) with a fake driver.
       Done in `test_device_filter.py`, which tests the filter directly.
 
 ## Low-priority follow-ups
 
-Found during the audit but not JS320-specific.  Fix them opportunistically.
+Found during the audit but not JS320-specific.
+
+**Outcome** (2026-10-06): done.  The duplicated example helpers found along
+the way are a separate plan, `example_dedup.md`.
 
 - [x] `pyjoulescope_driver/entry_points/record.py:67`: "Device not found"
       returns None, so the exit code is 0.
-- [ ] `pyjoulescope_driver/mem_client.py:98`: `publish_and_wait` on
+- [x] `pyjoulescope_driver/mem_client.py:98`: `publish_and_wait` on
       `h/!rsp` accepts the first response without checking the
       transaction id.
-- [ ] `example/jsdrv/jsdrv.c:175,181` and `example/minibitty/main.cpp:186-189`:
+      `Driver.publish_and_wait` takes a new `match` callable that skips
+      other responses, and `MemClient.cmd` matches the transaction id.
+      Tested by `test_driver_publish_and_wait.py` and
+      `test_mem_client.py`.
+- [x] `example/jsdrv/jsdrv.c:175,181` and `example/minibitty/main.cpp:186-189`:
       `"e"` maps to EMERGENCY, so the ERROR alias is unreachable.
-- [ ] Usage strings say `jsdrv_util`, but the binary is `jsdrv`
-      (`example/CMakeLists.txt:36`).
-- [ ] `example/minibitty/power_cycle.c:42`: the usage text gives a
+      Removed the EMERGENCY alias, so `"e"` is ERROR.
+- [x] Usage strings say `jsdrv_util`, but the binary is `jsdrv`
+      (`example/CMakeLists.txt:36`).  Also fixed the `release.py`
+      docstring.
+- [x] `example/minibitty/power_cycle.c:42`: the usage text gives a
       `--delay` default of 2500, but the code default is 0.  Several
       tools use `atoi` with no validation.
-- [ ] Leaks on error paths: `set.c:240`, `mem_read.c:143`,
+      The usage now says 0.  `power_cycle`, `force_remove`, `cal`,
+      `publish`, `state_get`, `stream` and `timesync` parse with
+      `jsdrv_cstr_to_u32` or `jsdrv_cstr_to_i32` and reject bad values.
+- [x] Leaks on error paths: `set.c:240`, `mem_read.c:143`,
       `mem_write.c:131`, `fpga_mem.c:315`, `mem.c:260`, `firmware.c:122`,
       `timesync.c:359-365`, and `force_remove.c:262-265`, which
       resubscribes on every iteration.
-- [ ] `src/devices/js220/js220_usb.c:906`: `memset(&d->mem_hdr, 0,
+      `set`, `mem_read`, `mem_write` and `timesync` now close the device
+      and unsubscribe on every path, `mem` frees its semaphore when open
+      fails, and `force_remove` unsubscribes each iteration.
+      `fpga_mem.c` and `firmware.c` did not leak: their callers always
+      run `teardown`, which frees the semaphore and event.
+- [x] `src/devices/js220/js220_usb.c:906`: `memset(&d->mem_hdr, 0,
       sizeof(d->mem_topic))` zeroes `mem_data` before it is freed, so
       every memory operation leaks its buffer.
-- [ ] `doc/plans/design_review_2026-07.md` P4.1: the Node
+      Now `sizeof(d->mem_hdr)`.  **HW**: `jsdrv mem_read` of the JS220
+      `c/pers` region still works.  `js220_usb.c` has no unit tests, so
+      they are planned in `js220_usb_test.md`.
+- [x] `doc/plans/design_review_2026-07.md` P4.1: the Node
       `buffer_info_to_js`/`buffer_rsp_to_js` todos look done in the
       working tree but are still unchecked.
+      Done in `9c1d933`, along with P4.2.  Both are now checked.

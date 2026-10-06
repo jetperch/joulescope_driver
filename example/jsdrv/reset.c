@@ -15,20 +15,21 @@
  */
 
 #include "jsdrv_prv.h"
+#include "device_match.h"
 #include <stdio.h>
 #include <string.h>
 #include "jsdrv_prv/thread.h"
 
 
 static int usage() {
-    printf("usage: jsdrv_util reset [--device {device_path}]} {app|update1|update2}\n");
+    printf("usage: jsdrv reset [--device {device_path}]} {app|update1|update2}\n");
     return 1;
 }
 
 static void on_add(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) topic;
     (void) value;
-    uint32_t * counter = (uint32_t *) user_data;
+    volatile uint32_t * counter = (volatile uint32_t *) user_data;
     *counter += 1;
 }
 
@@ -36,7 +37,8 @@ static void on_add(void * user_data, const char * topic, const struct jsdrv_unio
 int on_reset(struct app_s * self, int argc, char * argv[]) {
     char * device = NULL;
     char * target = NULL;
-    uint32_t counter = 0;
+    volatile uint32_t counter = 0;
+    int32_t rc;
 
     while (argc) {
         if (argv[0][0] != '-') {
@@ -58,31 +60,42 @@ int on_reset(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
+    if (!target) {
+        printf("Missing reset target\n");
+        return usage();
+    }
     ROE(app_match(self, device));
+    if (device_is_model(self->device.topic, "js320")) {
+        // The JS320 has no h/!reset.  Use "minibitty firmware launch" instead.
+        printf("Device %s does not support reset\n", self->device.topic);
+        return 1;
+    }
 
     struct jsdrv_topic_s topic;
-    jsdrv_topic_set(&topic, self->device.topic);
 
     //printf("Open device %s\n", self->device.topic);
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_OPEN);
     ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(JSDRV_DEVICE_OPEN_MODE_RAW), JSDRV_TIMEOUT_MS_DEFAULT));
 
-    ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_ADD, JSDRV_SFLAG_PUB, on_add, &counter, JSDRV_TIMEOUT_MS_DEFAULT));
+    ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_ADD, JSDRV_SFLAG_PUB, on_add, (void *) &counter, JSDRV_TIMEOUT_MS_DEFAULT));
 
     //printf("Reset to %s\n", target);
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "h/!reset");
-    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_cstr(target), JSDRV_TIMEOUT_MS_DEFAULT));
+    rc = jsdrv_publish(self->context, topic.topic, &jsdrv_union_cstr(target), JSDRV_TIMEOUT_MS_DEFAULT);
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_CLOSE);
-    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
+    int32_t close_rc = jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT);
+    if (!rc) {
+        rc = close_rc;
+    }
 
     //printf("Wait for reconnect\n");
-    while (!counter) {
+    while (!rc && !counter && !quit_) {
         jsdrv_thread_sleep_ms(1);
     }
-    jsdrv_unsubscribe(self->context, JSDRV_MSG_DEVICE_ADD, on_add, &counter, JSDRV_TIMEOUT_MS_DEFAULT);
-    return 0;
+    jsdrv_unsubscribe(self->context, JSDRV_MSG_DEVICE_ADD, on_add, (void *) &counter, JSDRV_TIMEOUT_MS_DEFAULT);
+    return rc;
 }

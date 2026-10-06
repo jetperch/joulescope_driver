@@ -31,7 +31,7 @@
 typedef int32_t (*device_fn)(const char * device, void * user_data);
 
 static int usage(void) {
-    printf("usage: jsdrv_util statistics\n");
+    printf("usage: jsdrv statistics\n");
     return 1;
 }
 
@@ -98,13 +98,7 @@ static int32_t device_initialize(const char * device, void * user_data) {
     }
     printf("device_open %s\n", device);
 
-    if (jsdrv_cstr_starts_with(device, "u/js220")) {
-        ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_DEFAULTS, 0));
-        ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto")));
-        ROE(publish(self, device, "s/stats/ctrl", &jsdrv_union_u8_r(1)));
-        snprintf(t, sizeof(t), "%s/s/stats/value", device);
-        jsdrv_subscribe(self->context, t, JSDRV_SFLAG_PUB, on_statistics_value, self, JSDRV_TIMEOUT_MS_DEFAULT);
-    } else if (jsdrv_cstr_starts_with(device, "u/js320")) {
+    if (device_is_model(device, "js220") || device_is_model(device, "js320")) {
         ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_DEFAULTS, JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto")));
         ROE(publish(self, device, "s/stats/ctrl", &jsdrv_union_u8_r(1)));

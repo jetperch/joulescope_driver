@@ -7,6 +7,7 @@
 
 #include "device_match.h"
 #include <stdio.h>
+#include <string.h>
 
 static int failures = 0;
 
@@ -64,10 +65,48 @@ static void test_is_joulescope(void) {
     CHECK(!device_is_joulescope(NULL));
 }
 
+static void test_is_model(void) {
+    printf("test_is_model:\n");
+    CHECK(device_is_model("u/js320/8W2A", "js320"));
+    CHECK(device_is_model("u/JS320/8W2A", "js320"));
+    CHECK(device_is_model("u/js220/000415", "JS220"));
+    CHECK(!device_is_model("u/js220/000415", "js22"));
+    CHECK(!device_is_model("u/js220/000415", "js2200"));
+    CHECK(!device_is_model("u/mb/1", "js320"));
+    CHECK(!device_is_model("u/js320", "js320"));
+    CHECK(!device_is_model(NULL, "js320"));
+    CHECK(!device_is_model("u/js320/8W2A", NULL));
+}
+
+static void test_match_list(void) {
+    printf("test_match_list:\n");
+    const char * d = "u/js220/000415,u/js320/8W2A,u/js320/31NB,u/mb/1";
+    char m[64];
+    CHECK(4 == device_match_list(d, NULL, m, sizeof(m)));
+    CHECK(0 == strcmp(m, "u/js220/000415"));
+    CHECK(2 == device_match_list(d, "js320", m, sizeof(m)));
+    CHECK(0 == strcmp(m, "u/js320/8W2A"));
+    CHECK(1 == device_match_list(d, "31NB", m, sizeof(m)));
+    CHECK(0 == strcmp(m, "u/js320/31NB"));
+    CHECK(1 == device_match_list(d, "u/mb/1", m, sizeof(m)));
+    CHECK(0 == strcmp(m, "u/mb/1"));
+    CHECK(0 == device_match_list(d, "js110", m, sizeof(m)));
+    CHECK(0 == strcmp(m, ""));
+    CHECK(2 == device_match_list(d, "u/js320/", NULL, 0));
+    CHECK(0 == device_match_list("", NULL, m, sizeof(m)));
+    CHECK(0 == device_match_list(NULL, NULL, m, sizeof(m)));
+    CHECK(1 == device_match_list("u/js320/8W2A", "8W2A", m, sizeof(m)));
+    CHECK(1 == device_match_list("u/js320/8W2A,", "8W2A", m, sizeof(m)));
+    CHECK(1 == device_match_list("u/js320/8W2A", "8W2A", m, 6));
+    CHECK(0 == strcmp(m, "u/js3"));
+}
+
 int main(void) {
     test_match();
     test_match_malformed();
     test_is_joulescope();
+    test_is_model();
+    test_match_list();
     if (failures) {
         printf("FAILED: %d\n", failures);
         return 1;

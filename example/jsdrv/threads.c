@@ -65,7 +65,7 @@ static void * thread_fn(void * arg) {
 }
 
 static int usage(void) {
-    printf("usage: jsdrv_util threads [--duration duration_ms]\n");
+    printf("usage: jsdrv threads [--duration duration_ms]\n");
     return 1;
 }
 
@@ -84,7 +84,11 @@ int on_threads(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
-    ROE(app_match(self, NULL));
+    // h/timeout is a JS220 test topic.
+    if (app_match(self, "js220")) {
+        printf("threads requires a JS220\n");
+        return 1;
+    }
     ROE(publish(self, self->device.topic, JSDRV_MSG_OPEN, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
 
     int32_t rc = publish(self, self->device.topic, "h/timeout", &jsdrv_union_u32(100), 10);

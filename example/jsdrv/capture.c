@@ -15,6 +15,7 @@
  */
 
 #include "jsdrv_prv.h"
+#include "device_match.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/time.h"
 #include "jsdrv/topic.h"
@@ -54,64 +55,65 @@ static void data_fn(void * user_data, const char * topic, const struct jsdrv_uni
     fwrite(s->data, 1, (s->element_count * s->element_size_bits) / 8, f);
 }
 
-static FILE * channel_init(struct app_s * self, const char * device, const char * channel, const char * filename) {
+static int32_t channel_subscribe(struct app_s * self, const char * device, const char * channel, FILE * f, bool subscribe) {
     int32_t rc;
     struct jsdrv_topic_s t;
+    jsdrv_topic_set(&t, device);
+    jsdrv_topic_append(&t, "s");
+    jsdrv_topic_append(&t, channel);
+    jsdrv_topic_append(&t, "!data");
+    if (subscribe) {
+        rc = jsdrv_subscribe(self->context, t.topic, JSDRV_SFLAG_PUB, data_fn, (void *) f, JSDRV_TIMEOUT_MS_DEFAULT);
+    } else {
+        rc = jsdrv_unsubscribe(self->context, t.topic, data_fn, (void *) f, JSDRV_TIMEOUT_MS_DEFAULT);
+    }
+    if (rc) {
+        printf("%s %s failed with %d\n", subscribe ? "subscribe" : "unsubscribe", t.topic, (int) rc);
+    }
+    return rc;
+}
+
+static int32_t channel_ctrl(struct app_s * self, const char * device, const char * channel, uint32_t ctrl) {
+    struct jsdrv_topic_s t;
+    jsdrv_topic_set(&t, "s");
+    jsdrv_topic_append(&t, channel);
+    jsdrv_topic_append(&t, "ctrl");
+    return publish(self, device, t.topic, &jsdrv_union_u32_r(ctrl), JSDRV_TIMEOUT_MS_DEFAULT);
+}
+
+static FILE * channel_init(struct app_s * self, const char * device, const char * channel, const char * filename) {
     if (NULL == filename) {
         return NULL;
     }
     FILE * f = fopen(filename, "wb");
     if (NULL == f) {
+        printf("Could not open %s\n", filename);
         return NULL;
     }
-    jsdrv_topic_set(&t, device);
-    jsdrv_topic_append(&t, "s");
-    jsdrv_topic_append(&t, channel);
-    jsdrv_topic_append(&t, "ctrl");
-    rc = jsdrv_publish(self->context, t.topic, &jsdrv_union_u32_r(1), 0);
-    if (rc) {
-        fclose(f);
-        return NULL;
-    }
-
-    jsdrv_topic_set(&t, device);
-    jsdrv_topic_append(&t, "s");
-    jsdrv_topic_append(&t, channel);
-    jsdrv_topic_append(&t, "!data");
-    rc = jsdrv_subscribe(self->context, t.topic, JSDRV_SFLAG_PUB, data_fn, (void *) f, 0);
-    if (rc) {
+    if (channel_subscribe(self, device, channel, f, true)) {
         fclose(f);
         return NULL;
     }
     return f;
 }
 
+static void channel_start(struct app_s * self, const char * device, const char * channel, FILE * f) {
+    if (NULL != f) {
+        channel_ctrl(self, device, channel, 1);
+    }
+}
+
+static void channel_stop(struct app_s * self, const char * device, const char * channel, FILE * f) {
+    if (NULL != f) {
+        channel_subscribe(self, device, channel, f, false);
+    }
+}
+
 static void channel_finalize(struct app_s * self, const char * device, const char * channel, FILE * f) {
-    int32_t rc;
-    struct jsdrv_topic_s t;
-    if (f == NULL) {
-        return;
+    if (NULL != f) {
+        channel_ctrl(self, device, channel, 0);
+        fclose(f);
     }
-
-    jsdrv_topic_set(&t, device);
-    jsdrv_topic_append(&t, "s");
-    jsdrv_topic_append(&t, channel);
-    jsdrv_topic_append(&t, "!data");
-    rc = jsdrv_unsubscribe(self->context, t.topic, data_fn, (void *) f, 0);
-    if (rc) {
-        printf("jsdrv_unsubscribe failed with %d\n", rc);
-    }
-
-    jsdrv_topic_set(&t, device);
-    jsdrv_topic_append(&t, "s");
-    jsdrv_topic_append(&t, channel);
-    jsdrv_topic_append(&t, "ctrl");
-    rc = jsdrv_publish(self->context, t.topic, &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
-    if (rc) {
-        printf("jsdrv_publish failed with %d\n", rc);
-    }
-
-    fclose(f);
 }
 
 
@@ -119,6 +121,8 @@ static int usage(void) {
     printf("usage: jsdrv capture [<option> <value>]"
            "\n"
            "Options:\n"
+           "    --device        The device filter: path, model or serial number.\n"
+           "                    Defaults to the first Joulescope.\n"
            "    -d, --duration  The duration in milliseconds.\n"
            "                    0 (default) runs until CTRL-C\n"
            "    -f, --frequency The sampling frequency in Hz.\n"
@@ -133,6 +137,7 @@ static int usage(void) {
 int on_capture(struct app_s * self, int argc, char * argv[]) {
     uint32_t frequency = 0;
     uint32_t filter = 0;
+    char * device_filter = NULL;
     char * filename_i = NULL;
     char * filename_v = NULL;
     char * filename_p = NULL;
@@ -143,6 +148,11 @@ int on_capture(struct app_s * self, int argc, char * argv[]) {
     while (argc) {
         if (argv[0][0] != '-') {
             return usage();
+        } else if (0 == strcmp(argv[0], "--device")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            device_filter = argv[0];
+            ARG_CONSUME();
         } else if ((0 == strcmp(argv[0], "-d")) || (0 == strcmp(argv[0], "--duration"))) {
             ARG_CONSUME();
             ARG_REQUIRE();
@@ -178,24 +188,30 @@ int on_capture(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
-    ROE(app_match(self, NULL));
+    ROE(app_match(self, device_filter));
     char * device = self->device.topic;
     ROE(publish(self, device, JSDRV_MSG_OPEN, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
-    if (jsdrv_cstr_starts_with(device, "u/js220") || jsdrv_cstr_starts_with(device, "u/js320")) {
-        ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto"), 0));
-    } else if (jsdrv_cstr_starts_with(device, "u/js110")) {
-        ROE(publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), 0));
+    if (device_is_model(device, "js220") || device_is_model(device, "js320")) {
+        ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));
+    } else if (device_is_model(device, "js110")) {
+        ROE(publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));
     }
     if (frequency) {
         if (filter) {
-            ROE(publish(self, device, "h/filter", &jsdrv_union_u32_r(filter), 0));
+            ROE(publish(self, device, "h/filter", &jsdrv_union_u32_r(filter), JSDRV_TIMEOUT_MS_DEFAULT));
         }
-        ROE(publish(self, device, "h/fs", &jsdrv_union_u32_r(frequency), 0));
+        ROE(publish(self, device, "h/fs", &jsdrv_union_u32_r(frequency), JSDRV_TIMEOUT_MS_DEFAULT));
     }
 
+    // Subscribe to every channel before enabling any of them, and
+    // unsubscribe from every channel before disabling any of them,
+    // so that the files cover the same time span.
     file_i = channel_init(self, device, "i", filename_i);
     file_v = channel_init(self, device, "v", filename_v);
     file_p = channel_init(self, device, "p", filename_p);
+    channel_start(self, device, "i", file_i);
+    channel_start(self, device, "v", file_v);
+    channel_start(self, device, "p", file_p);
 
     int64_t t_end = jsdrv_time_utc() + JSDRV_TIME_MILLISECOND * (int64_t) self->duration_ms;
     while (!quit_) {
@@ -205,6 +221,9 @@ int on_capture(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
+    channel_stop(self, device, "i", file_i);
+    channel_stop(self, device, "v", file_v);
+    channel_stop(self, device, "p", file_p);
     channel_finalize(self, device, "i", file_i);
     channel_finalize(self, device, "v", file_v);
     channel_finalize(self, device, "p", file_p);

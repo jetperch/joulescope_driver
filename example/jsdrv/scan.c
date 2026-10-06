@@ -24,7 +24,7 @@ int on_scan(struct app_s * self, int argc, char * argv[]) {
             self->verbose++;
             ARG_CONSUME();
         } else {
-            printf("usage: jsdrv_util scan [--verbose]\n");
+            printf("usage: jsdrv scan [--verbose]\n");
             return 1;
         }
     }

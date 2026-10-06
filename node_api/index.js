@@ -61,7 +61,7 @@ class JoulescopeDriver {
 
     device_paths(timeout=-1) {
         var p = this.query("@/list");
-        return p.split(',').sort()
+        return p ? p.split(',').sort() : [];
     }
 
     /**

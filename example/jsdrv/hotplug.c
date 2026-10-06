@@ -20,7 +20,7 @@
 #include <string.h>
 
 static int usage(void) {
-    printf("usage: jsdrv_util hotplug [--retain]\n");
+    printf("usage: jsdrv hotplug [--retain]\n");
     return 1;
 }
 

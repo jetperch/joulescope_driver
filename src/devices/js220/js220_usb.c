@@ -903,7 +903,7 @@ static int32_t mem_complete(struct dev_s * d, int32_t status) {
     jsdrvp_backend_send(d->context, m);
 
     jsdrv_topic_clear(&d->mem_topic);
-    memset(&d->mem_hdr, 0, sizeof(d->mem_topic));
+    memset(&d->mem_hdr, 0, sizeof(d->mem_hdr));
     d->mem_offset_valid = 0;
     d->mem_offset_sent = 0;
     if (NULL != d->mem_data) {

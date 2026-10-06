@@ -574,6 +574,17 @@ static int run(struct app_s * self, const char * device) {
 
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME,
                    JSDRV_TIMEOUT_MS_DEFAULT));
+    // The current range defaults to off, which makes current samples meaningless.
+    struct jsdrv_topic_s range_topic;
+    jsdrv_topic_set(&range_topic, device);
+    jsdrv_topic_append(&range_topic, "s/i/range/mode");
+    rc = jsdrv_publish(self->context, range_topic.topic, &jsdrv_union_cstr_r("auto"),
+                       JSDRV_TIMEOUT_MS_DEFAULT);
+    if (rc) {
+        printf("publish %s failed: %d\n", range_topic.topic, (int) rc);
+        jsdrv_close(self->context, device, JSDRV_TIMEOUT_MS_DEFAULT);
+        return rc;
+    }
     jsdrv_thread_sleep_ms(200);  // let timesync settle
 
     for (uint32_t i = 0; i < TESTS_COUNT && !quit_; ++i) {

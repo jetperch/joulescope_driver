@@ -113,7 +113,17 @@ int on_throughput(struct app_s * self, int argc, char * argv[]) {
         jsdrv_thread_sleep_ms(10);
     }
 
-    jsdrv_publish(self->context, topic.topic, &jsdrv_union_u8(0), 0);
+    // Stop the transmitter.
+    jsdrv_topic_set(&topic, topic_base.topic);
+    jsdrv_topic_append(&topic, "comm/tpt/0/tx/cnt");
+    jsdrv_publish(self->context, topic.topic, &jsdrv_union_u8(0), JSDRV_TIMEOUT_MS_DEFAULT);
+
+    jsdrv_topic_set(&topic, topic_base.topic);
+    jsdrv_topic_append(&topic, "comm/usbd/0/tx/!stat");
+    jsdrv_unsubscribe(self->context, topic.topic, on_device_stats, NULL, 0);
+    jsdrv_topic_set(&topic, topic_base.topic);
+    jsdrv_topic_append(&topic, "comm/usbd/0/rx/!stat");
+    jsdrv_unsubscribe(self->context, topic.topic, on_device_stats, NULL, 0);
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
 
     return 0;

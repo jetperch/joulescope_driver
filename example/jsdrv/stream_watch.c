@@ -129,14 +129,25 @@ static int32_t publish_u32(struct app_s * self, const char * subtopic, uint32_t 
     return rc;
 }
 
+static void data_topic(struct stream_watch_s * self, uint32_t idx, struct jsdrv_topic_s * t) {
+    jsdrv_topic_set(t, self->app->device.topic);
+    jsdrv_topic_append(t, "s");
+    jsdrv_topic_append(t, self->channels[idx].name);
+    jsdrv_topic_append(t, "!data");
+}
+
 static int32_t subscribe_data(struct stream_watch_s * self, uint32_t idx) {
     struct jsdrv_topic_s t;
-    jsdrv_topic_set(&t, self->app->device.topic);
-    jsdrv_topic_append(&t, "s");
-    jsdrv_topic_append(&t, self->channels[idx].name);
-    jsdrv_topic_append(&t, "!data");
+    data_topic(self, idx, &t);
     return jsdrv_subscribe(self->app->context, t.topic, JSDRV_SFLAG_PUB,
                            on_data, &self->channels[idx], JSDRV_TIMEOUT_MS_DEFAULT);
+}
+
+static void unsubscribe_data(struct stream_watch_s * self, uint32_t idx) {
+    struct jsdrv_topic_s t;
+    data_topic(self, idx, &t);
+    jsdrv_unsubscribe(self->app->context, t.topic, on_data, &self->channels[idx],
+                      JSDRV_TIMEOUT_MS_DEFAULT);
 }
 
 // Emit one JSON evidence line for the window [t_start, t_end).
@@ -236,27 +247,44 @@ int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
+    // The callbacks point at watch on this stack frame, so every path
+    // below must unsubscribe before returning.
     int rc = 1;
-    ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_ADD, JSDRV_SFLAG_PUB,
-                        on_device_add, &watch, JSDRV_TIMEOUT_MS_DEFAULT));
-    ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_REMOVE, JSDRV_SFLAG_PUB,
-                        on_device_remove, &watch, JSDRV_TIMEOUT_MS_DEFAULT));
-    ROE(app_match(self, device_filter));
+    bool opened = false;
+    uint32_t data_subscribed = 0;
+    if (jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_ADD, JSDRV_SFLAG_PUB,
+                        on_device_add, &watch, JSDRV_TIMEOUT_MS_DEFAULT)) {
+        goto exit_out;
+    }
+    if (jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_REMOVE, JSDRV_SFLAG_PUB,
+                        on_device_remove, &watch, JSDRV_TIMEOUT_MS_DEFAULT)) {
+        goto exit_add;
+    }
+    if (app_match(self, device_filter)) {
+        goto exit;
+    }
     printf("stream_watch device=%s duration=%" PRIu32 "s min_rate=%" PRIu32 "\n",
            self->device.topic, duration_s, min_rate);
     // The UI uses a generous open timeout; a leaked prior session can burn
     // ~750 ms in CONNECT_REQ retries before the handshake converges.
-    ROE(jsdrv_open(self->context, self->device.topic,
-                   JSDRV_DEVICE_OPEN_MODE_DEFAULTS, 5000));
-    if (fs) {
-        ROE(publish_u32(self, "h/fs", fs));
+    if (jsdrv_open(self->context, self->device.topic,
+                   JSDRV_DEVICE_OPEN_MODE_DEFAULTS, 5000)) {
+        goto exit;
     }
-    for (uint32_t idx = 0; idx < CHANNEL_COUNT; ++idx) {
-        ROE(subscribe_data(&watch, idx));
+    opened = true;
+    if (fs && publish_u32(self, "h/fs", fs)) {
+        goto exit;
     }
-    ROE(publish_u32(self, "s/i/ctrl", 1U));
-    ROE(publish_u32(self, "s/v/ctrl", 1U));
-    ROE(publish_u32(self, "s/p/ctrl", 1U));
+    for (; data_subscribed < CHANNEL_COUNT; ++data_subscribed) {
+        if (subscribe_data(&watch, data_subscribed)) {
+            goto exit;
+        }
+    }
+    if (publish_u32(self, "s/i/ctrl", 1U)
+            || publish_u32(self, "s/v/ctrl", 1U)
+            || publish_u32(self, "s/p/ctrl", 1U)) {
+        goto exit;
+    }
 
     // Window loop.  Windows are wall-clock: a host sleep inside the run
     // shows up as one long window with its actual dt, so per-window rates
@@ -294,11 +322,25 @@ int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
     printf("stream_watch result: rc=%d ok_streak=%" PRIu32 "/%" PRIu32
            " windows=%" PRIu32 "\n", rc, ok_streak, eval_s, windows_total);
 
+exit:
     // Clean close (the unclean-close scenarios kill this process instead).
-    publish_u32(self, "s/i/ctrl", 0U);
-    publish_u32(self, "s/v/ctrl", 0U);
-    publish_u32(self, "s/p/ctrl", 0U);
-    jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
+    if (opened) {
+        publish_u32(self, "s/i/ctrl", 0U);
+        publish_u32(self, "s/v/ctrl", 0U);
+        publish_u32(self, "s/p/ctrl", 0U);
+    }
+    while (data_subscribed) {
+        unsubscribe_data(&watch, --data_subscribed);
+    }
+    if (opened) {
+        jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
+    }
+    jsdrv_unsubscribe(self->context, JSDRV_MSG_DEVICE_REMOVE, on_device_remove, &watch,
+                      JSDRV_TIMEOUT_MS_DEFAULT);
+exit_add:
+    jsdrv_unsubscribe(self->context, JSDRV_MSG_DEVICE_ADD, on_device_add, &watch,
+                      JSDRV_TIMEOUT_MS_DEFAULT);
+exit_out:
     if (out_path) {
         fclose(watch.out);
     }

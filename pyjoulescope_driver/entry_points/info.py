@@ -46,6 +46,19 @@ def version_to_str(version):
     return f'{v_major}.{v_minor}.{v_patch}'
 
 
+def format_value(meta, value):
+    """Format a value for display using its metadata.
+
+    :param meta: The topic metadata dict, or None.
+    :param value: The topic value.
+    :return: The value to display.  Only u32 values with metadata
+        format "version" are converted to "major.minor.patch".
+    """
+    if meta is not None and meta.get('format', None) == 'version':
+        return version_to_str(value)
+    return value
+
+
 def _sys_info():
     try:
         from pyjls import __version__ as jls_version
@@ -101,10 +114,13 @@ def _list_devices(driver):
                 continue
             try:
                 if ('/js220/' in device_path) or ('/js320/' in device_path):
-                    fw = version_to_str(driver.query(f'{device_path}/c/fw/version'))
-                    hw = version_to_str(driver.query(f'{device_path}/c/hw/version'))
-                    fpga = version_to_str(driver.query(f'{device_path}/s/fpga/version'))
-                    txt.append(f'    {device_path}: hw={hw}, fw={fw}, fpga={fpga}')
+                    meta = metadata_load(driver, device_path)
+                    v = {}
+                    for name, subtopic in [('hw', 'c/hw/version'), ('fw', 'c/fw/version'),
+                                           ('fpga', 's/fpga/version')]:
+                        value = driver.query(f'{device_path}/{subtopic}')
+                        v[name] = format_value(meta.get(subtopic), value)
+                    txt.append(f'    {device_path}: hw={v["hw"]}, fw={v["fw"]}, fpga={v["fpga"]}')
                 else:
                     txt.append(f'    {device_path}')
             except Exception:
@@ -155,11 +171,7 @@ class Info:
                 print(f'{device_path} values:')
                 for key, value in self._values.items():
                     subtopic = key[len(device_path) + 1:]
-                    meta = self._meta.get(subtopic, None)
-                    if meta is not None:
-                        fmt = meta.get('format', None)
-                        if fmt == 'version':
-                            value = version_to_str(value)
+                    value = format_value(self._meta.get(subtopic, None), value)
                     print(f'  {subtopic} = {value}')
         return 0
 

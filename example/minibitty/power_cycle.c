@@ -40,7 +40,7 @@ static int usage(void) {
         "  --power <device>   Power supply device filter\n"
         "  --target <device>  Target device filter\n"
         "  --count <N>        Iterations: negative=infinite, 0=power toggle only\n"
-        "  --delay <ms>       Post-detection delay in ms (default=2500)\n"
+        "  --delay <ms>       Post-detection delay in ms (default=0)\n"
         "  --timeout <ms>     Target open timeout in ms (default=10000)\n"
     );
     return 1;
@@ -120,15 +120,24 @@ int on_power_cycle(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--count") && argc > 1) {
             ARG_CONSUME();
-            count_ = (int32_t) atoi(argv[0]);
+            if (jsdrv_cstr_to_i32(argv[0], &count_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--delay") && argc > 1) {
             ARG_CONSUME();
-            delay_ms_ = (uint32_t) atoi(argv[0]);
+            if (jsdrv_cstr_to_u32(argv[0], &delay_ms_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--timeout") && argc > 1) {
             ARG_CONSUME();
-            open_timeout_ms_ = (uint32_t) atoi(argv[0]);
+            if (jsdrv_cstr_to_u32(argv[0], &open_timeout_ms_)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else {
             printf("Unknown argument: %s\n", argv[0]);
@@ -144,12 +153,13 @@ int on_power_cycle(struct app_s * self, int argc, char * argv[]) {
     // Match power device
     struct jsdrv_topic_s power_topic;
     jsdrv_topic_clear(&power_topic);
-    ROE(app_match(self, power_device_));
+    ROE(app_match_ex(self, power_device_, APP_MATCH_EXPLICIT));
     jsdrv_topic_set(&power_topic, self->device.topic);
     printf("Power device: %s\n", power_topic.topic);
+    ROE(app_power_target_check(power_topic.topic, target_device_));
 
     // Set initial target presence from device list
-    target_present_ = (0 == app_match(self, target_device_));
+    target_present_ = (0 == app_match_ex(self, target_device_, APP_MATCH_EXPLICIT));
 
     // Subscribe to device add/remove events
     ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_ADD,
@@ -209,7 +219,7 @@ int on_power_cycle(struct app_s * self, int argc, char * argv[]) {
         }
 
         // Match target device for its full topic
-        rc = app_match(self, target_device_);
+        rc = app_match_ex(self, target_device_, APP_MATCH_EXPLICIT);
         if (rc) {
             printf("  FAIL: target device match failed\n");
             ++fail;

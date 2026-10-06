@@ -42,30 +42,30 @@ struct ts_history_s {
     double host_skew_us;
 };
 
+/// The maps from one source.  Each source has its own counter rate:
+/// 'c' (controller, ~100 MHz) and 's' (sensor, ~16 MHz).
+struct ts_source_s {
+    char name;                   // 'c' or 's'
+    uint32_t map_count;          // maps received
+    uint32_t last_update_counter;
+
+    // Steady-state history (most recent HISTORY_SIZE samples received
+    // after the convergence time).
+    struct ts_history_s history[HISTORY_SIZE];
+    uint32_t history_head;
+    uint32_t history_count;
+};
+
 struct ts_state_s {
     char source_filter;          // 'c', 's', or 0 for both
     bool require_converge;
     double max_rate_ppm;
     double max_skew_us;
+    uint32_t converge_time_ms;   // ignore maps before this time for the history
 
     uint32_t map_count;          // total maps received
-    uint32_t map_count_c;
-    uint32_t map_count_s;
     int64_t  start_utc;          // host UTC when subcommand started
-
-    // Steady-state history (most recent HISTORY_SIZE samples).
-    struct ts_history_s history[HISTORY_SIZE];
-    uint32_t history_head;
-    uint32_t history_count;
-
-    // Last seen update_counter per source.
-    uint32_t last_update_counter_c;
-    uint32_t last_update_counter_s;
-
-    // Last error tracked for pass/fail at end.
-    double last_skew_us;
-    double last_rate_hz;
-    bool   converged;
+    struct ts_source_s sources[2];
 };
 
 static struct ts_state_s g_state;
@@ -101,7 +101,7 @@ static void format_iso_utc(int64_t utc_q30, char * out, size_t out_size) {
     snprintf(out, out_size, "%s.%06" PRIu32 "Z", buf, time_us);
 }
 
-static void history_push(struct ts_state_s * s, double rate_hz, double skew_us) {
+static void history_push(struct ts_source_s * s, double rate_hz, double skew_us) {
     s->history[s->history_head].rate_hz = rate_hz;
     s->history[s->history_head].host_skew_us = skew_us;
     s->history_head = (s->history_head + 1U) % HISTORY_SIZE;
@@ -138,6 +138,15 @@ static void on_map(void * user_data, const char * topic, const struct jsdrv_unio
     if (s->source_filter && source != s->source_filter) {
         return;
     }
+    struct ts_source_s * src = NULL;
+    for (uint32_t i = 0; i < 2; ++i) {
+        if (s->sources[i].name == source) {
+            src = &s->sources[i];
+        }
+    }
+    if (NULL == src) {
+        return;
+    }
 
     int64_t host_utc_now = jsdrv_time_utc();
     double t_since_start_s = JSDRV_TIME_TO_F64(host_utc_now - s->start_utc);
@@ -169,16 +178,11 @@ static void on_map(void * user_data, const char * topic, const struct jsdrv_unio
 
     // Update bookkeeping.
     ++s->map_count;
-    if (source == 'c') {
-        ++s->map_count_c;
-        s->last_update_counter_c = body->update_counter;
-    } else if (source == 's') {
-        ++s->map_count_s;
-        s->last_update_counter_s = body->update_counter;
+    ++src->map_count;
+    src->last_update_counter = body->update_counter;
+    if ((host_utc_now - s->start_utc) >= ((int64_t) s->converge_time_ms) * JSDRV_TIME_MILLISECOND) {
+        history_push(src, counter_rate_hz, host_skew_us);
     }
-    history_push(s, counter_rate_hz, host_skew_us);
-    s->last_rate_hz = counter_rate_hz;
-    s->last_skew_us = host_skew_us;
 
     // Print line.
     char iso[64];
@@ -189,7 +193,7 @@ static void on_map(void * user_data, const char * topic, const struct jsdrv_unio
     fflush(stdout);
 }
 
-static void compute_stats(const struct ts_state_s * s,
+static void compute_stats(const struct ts_source_s * s,
                           double * mean_rate, double * rate_stddev_hz,
                           double * mean_abs_skew, double * peak_skew) {
     *mean_rate = 0.0;
@@ -225,43 +229,51 @@ static void compute_stats(const struct ts_state_s * s,
     }
 }
 
-static int print_summary(struct ts_state_s * s) {
+static int print_source_summary(const struct ts_state_s * state, const struct ts_source_s * s) {
     double mean_rate, rate_stddev, mean_skew, peak_skew;
     compute_stats(s, &mean_rate, &rate_stddev, &mean_skew, &peak_skew);
     double rate_ppm = (mean_rate > 0.0) ? (rate_stddev / mean_rate * 1e6) : 0.0;
 
-    printf("\n=== Summary ===\n");
-    printf("  maps received   : %u (c=%u, s=%u)\n",
-           (unsigned) s->map_count, (unsigned) s->map_count_c, (unsigned) s->map_count_s);
-    printf("  history samples : %u\n", (unsigned) s->history_count);
+    printf("\n--- source %c ---\n", s->name);
+    printf("  maps received   : %u\n", (unsigned) s->map_count);
+    printf("  history samples : %u (after %u ms)\n",
+           (unsigned) s->history_count, (unsigned) state->converge_time_ms);
     printf("  mean rate       : %.6f Hz\n", mean_rate);
     printf("  rate stddev     : %.6f Hz (%.3f ppm of mean)\n", rate_stddev, rate_ppm);
     printf("  mean abs skew   : %.2f us\n", mean_skew);
     printf("  peak abs skew   : %.2f us\n", peak_skew);
 
     int rc = 0;
-    if (s->require_converge) {
-        if (s->map_count == 0) {
-            printf("  FAIL: no maps received\n");
-            rc = 1;
-        } else if (s->map_count < 2) {
-            printf("  FAIL: only %u map received (need >= 2 to converge)\n",
-                   (unsigned) s->map_count);
+    if (state->require_converge) {
+        if (s->history_count < 2) {
+            printf("  FAIL: %u maps after %u ms (need >= 2 to converge)\n",
+                   (unsigned) s->history_count, (unsigned) state->converge_time_ms);
             rc = 1;
         }
-        if (peak_skew > s->max_skew_us) {
+        if (peak_skew > state->max_skew_us) {
             printf("  FAIL: peak skew %.2f us > %.2f us limit\n",
-                   peak_skew, s->max_skew_us);
+                   peak_skew, state->max_skew_us);
             rc = 1;
         }
-        if (rate_ppm > s->max_rate_ppm) {
+        if (rate_ppm > state->max_rate_ppm) {
             printf("  FAIL: rate stddev %.3f ppm > %.3f ppm limit\n",
-                   rate_ppm, s->max_rate_ppm);
+                   rate_ppm, state->max_rate_ppm);
             rc = 1;
         }
         if (rc == 0) {
             printf("  PASS\n");
-            s->converged = true;
+        }
+    }
+    return rc;
+}
+
+static int print_summary(struct ts_state_s * s) {
+    int rc = 0;
+    printf("\n=== Summary ===\n");
+    printf("  maps received   : %u\n", (unsigned) s->map_count);
+    for (uint32_t i = 0; i < 2; ++i) {
+        if (!s->source_filter || (s->source_filter == s->sources[i].name)) {
+            rc |= print_source_summary(s, &s->sources[i]);
         }
     }
     fflush(stdout);
@@ -278,12 +290,14 @@ static int usage(void) {
         "Options:\n"
         "  --duration <ms>      Run for this duration then exit (default: %u).\n"
         "  --source <c|s>       Filter on source instance (default: both).\n"
+        "  --converge <ms>      Exclude maps before this time from the\n"
+        "                       statistics (default: %u).\n"
         "  --require-converge   Exit non-zero if not converged at end.\n"
         "  --max-skew-us <us>   Max allowed peak host skew (default: %.0f).\n"
         "  --max-rate-ppm <ppm> Max allowed rate stddev as ppm of mean\n"
         "                       (default: %.0f).\n"
         "\nPress CTRL-C to exit early.\n",
-        DEFAULT_DURATION_MS, DEFAULT_MAX_SKEW_US, DEFAULT_MAX_RATE_PPM);
+        DEFAULT_DURATION_MS, CONVERGE_TIME_MS, DEFAULT_MAX_SKEW_US, DEFAULT_MAX_RATE_PPM);
     return 1;
 }
 
@@ -296,6 +310,9 @@ int on_timesync(struct app_s * self, int argc, char * argv[]) {
     memset(s, 0, sizeof(*s));
     s->max_rate_ppm = DEFAULT_MAX_RATE_PPM;
     s->max_skew_us = DEFAULT_MAX_SKEW_US;
+    s->converge_time_ms = CONVERGE_TIME_MS;
+    s->sources[0].name = 'c';
+    s->sources[1].name = 's';
     self->duration_ms = DEFAULT_DURATION_MS;
 
     char * device_filter = NULL;
@@ -306,7 +323,10 @@ int on_timesync(struct app_s * self, int argc, char * argv[]) {
         } else if (0 == strcmp(argv[0], "--duration")) {
             ARG_CONSUME();
             ARG_REQUIRE();
-            self->duration_ms = (uint32_t) strtoul(argv[0], NULL, 10);
+            if (jsdrv_cstr_to_u32(argv[0], &self->duration_ms)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--source")) {
             ARG_CONSUME();
@@ -315,6 +335,14 @@ int on_timesync(struct app_s * self, int argc, char * argv[]) {
                 s->source_filter = argv[0][0];
             } else {
                 printf("--source must be 'c' or 's'\n");
+                return usage();
+            }
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--converge")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            if (jsdrv_cstr_to_u32(argv[0], &s->converge_time_ms)) {
+                printf("Invalid value: %s\n", argv[0]);
                 return usage();
             }
             ARG_CONSUME();
@@ -354,37 +382,48 @@ int on_timesync(struct app_s * self, int argc, char * argv[]) {
     jsdrv_topic_set(&topic_s, self->device.topic);
     jsdrv_topic_append(&topic_s, "s/ts/!map");
 
+    int32_t rc = 0;
+    bool subscribed_c = false;
+    bool subscribed_s = false;
     if (s->source_filter != 's') {
         printf("# Subscribing to %s\n", topic_c.topic);
-        ROE(jsdrv_subscribe(self->context, topic_c.topic, JSDRV_SFLAG_PUB,
-                             on_map, s, JSDRV_TIMEOUT_MS_DEFAULT));
+        rc = jsdrv_subscribe(self->context, topic_c.topic, JSDRV_SFLAG_PUB,
+                             on_map, s, JSDRV_TIMEOUT_MS_DEFAULT);
+        subscribed_c = (0 == rc);
     }
-    if (s->source_filter != 'c') {
+    if (!rc && (s->source_filter != 'c')) {
         printf("# Subscribing to %s\n", topic_s.topic);
-        ROE(jsdrv_subscribe(self->context, topic_s.topic, JSDRV_SFLAG_PUB,
-                             on_map, s, JSDRV_TIMEOUT_MS_DEFAULT));
+        rc = jsdrv_subscribe(self->context, topic_s.topic, JSDRV_SFLAG_PUB,
+                             on_map, s, JSDRV_TIMEOUT_MS_DEFAULT);
+        subscribed_s = (0 == rc);
     }
-    printf("# Duration %u ms; press CTRL-C to exit early.\n", self->duration_ms);
-    fflush(stdout);
+    if (!rc) {
+        printf("# Duration %u ms; press CTRL-C to exit early.\n", self->duration_ms);
+        fflush(stdout);
 
-    int64_t end_utc = s->start_utc
-        + ((int64_t) self->duration_ms) * JSDRV_TIME_MILLISECOND;
-    while (!quit_) {
-        jsdrv_thread_sleep_ms(50);
-        if (jsdrv_time_utc() >= end_utc) {
-            break;
+        int64_t end_utc = s->start_utc
+            + ((int64_t) self->duration_ms) * JSDRV_TIME_MILLISECOND;
+        while (!quit_) {
+            jsdrv_thread_sleep_ms(50);
+            if (jsdrv_time_utc() >= end_utc) {
+                break;
+            }
         }
     }
 
-    if (s->source_filter != 's') {
+    if (subscribed_c) {
         jsdrv_unsubscribe(self->context, topic_c.topic, on_map, s,
                           JSDRV_TIMEOUT_MS_DEFAULT);
     }
-    if (s->source_filter != 'c') {
+    if (subscribed_s) {
         jsdrv_unsubscribe(self->context, topic_s.topic, on_map, s,
                           JSDRV_TIMEOUT_MS_DEFAULT);
     }
-    int rc = print_summary(s);
+    if (rc) {
+        printf("subscribe failed: %d\n", (int) rc);
+    } else {
+        rc = print_summary(s);
+    }
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
     return rc;
 }

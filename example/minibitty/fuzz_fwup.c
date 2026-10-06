@@ -631,7 +631,7 @@ static int iterate_once(struct sweep_ctx_s * ctx, uint32_t mask,
     r->mask = mask;
 
     // Match DUT (may fail if device not enumerated).
-    rc = app_match(self, cfg->target_filter);
+    rc = app_match_ex(self, cfg->target_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT);
     if (rc) {
         printf("  ERROR: target device not found\n");
         r->open_rc = rc;
@@ -698,7 +698,7 @@ static int iterate_once(struct sweep_ctx_s * ctx, uint32_t mask,
         }
 
         // Rematch after re-enumeration.
-        rc = app_match(self, cfg->target_filter);
+        rc = app_match_ex(self, cfg->target_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT);
         if (rc) {
             printf("  ERROR: target did not re-enumerate after reset\n");
             r->open_rc = rc;
@@ -836,6 +836,8 @@ static uint32_t gen_subsets(uint32_t depth, uint32_t * out_masks,
 static int usage(void) {
     printf(
         "usage: minibitty fuzz_fwup [options] <release_zip> [device_filter]\n"
+        "\n"
+        "device_filter defaults to u/js320/ and must match one device.\n"
         "\n"
         "Verify JS320 open+fwup recovery for broken data-block subsets.\n"
         "\n"
@@ -981,6 +983,9 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
         printf("missing release zip\n");
         return usage();
     }
+    if (!cfg.target_filter) {
+        cfg.target_filter = "u/js320/";
+    }
 
     // Build the subset list.
     uint32_t masks[64];
@@ -1002,7 +1007,7 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
     if (cfg.power_filter) {
         printf("  power:   %s\n", cfg.power_filter);
     }
-    printf("  target:  %s\n", cfg.target_filter ? cfg.target_filter : "(first)");
+    printf("  target:  %s\n", cfg.target_filter);
     printf("  depth=%u repeat=%u stop_on_fail=%d\n",
            cfg.depth, cfg.repeat, cfg.stop_on_fail);
     printf("  open_timeout_ms=%u fwup_timeout_ms=%u max_duration_s=%" PRIu64 "\n",
@@ -1030,16 +1035,34 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
     struct jsdrv_topic_s power_topic;
     jsdrv_topic_clear(&power_topic);
     if (cfg.power_filter) {
-        ROE(app_match(self, cfg.power_filter));
-        jsdrv_topic_set(&power_topic, self->device.topic);
-        printf("Power device: %s\n", power_topic.topic);
+        int32_t match_rc = app_match_ex(self, cfg.power_filter, APP_MATCH_EXPLICIT);
+        if (!match_rc) {
+            jsdrv_topic_set(&power_topic, self->device.topic);
+            printf("Power device: %s\n", power_topic.topic);
+            match_rc = app_power_target_check(power_topic.topic, cfg.target_filter);
+        }
+        if (match_rc) {
+            free(zip_data);
+            return match_rc;
+        }
     }
 
     // Target prefix for add/remove tracking:
-    target_prefix_ = cfg.target_filter ? cfg.target_filter : "u/js320/";
+    target_prefix_ = cfg.target_filter;
 
-    // Initial target presence.
-    target_present_ = (0 == app_match(self, cfg.target_filter));
+    // Initial target presence.  Each iteration erases the target, so
+    // refuse a filter that matches more than one device.
+    target_present_ = false;
+    if (0 == app_scan(self)) {
+        uint32_t count = device_match_list(self->devices, cfg.target_filter, NULL, 0);
+        if (count > 1) {
+            printf("Target filter \"%s\" matches %u devices: %s\n",
+                   cfg.target_filter, count, self->devices);
+            free(zip_data);
+            return 1;
+        }
+        target_present_ = (1 == count);
+    }
 
     // Subscribe to add/remove events.
     ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_ADD,
@@ -1122,7 +1145,7 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
             printf("%s0x%02X", (i ? "," : ""), failed[i]);
         }
         printf(" %s", cfg.release_zip);
-        if (cfg.target_filter) { printf(" %s", cfg.target_filter); }
+        printf(" %s", cfg.target_filter);
         printf("\n");
     }
 

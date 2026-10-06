@@ -264,6 +264,7 @@ static int usage(void) {
         "\n"
         "  erase [-v] <image> [device_filter]\n"
         "      Erase a specific image slot.\n"
+        "      Requires a device_filter that matches exactly one device.\n"
         "      image                    Image slot (0-1)\n",
         PIPELINE_MAX
         );
@@ -324,7 +325,7 @@ static int on_firmware_update(struct app_s * self, int argc, char * argv[]) {
     ARG_CONSUME();
     if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
 
-    ROE(app_match(self, device_filter));
+    ROE(app_match_ex(self, device_filter, APP_MATCH_MB));
     rc = setup(self);
     if (!rc) {
         rc = do_firmware(self, path, pipeline_depth, (uint8_t) image_slot);
@@ -358,7 +359,7 @@ static int on_firmware_launch(struct app_s * self, int argc, char * argv[]) {
     ARG_CONSUME();
     if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
 
-    ROE(app_match(self, device_filter));
+    ROE(app_match_ex(self, device_filter, APP_MATCH_MB));
     rc = setup(self);
     if (!rc) {
         rc = do_launch((uint8_t) image_slot);
@@ -392,7 +393,7 @@ static int on_firmware_erase(struct app_s * self, int argc, char * argv[]) {
     ARG_CONSUME();
     if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
 
-    ROE(app_match(self, device_filter));
+    ROE(app_match_ex(self, device_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT));
     rc = setup(self);
     if (!rc) {
         rc = do_erase((uint8_t) image_slot);

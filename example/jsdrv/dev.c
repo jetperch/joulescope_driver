@@ -20,7 +20,7 @@
 
 
 static int usage() {
-    printf("usage: jsdrv_util dev [--device {device_path}]}\n");
+    printf("usage: jsdrv dev [--device {device_path}]}\n");
     return 1;
 }
 

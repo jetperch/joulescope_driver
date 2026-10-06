@@ -131,7 +131,7 @@ int on_fwup(struct app_s * self, int argc, char * argv[]) {
         return usage();
     }
 
-    ROE(app_match(self, device_filter));
+    ROE(app_match_ex(self, device_filter, APP_MATCH_MB));
     printf("Target device: %s\n", self->device.topic);
 
     // Read ZIP (or signal "use embedded" by leaving zip_data NULL and zip_size 0).

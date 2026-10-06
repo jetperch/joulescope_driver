@@ -15,6 +15,7 @@
  */
 
 #include "jsdrv_prv.h"
+#include "device_match.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/time.h"
 #include "jsdrv/topic.h"
@@ -141,7 +142,8 @@ static int32_t device_publish(struct app_s * self, const char * device, const ch
 }
 
 static int usage(void) {
-    printf("usage: jsdrv_util stream_buffer [--option value]\n"
+    printf("usage: jsdrv stream_buffer [--option value]\n"
+           "    --device     device filter: path, model or serial number\n"
            "    --duration   duration in milliseconds\n"
            "    --length     number of entries per summary request\n"
            "    --mem_size   Memory size in bytes (< 4294967296)\n"
@@ -160,9 +162,15 @@ static bool wait_for_duration_ms(uint32_t duration_ms) {
 int on_stream_buffer(struct app_s * self, int argc, char * argv[]) {
     uint32_t duration_ms = 5000;
     uint32_t mem_size = 100000000U;
+    char * device_filter = NULL;
     while (argc) {
         if (argv[0][0] != '-') {
             return usage();
+        } else if (0 == strcmp(argv[0], "--device")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            device_filter = argv[0];
+            ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--duration")) {
             ARG_CONSUME();
             ARG_REQUIRE();
@@ -183,16 +191,15 @@ int on_stream_buffer(struct app_s * self, int argc, char * argv[]) {
         }
     }
 
-    ROE(app_match(self, NULL));
+    ROE(app_match(self, device_filter));
     char * device = self->device.topic;
     ROE(jsdrv_subscribe(self->context, JSDRV_MSG_DEVICE_REMOVE, JSDRV_SFLAG_PUB, on_device_remove, self, JSDRV_TIMEOUT_MS_DEFAULT));
     ROE(device_publish(self, device, JSDRV_MSG_OPEN, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
     ROE(jsdrv_subscribe(self->context, device, JSDRV_SFLAG_PUB, on_pub_cmd, self, JSDRV_TIMEOUT_MS_DEFAULT));
     ROE(jsdrv_subscribe(self->context, RESPONSE_TOPIC, JSDRV_SFLAG_PUB, on_buf_rsp, self, JSDRV_TIMEOUT_MS_DEFAULT));
 
-    if (jsdrv_cstr_starts_with(device, "u/js220")) {
-        ROE(device_publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("10 A"), JSDRV_TIMEOUT_MS_DEFAULT));
-        ROE(device_publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("manual"), JSDRV_TIMEOUT_MS_DEFAULT));
+    if (device_is_model(device, "js220") || device_is_model(device, "js320")) {
+        ROE(device_publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, "m/@/!add",  &jsdrv_union_u8_r(7), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, "m/007/a/!add",  &jsdrv_union_u8_r(3), JSDRV_TIMEOUT_MS_DEFAULT));
         struct jsdrv_topic_s t;
@@ -214,7 +221,7 @@ int on_stream_buffer(struct app_s * self, int argc, char * argv[]) {
         } else {
             device_publish(self, device, ctrl_str, &jsdrv_union_u32_r(0), JSDRV_TIMEOUT_MS_DEFAULT);
         }
-    } else if (jsdrv_cstr_starts_with(device, "u/js110")) {
+    } else if (device_is_model(device, "js110")) {
         ROE(device_publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, "m/@/!add",  &jsdrv_union_u8_r(7), JSDRV_TIMEOUT_MS_DEFAULT));
         ROE(publish(self, "m/007/a/!add",  &jsdrv_union_u8_r(3), JSDRV_TIMEOUT_MS_DEFAULT));

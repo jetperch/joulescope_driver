@@ -175,7 +175,6 @@ struct log_level_convert_s {
 const struct log_level_convert_s LOG_LEVEL_CONVERT[] = {
     {"off", JSDRV_LOG_LEVEL_OFF},
     {"emergency", JSDRV_LOG_LEVEL_EMERGENCY},
-    {"e", JSDRV_LOG_LEVEL_EMERGENCY},
     {"alert", JSDRV_LOG_LEVEL_ALERT},
     {"a", JSDRV_LOG_LEVEL_ALERT},
     {"critical", JSDRV_LOG_LEVEL_CRITICAL},
@@ -224,12 +223,20 @@ int main(int argc, char * argv[]) {
     if ((jsdrv_cstr_casecmp("--log-level", argv[0]) == 0) || (jsdrv_cstr_casecmp("--log_level", argv[0]) == 0)) {
         ARG_CONSUME();
         int8_t level = JSDRV_LOG_LEVEL_ERROR;
+        if (argc < 1) {
+            printf("Missing log level\n");
+            return usage();
+        }
         if (log_level_cvt(argv[0], &level)) {
             printf("Invalid log level: %s\n", argv[0]);
             return usage();
         }
         ARG_CONSUME();
         jsdrv_log_level_set(level);
+    }
+    if (argc < 1) {
+        printf("Missing command\n");
+        return usage();
     }
 
     ROE(app_initialize(self));

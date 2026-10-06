@@ -25,6 +25,7 @@ async function testBasic(){
     var device_paths = drv.device_paths();
     console.log('device_paths: ' + device_paths);
     assert.ok(Array.isArray(device_paths), 'device_paths must be an array');
+    device_paths.forEach((p) => assert.ok(p.length > 0, 'device_paths must not contain empty paths'));
     drv.finalize();
     console.log('testBasic passed');
 }

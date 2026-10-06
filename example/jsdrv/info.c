@@ -85,7 +85,7 @@ static int device_info(struct app_s * self, const char * device, int32_t open_mo
 }
 
 static int usage(void) {
-    printf("usage: jsdrv_util info [--verbose] [--open-mode MODE] device_path\n");
+    printf("usage: jsdrv info [--verbose] [--open-mode MODE] device_path\n");
     printf("  --open-mode MODE   default|resume|raw, or an integer (default: resume)\n");
     return 1;
 }

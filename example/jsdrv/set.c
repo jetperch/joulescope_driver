@@ -25,7 +25,7 @@
 
 const char USAGE[] =
     "\n"
-    "usage: jsdrv_util set device_path \"topic=value\" ...\n"
+    "usage: jsdrv set device_path \"topic=value\" ...\n"
     "    topic: The hierarchical topic relative to device_path separated by /.\n"
     "    value: The value to publish to topic.\n"
     "           String values must start and end with \".\n"
@@ -112,13 +112,13 @@ static int u32list_to_bin(const char * s, uint8_t ** bin, size_t * bin_size) {
         while (!is_separator(*c)) {
             *z++ = *c++;
             if ((z - u32_buffer) >= (intptr_t) (sizeof(u32_buffer) - 2)) {
-                printf("u32list item %lu too long\n", i);
+                printf("u32list item %lu too long\n", (unsigned long) i);
                 return 1;
             }
         }
         *z++ = 0;
         if (jsdrv_cstr_to_u32(u32_buffer, &b[i])) {
-            printf("u32list item %lu conversion failed: %s\n", i, u32_buffer);
+            printf("u32list item %lu conversion failed: %s\n", (unsigned long) i, u32_buffer);
             return 1;
         } else {
             printf("0x%08x\n", b[i]);
@@ -224,10 +224,12 @@ static int set_arg(struct app_s * self, char * device_path, char * arg) {
 
 int on_set(struct app_s * self, int argc, char * argv[]) {
     char * device_filter = NULL;
-    while (argc) {
+    bool opened = false;
+    int rc = 0;
+    while (argc && !rc) {
         if (argv[0][0] == '-') {
             // no options at this time
-            return usage();
+            rc = usage();
         } else if (NULL == device_filter) {
             device_filter = argv[0];
             if (strchr(device_filter, '=')) {
@@ -235,18 +237,19 @@ int on_set(struct app_s * self, int argc, char * argv[]) {
             }
             ROE(app_match(self, device_filter));
             ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, 1000));
+            opened = true;
             ARG_CONSUME();
         } else {
             if (set_arg(self, self->device.topic, argv[0])) {
-                return usage();
+                rc = usage();
             }
             ARG_CONSUME();
         }
     }
 
-    if (self->device.topic[0]) {
+    if (opened) {
         jsdrv_close(self->context, self->device.topic, 1000);
     }
 
-    return 0;
+    return rc;
 }

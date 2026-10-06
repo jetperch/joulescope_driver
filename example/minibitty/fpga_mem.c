@@ -15,6 +15,7 @@
  */
 
 #include "minibitty_exe_prv.h"
+#include "device_match.h"
 #include "mb/stdmsg.h"
 #include "jsdrv/cstr.h"
 #include <stdio.h>
@@ -685,10 +686,14 @@ static int usage(void) {
         "  read <offset> <size>     Read and hex dump\n"
         "  program <path>           Erase, write, and verify image file\n"
         "  uid                      Read the SPI flash 64-bit unique ID\n"
-        "  aes_key <hex> [options]  Program ECP5 AES-128 encryption key (OTP!)\n"
+        "  aes_key <hex> [options] <u/js320/serial>\n"
+        "                           Program ECP5 AES-128 encryption key (OTP!)\n"
         "    --lock                   Set key lock fuse (prevents readback)\n"
         "    --encrypt-only           Require encrypted bitstreams only\n"
+        "    --yes                    Confirm burning the OTP fuses\n"
         "\n"
+        "erase, write and program require a device_filter that matches\n"
+        "exactly one device.\n"
         "Offset and size accept hex (0x...) or decimal.\n",
         PIPELINE_MAX
         );
@@ -745,7 +750,7 @@ int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
         if (parse_u32(argv[0], &size)) { printf("invalid size: %s\n", argv[0]); return usage(); }
         ARG_CONSUME();
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT));
         rc = setup(self);
         if (!rc) { rc = do_erase(self, offset, size); }
         return teardown(self, rc);
@@ -757,7 +762,7 @@ int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
         if (parse_u32(argv[0], &size)) { printf("invalid size: %s\n", argv[0]); return usage(); }
         ARG_CONSUME();
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT));
         rc = setup(self);
         if (!rc) { rc = do_write(self, offset, size); }
         return teardown(self, rc);
@@ -769,7 +774,7 @@ int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
         if (parse_u32(argv[0], &size)) { printf("invalid size: %s\n", argv[0]); return usage(); }
         ARG_CONSUME();
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB));
         rc = setup(self);
         if (!rc) { rc = do_read(self, offset, size); }
         return teardown(self, rc);
@@ -778,13 +783,13 @@ int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
         const char * path = argv[0];
         ARG_CONSUME();
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT));
         rc = setup_fwup(self);
         if (!rc) { rc = do_program(self, path, pipeline_depth); }
         return teardown_fwup(self, rc);
     } else if (0 == strcmp(subcmd, "uid")) {
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB));
         rc = setup(self);
         if (!rc) { rc = do_read_uid(self); }
         return teardown(self, rc);
@@ -801,6 +806,7 @@ int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
         }
         ARG_CONSUME();
         uint32_t flags = 0;
+        bool confirmed = false;
         while (argc > 0 && argv[0][0] == '-') {
             if (0 == strcmp(argv[0], "--lock")) {
                 flags |= 0x01;
@@ -808,12 +814,26 @@ int on_fpga_mem(struct app_s * self, int argc, char * argv[]) {
             } else if (0 == strcmp(argv[0], "--encrypt-only")) {
                 flags |= 0x02;
                 ARG_CONSUME();
+            } else if (0 == strcmp(argv[0], "--yes")) {
+                confirmed = true;
+                ARG_CONSUME();
             } else {
                 break;
             }
         }
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT));
+        // OTP fuses cannot be undone: require the exact JS320 device path.
+        if (!device_is_model(self->device.topic, "js320")
+                || jsdrv_cstr_casecmp(device_filter, self->device.topic)) {
+            printf("aes_key requires the full device path, such as u/js320/<serial>\n");
+            return 1;
+        }
+        if (!confirmed) {
+            printf("aes_key permanently burns OTP fuses on %s.  Add --yes to confirm.\n",
+                   self->device.topic);
+            return 1;
+        }
         rc = setup_common(self);
         if (!rc) { rc = do_prog_aes_key(self, key, flags); }
         return teardown_common(self, rc);

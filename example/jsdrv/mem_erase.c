@@ -25,7 +25,7 @@
 
 
 static int usage() {
-    printf("usage: jsdrv_util mem_erase [--device {device_path}] [--timeout {timeout_ms}] {region}\n");
+    printf("usage: jsdrv mem_erase [--device {device_path}] [--timeout {timeout_ms}] {region}\n");
     return 1;
 }
 
@@ -54,7 +54,6 @@ int on_mem_erase(struct app_s * self, int argc, char * argv[]) {
                 printf("Could not parse timeout\n");
                 return usage();
             }
-            device = argv[0];
             ARG_CONSUME();
         } else if ((0 == strcmp(argv[0], "--verbose")) || (0 == strcmp(argv[0], "-v"))) {
             self->verbose++;

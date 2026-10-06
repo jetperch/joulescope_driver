@@ -22,6 +22,7 @@
 
 #include "minibitty_exe_prv.h"
 #include "mb/stdmsg.h"
+#include "jsdrv/cstr.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -240,12 +241,18 @@ int on_state_get(struct app_s * self, int argc, char * argv[]) {
         if (0 == strcmp(argv[0], "--repeat")) {
             ARG_CONSUME();
             if (argc < 1) { printf("--repeat requires N\n"); return usage(); }
-            repeat = strtoul(argv[0], NULL, 0);
+            if (jsdrv_cstr_to_u32(argv[0], &repeat)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--pipeline")) {
             ARG_CONSUME();
             if (argc < 1) { printf("--pipeline requires N\n"); return usage(); }
-            pipeline = strtoul(argv[0], NULL, 0);
+            if (jsdrv_cstr_to_u32(argv[0], &pipeline)) {
+                printf("Invalid value: %s\n", argv[0]);
+                return usage();
+            }
             if (pipeline < 1) pipeline = 1;
             if (pipeline > PIPELINE_MAX) pipeline = PIPELINE_MAX;
             ARG_CONSUME();

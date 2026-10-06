@@ -26,7 +26,7 @@
 
 
 static int usage() {
-    printf("usage: jsdrv_util mem_write [--device {device_path}] [--timeout {timeout_ms}] {region} {file}\n");
+    printf("usage: jsdrv mem_write [--device {device_path}] [--timeout {timeout_ms}] {region} {file}\n");
     return 1;
 }
 
@@ -94,7 +94,6 @@ int on_mem_write(struct app_s * self, int argc, char * argv[]) {
                 printf("Could not parse timeout\n");
                 return usage();
             }
-            device = argv[0];
             ARG_CONSUME();
         } else if ((0 == strcmp(argv[0], "--verbose")) || (0 == strcmp(argv[0], "-v"))) {
             self->verbose++;
@@ -119,20 +118,22 @@ int on_mem_write(struct app_s * self, int argc, char * argv[]) {
 
     struct jsdrv_topic_s topic;
     jsdrv_topic_set(&topic, self->device.topic);
-
-    jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_OPEN);
-    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(JSDRV_DEVICE_OPEN_MODE_RESUME), JSDRV_TIMEOUT_MS_DEFAULT));
+    int32_t rc = jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(JSDRV_DEVICE_OPEN_MODE_RESUME), JSDRV_TIMEOUT_MS_DEFAULT);
+    if (rc) {
+        free(data);
+        return rc;
+    }
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "h/mem");
     jsdrv_topic_append(&topic, region);
     jsdrv_topic_append(&topic, "!write");
-    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_bin(data, data_size), write_timeout_ms));
+    rc = jsdrv_publish(self->context, topic.topic, &jsdrv_union_bin(data, data_size), write_timeout_ms);
     free(data);
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, JSDRV_MSG_CLOSE);
-    ROE(jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
-    return 0;
+    int32_t close_rc = jsdrv_publish(self->context, topic.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT);
+    return rc ? rc : close_rc;
 }

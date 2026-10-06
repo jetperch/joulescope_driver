@@ -30,6 +30,9 @@
 #include <string.h>
 
 
+/// The maximum time to wait for the h/cal/!rsp response to one command.
+#define CAL_CMD_TIMEOUT_MS  (60000U)
+
 static volatile bool cal_done_;
 static volatile int32_t cal_rsp_status_;
 static volatile uint32_t cal_rsp_txn_id_;
@@ -214,11 +217,16 @@ static int run_cmd(struct app_s * self, struct jsdrv_cal_cmd_s * cmd) {
         goto teardown;
     }
 
-    while (!quit_ && !cal_done_) {
+    uint32_t elapsed_ms = 0;
+    while (!quit_ && !cal_done_ && (elapsed_ms < CAL_CMD_TIMEOUT_MS)) {
         jsdrv_thread_sleep_ms(50);
+        elapsed_ms += 50;
     }
     if (!cal_done_) {
-        rc = JSDRV_ERROR_ABORTED;
+        if (!quit_) {
+            printf("ERROR: timeout waiting for h/cal/!rsp\n");
+        }
+        rc = quit_ ? JSDRV_ERROR_ABORTED : JSDRV_ERROR_TIMED_OUT;
         goto teardown;
     }
     rc = cal_rsp_status_;
@@ -240,7 +248,7 @@ teardown:
 
 
 static int open_device(struct app_s * self, char * device_filter) {
-    ROE(app_match(self, device_filter));
+    ROE(app_match_ex(self, device_filter, APP_MATCH_MB));
     printf("Target device: %s\n", self->device.topic);
     int32_t rc = jsdrv_open(self->context, self->device.topic,
                             JSDRV_DEVICE_OPEN_MODE_RESUME,
@@ -366,7 +374,10 @@ static int on_cal_offset(struct app_s * self, int argc, char * argv[],
     char * device_filter = NULL;
     while (argc) {
         if (0 == strcmp(argv[0], "--samples") && argc >= 2) {
-            samples_per_point = (uint32_t) strtoul(argv[1], NULL, 0);
+            if (jsdrv_cstr_to_u32(argv[1], &samples_per_point)) {
+                printf("Invalid value: %s\n", argv[1]);
+                return usage();
+            }
             ARG_CONSUME();
             ARG_CONSUME();
         } else if (argv[0][0] == '-') {

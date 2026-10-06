@@ -14,12 +14,12 @@
 
 """Handle device programming for firmware and gateware.
 
-For finer control on updating, use the jsdrv_util application.  For example:
+For finer control on updating, use the jsdrv application.  For example:
 
-jsdrv_util reset update1 && jsdrv_util mem_erase c/upd2 && jsdrv_util mem_write c/upd2 "C:/joulescope/js220/images/ctrl_release/updater2/js220_ctrl_updater2_1_0_1.img" && jsdrv_util reset update2
-jsdrv_util reset update2 && jsdrv_util mem_erase c/upd1 && jsdrv_util mem_write c/upd1 "C:/joulescope/js220/images/ctrl_release/updater1/js220_ctrl_updater1_1_0_1.img" && jsdrv_util reset update1
-jsdrv_util reset update1 && jsdrv_util mem_erase c/app && jsdrv_util mem_write c/app "C:/joulescope/js220/images/ctrl_release/app/js220_ctrl_app_1_0_1.img" && jsdrv_util reset app
-jsdrv_util reset update1 && jsdrv_util mem_erase s/app1 && jsdrv_util mem_write s/app1 "C:/joulescope/js220/images/fpga_release/js220_fpga_1_0_1.img" && jsdrv_util reset app
+jsdrv reset update1 && jsdrv mem_erase c/upd2 && jsdrv mem_write c/upd2 "C:/joulescope/js220/images/ctrl_release/updater2/js220_ctrl_updater2_1_0_1.img" && jsdrv reset update2
+jsdrv reset update2 && jsdrv mem_erase c/upd1 && jsdrv mem_write c/upd1 "C:/joulescope/js220/images/ctrl_release/updater1/js220_ctrl_updater1_1_0_1.img" && jsdrv reset update1
+jsdrv reset update1 && jsdrv mem_erase c/app && jsdrv mem_write c/app "C:/joulescope/js220/images/ctrl_release/app/js220_ctrl_app_1_0_1.img" && jsdrv reset app
+jsdrv reset update1 && jsdrv mem_erase s/app1 && jsdrv mem_write s/app1 "C:/joulescope/js220/images/fpga_release/js220_fpga_1_0_1.img" && jsdrv reset app
 """
 
 import json

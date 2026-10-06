@@ -100,31 +100,48 @@ int32_t app_scan(struct app_s * self) {
     return jsdrv_query(self->context, JSDRV_MSG_DEVICE_LIST, &devices_value, 0);
 }
 
-int32_t app_match(struct app_s * self, const char * filter) {
+int32_t app_match_ex(struct app_s * self, const char * filter, uint32_t flags) {
+    char device[JSDRV_TOPIC_LENGTH_MAX];
     jsdrv_topic_clear(&self->device);
+    bool is_explicit = (flags & APP_MATCH_EXPLICIT) != 0;
+    if (is_explicit && (!filter || !filter[0])) {
+        printf("This command requires a device filter, such as u/js320/<serial>\n");
+        return 1;
+    }
     ROE(app_scan(self));
     if (0 == self->devices[0]) {
         printf("No devices found\n");
         return 1;
     }
 
-    char * d = &self->devices[0];
-    size_t sz = strlen(d);
-    for (size_t i = 0; i <= sz; ++i) {
-        if (self->devices[i] == ',') {
-            self->devices[i] = 0;
-        }
-        if (self->devices[i] == 0) {
-            if (device_match(d, filter)) {
-                jsdrv_topic_set(&self->device, d);
-                return 0;
-            }
-            d = &self->devices[i + 1];
-        }
+    uint32_t count = device_match_list(self->devices, filter, device, sizeof(device));
+    if (0 == count) {
+        printf("No matching device found\n");
+        return 1;
     }
+    if (is_explicit && (count > 1)) {
+        printf("Device filter \"%s\" matches %u devices: %s\n", filter, count, self->devices);
+        return 1;
+    }
+    if ((flags & APP_MATCH_MB) && (device_is_model(device, "js110") || device_is_model(device, "js220"))) {
+        printf("Device %s does not support this command\n", device);
+        return 1;
+    }
+    jsdrv_topic_set(&self->device, device);
+    return 0;
+}
 
-    printf("No matching device found\n");
-    return 1;
+int32_t app_match(struct app_s * self, const char * filter) {
+    return app_match_ex(self, filter, 0);
+}
+
+int32_t app_power_target_check(const char * power_device, const char * target_filter) {
+    if (power_device && power_device[0] && device_match(power_device, target_filter)) {
+        printf("The target filter \"%s\" matches the power device %s\n",
+               target_filter ? target_filter : "", power_device);
+        return 1;
+    }
+    return 0;
 }
 
 const struct command_s COMMANDS[] = {
@@ -185,7 +202,6 @@ struct log_level_convert_s {
 const struct log_level_convert_s LOG_LEVEL_CONVERT[] = {
     {"off", JSDRV_LOG_LEVEL_OFF},
     {"emergency", JSDRV_LOG_LEVEL_EMERGENCY},
-    {"e", JSDRV_LOG_LEVEL_EMERGENCY},
     {"alert", JSDRV_LOG_LEVEL_ALERT},
     {"a", JSDRV_LOG_LEVEL_ALERT},
     {"critical", JSDRV_LOG_LEVEL_CRITICAL},
@@ -239,12 +255,20 @@ int main(int argc, char * argv[]) {
     if ((jsdrv_cstr_casecmp("--log-level", argv[0]) == 0) || (jsdrv_cstr_casecmp("--log_level", argv[0]) == 0)) {
         ARG_CONSUME();
         int8_t level = JSDRV_LOG_LEVEL_ERROR;
+        if (argc < 1) {
+            printf("Missing log level\n");
+            return usage();
+        }
         if (log_level_cvt(argv[0], &level)) {
             printf("Invalid log level: %s\n", argv[0]);
             return usage();
         }
         ARG_CONSUME();
         jsdrv_log_level_set(level);
+    }
+    if (argc < 1) {
+        printf("Missing command\n");
+        return usage();
     }
 
     ROE(app_initialize(self));

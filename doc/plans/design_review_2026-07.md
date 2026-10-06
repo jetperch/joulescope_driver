@@ -179,12 +179,12 @@ emulated device proposal in `emulated_device.md`.
       C `RESUME` / Python `'restore'` / Node doc `resume`.
 - [x] P3.4 `program.py:89-98` — busy-spin loop without sleep; `:17-22`
       docstring references removed `jsdrv_util` binary.
-- [ ] P4.1 `node_api/src/joulescope_driver.cc:274-289` —
+- [x] P4.1 `node_api/src/joulescope_driver.cc:274-289` —
       `buffer_info_to_js`, `buffer_rsp_to_js`, default `bin_to_js` all
-      `return env.Undefined(); // todo`.
-- [ ] P4.2 `.github/workflows/packaging.yml` build_node_js — `npm test`
+      `return env.Undefined(); // todo`.  Done in `9c1d933`.
+- [x] P4.2 `.github/workflows/packaging.yml` build_node_js — `npm test`
       never run; `node_api/test/test_binding.js` misuses async
-      `assert.doesNotThrow`.
+      `assert.doesNotThrow`.  Done in `9c1d933`.
 - [x] P7.1 `dbc_test` and `boot_info_test` now registered with ctest.
 
 ### Docs (Phase 7)

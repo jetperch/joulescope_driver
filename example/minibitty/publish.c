@@ -15,6 +15,7 @@
  */
 
 #include "minibitty_exe_prv.h"
+#include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv/topic.h"
 #include <stdio.h>
@@ -59,7 +60,11 @@ int on_publish_cmd(struct app_s * self, int argc, char * argv[]) {
         return usage();
     }
 
-    uint32_t value = (uint32_t) strtoul(pos_args[2], NULL, 0);
+    uint32_t value = 0;
+    if (jsdrv_cstr_to_u32(pos_args[2], &value)) {
+        printf("Invalid value: %s\n", pos_args[2]);
+        return usage();
+    }
     struct jsdrv_union_s v;
     if (0 == strcmp(type_str, "u8")) {
         v = jsdrv_union_u8((uint8_t) value);

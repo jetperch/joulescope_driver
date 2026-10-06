@@ -257,7 +257,13 @@ static int setup(struct app_s * self) {
     mem_.semaphore = jsdrv_os_sem_alloc(0, PIPELINE_MAX);
     mem_.pipeline_depth = 1;
 
-    ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
+    // Callers skip teardown() when setup() fails, so free here.
+    int32_t rc = jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT);
+    if (rc) {
+        jsdrv_os_sem_free(mem_.semaphore);
+        mem_.semaphore = NULL;
+        return rc;
+    }
     jsdrv_thread_sleep_ms(500);
 
     jsdrv_topic_set(&topic, self->device.topic);
@@ -496,6 +502,8 @@ static int usage(void) {
         "  read <offset> <size> [--out f]    Read (hex dump or file output)\n"
         "  verify <offset> <file>            Read and compare against file\n"
         "\n"
+        "erase and write require a device_filter that matches exactly one device.\n"
+        "\n"
         "Examples:\n"
         "  minibitty mem s/flash/!cmd 0 erase 0x140000 0x20000\n"
         "  minibitty mem s/flash/!cmd 0 write 0x140000 meta.bin\n"
@@ -559,7 +567,7 @@ int on_mem(struct app_s * self, int argc, char * argv[]) {
         if (parse_u32(argv[0], &size)) { printf("invalid size: %s\n", argv[0]); return usage(); }
         ARG_CONSUME();
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT));
         rc = setup(self);
         if (rc) return rc;
         snprintf(mem_.cmd_topic, sizeof(mem_.cmd_topic), "%s", cmd_topic);
@@ -580,7 +588,7 @@ int on_mem(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
         }
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB | APP_MATCH_EXPLICIT));
         rc = setup(self);
         if (rc) return rc;
         snprintf(mem_.cmd_topic, sizeof(mem_.cmd_topic), "%s", cmd_topic);
@@ -603,7 +611,7 @@ int on_mem(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
         }
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB));
         rc = setup(self);
         if (rc) return rc;
         snprintf(mem_.cmd_topic, sizeof(mem_.cmd_topic), "%s", cmd_topic);
@@ -619,7 +627,7 @@ int on_mem(struct app_s * self, int argc, char * argv[]) {
         const char * path = argv[0];
         ARG_CONSUME();
         if (argc > 0) { device_filter = argv[0]; ARG_CONSUME(); }
-        ROE(app_match(self, device_filter));
+        ROE(app_match_ex(self, device_filter, APP_MATCH_MB));
         rc = setup(self);
         if (rc) return rc;
         snprintf(mem_.cmd_topic, sizeof(mem_.cmd_topic), "%s", cmd_topic);
