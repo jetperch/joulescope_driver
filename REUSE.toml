@@ -1,0 +1,89 @@
+version = 1
+
+# Files that cannot carry an inline comment header (binary, JSON, generated
+# test fixtures, HTML templates) are annotated here.  Vendored third-party
+# sources are also annotated here rather than edited, so they stay
+# byte-identical to the upstream source (clean provenance / re-vendoring).
+# When several annotations match a path, the last one wins.
+
+# Jetperch files without a comment syntax, or that must stay unmodified.
+[[annotations]]
+path = [
+    "credits.html",
+    "doc/architecture.svg",
+    "doc/doxygen/footer.html",
+    "doc/doxygen/header.html",
+    "doc/js220.txt",
+    "doc/sphinx/_static/**",
+    "joulescope_driver.cppcheck",
+    "node_api/package.json",
+    "node_api/package-lock.json",
+    "pyjoulescope_driver/host_params.json",
+    "pyjoulescope_driver/test/release/**",
+    "test/devices/js110/js110_cal_01.dat",
+]
+SPDX-FileCopyrightText = "Copyright 2014-2026 Jetperch LLC"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Tracy Profiler fork (v0.13.1), BSD-3-Clause.
+[[annotations]]
+path = [
+    "example/minibitty/tracy/client/**",
+    "example/minibitty/tracy/common/**",
+    "example/minibitty/tracy/tracy.diff",
+]
+SPDX-FileCopyrightText = "Copyright (c) 2017-2025, Bartosz Taudul <wolf@nereid.pl>"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+# LZ4 as embedded in Tracy, BSD-2-Clause.
+[[annotations]]
+path = "example/minibitty/tracy/common/tracy_lz4.*"
+SPDX-FileCopyrightText = "Copyright (C) 2011-2020, Yann Collet"
+SPDX-License-Identifier = "BSD-2-Clause"
+
+# cmocka 1.1.0+, Apache-2.0.
+[[annotations]]
+path = "third-party/cmocka/**"
+SPDX-FileCopyrightText = [
+    "Copyright 2008 Google Inc.",
+    "Copyright 2014-2018 Andreas Schneider <asn@cryptomilk.org>",
+    "Copyright 2015 Jakub Hrozek <jakub.hrozek@posteo.se>",
+]
+SPDX-License-Identifier = "Apache-2.0"
+
+# cmocka's bundled CMake modules, BSD-3-Clause (COPYING-CMAKE-SCRIPTS).
+[[annotations]]
+path = "third-party/cmocka/cmake/Modules/**"
+SPDX-FileCopyrightText = "Copyright cmocka CMake module authors"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+# cmocka's doxygen theme, MIT.
+[[annotations]]
+path = "third-party/cmocka/doc/that_style/**"
+SPDX-FileCopyrightText = "Copyright (c) 2017 Jan-Lukas Wynen"
+SPDX-License-Identifier = "MIT"
+
+# libusb, LGPL-2.1-or-later.
+[[annotations]]
+path = "third-party/libusb/**"
+SPDX-FileCopyrightText = "Copyright libusb contributors (see third-party/libusb/AUTHORS)"
+SPDX-License-Identifier = "LGPL-2.1-or-later"
+
+# miniz, MIT.
+[[annotations]]
+path = ["third-party/miniz/miniz.c", "third-party/miniz/miniz.h"]
+SPDX-FileCopyrightText = [
+    "Copyright 2013-2014 RAD Game Tools and Valve Software",
+    "Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC",
+]
+SPDX-License-Identifier = "MIT"
+
+# tinyprintf, BSD-3-Clause.
+[[annotations]]
+path = [
+    "third-party/tinyprintf/tinyprintf.c",
+    "third-party/tinyprintf/tinyprintf.h",
+    "third-party/tinyprintf/tinyprintf_LICENSE.BSD-new",
+]
+SPDX-FileCopyrightText = "Copyright (c) 2004,2012 Kustaa Nyholm / SpareTimeLabs"
+SPDX-License-Identifier = "BSD-3-Clause"

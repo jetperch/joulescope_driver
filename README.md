@@ -1,5 +1,6 @@
 <!--
-# Copyright 2014-2026 Jetperch LLC
+# SPDX-FileCopyrightText: Copyright 2014-2026 Jetperch LLC
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -138,3 +139,30 @@ Depending upon your system configuration, you may need to replace
 
 On Windows, you may be prompted to install the 
 [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+
+
+## License
+
+The Joulescope driver source code is licensed under the
+[Apache-2.0 license](LICENSES/Apache-2.0.txt).
+The project is free for commercial and non-commercial use.
+The bundled [third-party](third-party/README.md) libraries are provided
+under their respective licenses, as recorded in [REUSE.toml](REUSE.toml).
+
+The project is compliant with
+[Reuse Software](https://reuse.software/).
+
+```
+python -m pip install reuse[charset-normalizer]
+python -m reuse lint
+```
+
+The reuse tool can generate a software bill of materials (SBOM)
+in [SPDX format](https://spdx.dev/).
+
+```
+python -m reuse spdx
+```
+
+Each GitHub release includes this SPDX SBOM as the
+`joulescope_driver-vX.Y.Z.spdx` asset.
