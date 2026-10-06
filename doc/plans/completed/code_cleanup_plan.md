@@ -1,5 +1,11 @@
 # Design Review: Race Conditions & Memory Management
 
+**Archived (2026-10-06)**: ISSUES 1, 2, 3 and 7 are fixed, and ISSUE 6 is
+not a bug.  The open items (ISSUE 4 for libusb only, ISSUE 5, pool
+high-water marks, preallocation, reference counting) moved to
+`../open_issues.md` section 3.  WinUSB ISSUE 4 is fixed: its remove is
+under the lock.
+
 ## Status (2026-04-15)
 
 ISSUES 1, 2, and 3 were fixed in commit `a5b111c` ("Fix use-after-free

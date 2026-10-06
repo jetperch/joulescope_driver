@@ -536,7 +536,7 @@ static void test_mem_closed(void ** state) {
     assert_mem_idle(d);
 }
 
-// --- Host-side parameter tests (design_review_2026-07.md P2) ---
+// --- Host-side parameter tests ---
 
 static void connect_in(struct dev_s * d, uint32_t fw_version, uint32_t fpga_version) {
     uint8_t buf[sizeof(struct js220_port0_header_s) + sizeof(struct js220_port0_connect_s)];

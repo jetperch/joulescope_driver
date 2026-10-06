@@ -1,6 +1,7 @@
 # Dead public API audit: declared but unimplemented surfaces
 
-**Status**: proposed (deferred by design review 2026-07)
+**Status**: archived 2026-10-06.  All three items are still open; they
+moved to `../open_issues.md` section 1, "Public API".
 **Created**: 2026-07-31
 
 The 2026-07 design review (`design_review_2026-07.md`) found public API

@@ -298,6 +298,35 @@ LEDs steady), and streaming resumes on wake without user action.  If a host
 has selective suspend Disabled in its power plan, sleep still causes a
 watchdog reset; `c/comm/usbd/wd_en=0` is the manual mitigation on such hosts.
 
+## Related open items (moved from open_issues.md, 2026-10-06)
+
+Checked against the code on 2026-10-06.
+
+- [ ] Host power events on Linux and macOS.  `JSDRV_USBBK_MSG_POWER` is
+      only emitted by WinUSB (`winusb/backend.c:891`, from
+      `device_change_notifier.c`).  `libusb/backend.c` has no power
+      handling, so the mb_device SLEEP_REQ on suspend and the
+      revalidate/replay on resume (`mb_device.c`) never run off Windows.
+      Linux recovers through the bulk IN re-arm alone.  That was validated
+      with resume signaling; a reset-on-resume or a host that does not
+      suspend the bus (the two Windows cases) is untested off Windows.
+      Decide per platform whether a host power source is needed (macOS:
+      IOKit `IORegisterForSystemPower`; Linux: logind `PrepareForSleep`)
+      once the macOS validation above shows whether macOS resets on wake.
+- [ ] Bulk IN retry constants are not characterized on Windows
+      (`winusb/backend.c:60-65`, "conservative starting point") or macOS
+      (`libusb/backend.c:70-79`).  Measure during the Windows and macOS
+      validation runs above (step 6 and step 5).
+- [ ] WinUSB bulk OUT has no pipe timeout: `bulk_out_initialize` sets no
+      `PIPE_TRANSFER_TIMEOUT`, so a wedged OUT pipe blocks forever.
+      libusb uses 250 ms (`BULK_OUT_TIMEOUT_MS`).  The commented-out
+      timeout at `winusb/backend.c:390-393` is in `bulk_in_initialize`, not
+      bulk OUT.  This interacts with the S3 measurement above: today, OUT
+      writes queued while the device re-enumerates all flush when the pipe
+      returns (the CONNECT_REQ burst).  With a timeout they fail instead,
+      so the handshake replay must tolerate failed CONNECT_REQ writes.
+      Re-run the desktop S3 validation after adding it.
+
 ## Unit-testable logic
 
 The retry state machine (schedule, backoff, clear-on-complete, tear-down-on-NO_DEVICE, top-up on

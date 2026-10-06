@@ -545,7 +545,7 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
         rv = dt->device_factory(&d->device, c, &msg->payload.device);
     }
     if (rv) {
-        // The device never appears in @/list; see doc/plans/design_review_2026-07.md
+        // The device never appears in @/list; see doc/plans/open_issues.md
         // for adding a frontend diagnostic topic.
         JSDRV_LOGE("device_add(%s) failed with %d", model, rv);
         jsdrvp_msg_free(c, msg);

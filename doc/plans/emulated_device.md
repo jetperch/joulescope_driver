@@ -33,7 +33,7 @@ runtime rather than compile time:
 
 1. **Activation**: off by default.  Activate via a `jsdrv_initialize()`
    argument (giving the currently-unread `jsdrv_arg_s` its first real
-   consumer — see `dead_api_audit.md` §3), e.g.
+   consumer — see `open_issues.md` section 1), e.g.
    `{"emu", 1}` or an `emu/devices` list.
 2. **Backend layer** (`src/backend/emu.c`): implements the
    `jsdrvbk_s` contract — device add/remove on command, no OS

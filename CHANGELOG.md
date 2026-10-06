@@ -42,6 +42,26 @@ This file contains the list of changes made to the Joulescope driver.
 * Fixed jsdrv_finalize freeing the context while the frontend thread still
   runs after a join timeout.  Driver.finalize now uses the C default
   timeout instead of 1 second, and finalize twice is safe.
+* Fixed JS220 memory operations (h/mem/.../!read, !write, !erase).
+  * Fixed a buffer leak on every completed read or write.  mem_complete
+    cleared the state with the size of the wrong field, which also zeroed
+    the data pointer before it could be freed.
+  * Fixed a !write larger than 512 KB never publishing its return code,
+    so the caller waited for its timeout.  It now returns
+    JSDRV_ERROR_PARAMETER_INVALID immediately.
+  * Added js220_usb_test unit tests for memory operations and the
+    host-side parameters.
+* Cleaned up unused API surfaces.
+  * Documented the jsdrv_initialize() args parameter as reserved: pass
+    NULL.  No arguments are defined, and the driver ignores it.  The
+    signature is unchanged.
+  * Removed the unimplemented stream buffer "g/mode" topic definition and
+    the unused "s/ZZZ/..." placeholder topic macros from the private
+    buffer header.  A publish to "g/mode" still returns
+    JSDRV_ERROR_PARAMETER_INVALID.
+  * Consolidated the open review items into doc/plans/open_issues.md and
+    moved the pubsub request suffix and subscribe flag cleanup to
+    doc/plans/pubsub_api.md.
 
 
 ## 2.4.2

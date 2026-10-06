@@ -1,6 +1,13 @@
 # Design review 2026-07: incomplete and partially-complete features
 
-**Status**: in progress
+**Status**: archived 2026-10-06.  Phases 0-5 and 7 are done.  Every open
+item (Phase 6 decisions, open MEDIUM items and the LOW backlog) moved to
+`../open_issues.md`, checked against the code that day.  Also resolved
+since this file was last updated: examples now cover JS320
+(`completed/js320_fix.md`), `js220_usb.c` has unit tests
+(`completed/js220_usb_test.md`), the `src/json.c` format string is fixed,
+`a/!add`/`a/!remove` metadata is live in `buffer_params.c`, and
+`completed/tmap_fix.md` says complete.
 **Created**: 2026-07-31 (post v2.3.5 release)
 
 A full design review focused on finding incomplete or partially-complete
