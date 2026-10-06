@@ -148,14 +148,16 @@ static void test_event_burst_never_blocks_and_fully_drains(void ** state) {
     struct msg_queue_s * q = msg_queue_init();
 
     // More signals than a 64 KiB pipe holds, with no pop (and therefore
-    // no reset) in between: re-pushing the same message writes one wakeup
-    // byte per call while the queue stays non-empty.  The old blocking
-    // signal end hung here; nonblocking drops the excess, which is safe
-    // because a full pipe is already poll-readable.
+    // no reset) in between: each push writes one wakeup byte, and the test
+    // detaches the message directly (single-threaded) so it can be pushed
+    // again.  The old blocking signal end hung here; nonblocking drops the
+    // excess, which is safe because a full pipe is already poll-readable.
     msg_initialize(&m1);
     for (uint32_t i = 0; i < 70000U; ++i) {
         msg_queue_push(q, &m1);
+        jsdrv_list_remove(&m1.item);
     }
+    msg_queue_push(q, &m1);
     assert_true(event_is_signaled(q));
 
     // Popping to empty resets the event: the old single bounded read left

@@ -123,9 +123,12 @@ mini-plan first.
 
 ## 3. Threading and memory (from code_cleanup_plan.md)
 
-- [ ] ISSUE 4: `src/backend/libusb/msg_queue.c:103` removes the message
+- [x] ISSUE 4: `src/backend/libusb/msg_queue.c:103` removes the message
       from its list before taking the mutex.  WinUSB is fixed.  Replace
       with an assertion that the message is not in a list.
+      Done: `msg_queue_push` now asserts `jsdrv_list_is_empty(&msg->item)`.
+      The burst test in `msg_queue_test.c` re-pushed a queued message, so
+      it now detaches the message between pushes.
 - [ ] ISSUE 5: `volatile bool` flags with no atomics in `src/jsdrv.c:96`,
       `libusb/backend.c:185`, `js220_usb.c:286,290`,
       `js110_usb.c:476,479`, `js320_fwup_mgr.c:169-177` and

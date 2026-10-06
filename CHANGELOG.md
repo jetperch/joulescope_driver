@@ -23,7 +23,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.4.3
 
-2026 Oct 6 [in progress]
+2026 Oct 6
 
 * Added SPDX headers and REUSE.toml for REUSE compliance and SBOM generation.
   CI runs "reuse lint" and attaches the SPDX SBOM to each GitHub release.
@@ -81,6 +81,7 @@ This file contains the list of changes made to the Joulescope driver.
   * Consolidated the open review items into doc/plans/open_issues.md and
     moved the pubsub request suffix and subscribe flag cleanup to
     doc/plans/pubsub_api.md.
+* Fixed msg_queue message removal before taking mutex.
 
 
 ## 2.4.2
