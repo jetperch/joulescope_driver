@@ -791,7 +791,10 @@ cdef class Driver:
         None (default) uses the default timeout.
     """
     cdef c_jsdrv.jsdrv_context_s * _context
-    cdef object _subscribers
+    # The C library holds a borrowed pointer to each callback, so these
+    # lists hold the reference that keeps each callback alive.
+    cdef object _subscribers  # list of (topic, fn) registered with C
+    cdef object _released     # fn objects that C may still call
 
     def __init__(self, timeout=None):
         global _driver_count
@@ -801,7 +804,8 @@ cdef class Driver:
         with nogil:
             rc = c_jsdrv.jsdrv_initialize(&self._context, NULL, timeout_ms)
         _handle_rc(rc, 'jsdrv_initialize')
-        self._subscribers = set()  # (topic, fn)
+        self._subscribers = []
+        self._released = []
         if _driver_count == 0:
             c_jsdrv.jsdrv_log_initialize()
             c_jsdrv.jsdrv_log_register(_on_log_recv, NULL)
@@ -835,15 +839,24 @@ cdef class Driver:
         """Finalize the driver.
 
         :param timeout: The timeout in seconds.  None (default) uses
-            the default timeout.
+            the driver's finalize timeout, which allows time for every
+            device and backend thread to exit.
         """
         global _driver_count
         cdef c_jsdrv.jsdrv_context_s * context = self._context
-        timeout_ms = _timeout_validate(timeout)
+        if context == NULL:
+            return  # already finalized
+        self._context = NULL
+        timeout_ms = _timeout_validate(timeout, 0)  # 0 = C default
         with nogil:
             c_jsdrv.jsdrv_finalize(context, timeout_ms)
-            c_jsdrv.jsdrv_log_finalize()
         _driver_count -= 1
+        if _driver_count == 0:
+            with nogil:
+                c_jsdrv.jsdrv_log_finalize()
+        # The C library no longer calls any callback.
+        self._subscribers.clear()
+        self._released.clear()
 
     def publish(self, topic: str, value, timeout=None):
         """Publish a value to a topic.
@@ -920,6 +933,7 @@ cdef class Driver:
         cdef const uint8_t[:] topic_str = topic.encode('utf-8')
         cdef int32_t timeout_ms = _timeout_validate(timeout)
 
+        memset(&v, 0, sizeof(v))
         v.type = c_jsdrv.JSDRV_UNION_BIN
         v.size = 1024
         v.value.str = byte_str
@@ -1017,7 +1031,7 @@ cdef class Driver:
                 c_flags |= _SUBSCRIBE_FLAG_LOOKUP[f.lower()]
         else:
             c_flags = <int32_t> int(flags)
-        self._subscribers.add((topic, fn))
+        self._subscribers.append((topic, fn))
         with nogil:
             rc = c_jsdrv.jsdrv_subscribe(self._context, <char *> &topic_str[0], c_flags, _on_cmd_publish_cbk, fn_ptr, timeout_ms)
         _handle_rc(rc, 'jsdrv_subscribe', topic)
@@ -1033,11 +1047,12 @@ cdef class Driver:
         """
         cdef const uint8_t[:] topic_str = topic.encode('utf-8')
         cdef int32_t timeout_ms = _timeout_validate(timeout)
-        cdef void * fn_ptr = <void *> fn
+        targets = self._registered(fn, topic)
+        cdef void * fn_ptr = <void *> targets[0]
 
         with nogil:
             rc = c_jsdrv.jsdrv_unsubscribe(self._context, <char *> &topic_str[0], _on_cmd_publish_cbk, fn_ptr, timeout_ms)
-        self._subscribers.discard((topic, fn))
+        self._release(targets[:1], rc, timeout_ms, topic)
         _handle_rc(rc, 'jsdrv_unsubscribe', topic)
 
     def unsubscribe_all(self, fn, timeout=None):
@@ -1049,13 +1064,58 @@ cdef class Driver:
         :raise: On error.
         """
         cdef int32_t timeout_ms = _timeout_validate(timeout)
+        cdef int32_t rc = 0
+        cdef int32_t rc_target
+        cdef void * fn_ptr
 
-        with nogil:
-            rc = c_jsdrv.jsdrv_unsubscribe_all(self._context, _on_cmd_publish_cbk, <void *> fn, timeout_ms)
-        remove_list = [(t, f) for t, f in self._subscribers if f == fn]
-        for item in remove_list:
-            self._subscribers.discard(item)
+        targets = self._registered(fn)
+        for target in targets:
+            fn_ptr = <void *> target
+            with nogil:
+                rc_target = c_jsdrv.jsdrv_unsubscribe_all(self._context, _on_cmd_publish_cbk, fn_ptr, timeout_ms)
+            rc = rc or rc_target
+        self._release(targets, rc, timeout_ms)
         _handle_rc(rc, 'jsdrv_unsubscribe_all')
+
+    def _registered(self, fn, topic=None):
+        """Find the callback objects registered with C that match fn.
+
+        Python creates a new bound method object on each attribute access,
+        but C matches callbacks by pointer.  Unsubscribe must use the
+        object passed to subscribe, which is identical or equal to fn.
+
+        :param fn: The callback function.
+        :param topic: The topic to match, or None for all topics.
+        :return: The list of distinct matching objects, identical objects
+            first.  When nothing matches, the list is [fn].
+        """
+        entries = [f for t, f in self._subscribers if topic is None or t == topic]
+        targets = []
+        for f in [f for f in entries if f is fn] + [f for f in entries if f is not fn and f == fn]:
+            if not any(f is x for x in targets):
+                targets.append(f)
+        return targets if len(targets) else [fn]
+
+    def _release(self, targets, rc, timeout_ms, topic=None):
+        """Release the references held for unsubscribed callbacks.
+
+        :param targets: The callback objects passed to C unsubscribe.
+        :param rc: The C unsubscribe return code.
+        :param timeout_ms: The unsubscribe timeout.
+        :param topic: The unsubscribed topic, or None for all topics.
+        """
+        def match(t, f):
+            return (topic is None or t == topic) and any(f is x for x in targets)
+        removed = [f for t, f in self._subscribers if match(t, f)]
+        self._subscribers[:] = [(t, f) for t, f in self._subscribers if not match(t, f)]
+        if timeout_ms == 0 or rc:
+            # C has not confirmed the unsubscribe, so it may still call
+            # these callbacks.  Hold them until C confirms a later one.
+            self._released.extend(removed)
+        else:
+            # C processes commands in order, so it also completed every
+            # earlier unconfirmed unsubscribe.
+            self._released.clear()
 
     def open(self, device_prefix, mode=None, timeout=None):
         """Open an attached device.
@@ -1107,6 +1167,8 @@ cdef class Driver:
             device_prefix = device_prefix[:-1]
         topic = device_prefix + "/@/!close"
         topic_str = topic.encode('utf-8')
+        # Zero flags and app: jsdrvp_msg_free interprets app.
+        memset(&v, 0, sizeof(v))
         v.type = c_jsdrv.JSDRV_UNION_I32
         v.value.i32 = 0
         with nogil:

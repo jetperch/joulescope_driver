@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver, Record, time64
+from pyjoulescope_driver.device_filter import device_filter
 import time
 
 
@@ -33,7 +34,9 @@ def parser_config(p):
                    default='defaults',
                    help='The device open mode.  Defaults to "defaults".')
     p.add_argument('--serial_number',
-                   help='The serial number of the Joulescope for this capture.')
+                   help='The serial number of the Joulescope for this capture.  '
+                        + 'Also accepts a device path or model.  '
+                        + 'Defaults to all connected Joulescopes.')
     p.add_argument('--set',
                    default=[],
                    action='append',
@@ -58,19 +61,18 @@ def parser_config(p):
 def on_cmd(args):
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        if args.serial_number is not None:
-            device_paths = [p for p in d.device_paths() if p.lower().endswith(args.serial_number.lower())]
-        else:
-            device_paths = d.device_paths()
+        device_paths = device_filter(d.device_paths(), args.serial_number)
         if len(device_paths) == 0:
             print('Device not found')
-            return
+            return 1
 
+        opened = []
         try:
             for device_path in device_paths:
                 if args.verbose:
                     print(f'Open device: {device_path}')
                 d.open(device_path, mode=args.open)
+                opened.append(device_path)
                 try:  # configure the device
                     fs = args.frequency
                     if fs is None:
@@ -95,6 +97,12 @@ def on_cmd(args):
                     topic, value = set_cmd.split('=')
                     d.publish(f'{device_path}/{topic}', value)
 
+                # The JS220 and JS320 firmware default for s/i/range/mode is 0 = off.
+                is_js220_or_js320 = 'js220' in device_path or 'js320' in device_path
+                if is_js220_or_js320 and d.query(f'{device_path}/s/i/range/mode') == 0:
+                    print(f'WARNING: {device_path} current range is off, so current will be 0.  '
+                          + 'Use "--open defaults" or "--set s/i/range/mode=auto".')
+
             wr = Record(d, device_paths, args.signals)
             if args.verbose:
                 print(f'Record to file: {args.filename}')
@@ -115,7 +123,7 @@ def on_cmd(args):
             finally:
                 wr.close()
         finally:
-            for device_path in device_paths:
+            for device_path in opened:
                 if args.verbose:
                     print(f'Close device: {device_path}')
                 d.close(device_path)

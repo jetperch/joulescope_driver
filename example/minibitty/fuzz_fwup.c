@@ -27,6 +27,7 @@
  */
 
 #include "minibitty_exe_prv.h"
+#include "device_match.h"
 #include "mb/stdmsg.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/os_atomic.h"
@@ -391,7 +392,7 @@ static void on_device_add(void * user_data, const char * topic,
     (void) user_data;
     (void) topic;
     const char * p = device_prefix(value);
-    if (p && target_prefix_ && jsdrv_cstr_starts_with(p, target_prefix_)) {
+    if (p && target_prefix_ && device_match(p, target_prefix_)) {
         target_present_ = true;
     }
 }
@@ -401,7 +402,7 @@ static void on_device_remove(void * user_data, const char * topic,
     (void) user_data;
     (void) topic;
     const char * p = device_prefix(value);
-    if (p && target_prefix_ && jsdrv_cstr_starts_with(p, target_prefix_)) {
+    if (p && target_prefix_ && device_match(p, target_prefix_)) {
         target_present_ = false;
     }
 }

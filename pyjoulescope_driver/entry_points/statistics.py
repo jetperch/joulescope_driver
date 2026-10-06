@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver, time64
+from pyjoulescope_driver.device_filter import device_filter
 import sys
 import time
 
@@ -32,7 +33,9 @@ def parser_config(p):
                         + 'Add a suffix for other units: s=seconds, m=minutes, h=hours, d=days')
     p.add_argument('device_path',
                    nargs='*',
-                   help='The target device for this command.')
+                   help='The target devices for this command, '
+                        + 'each a device path, model or serial number.  '
+                        + 'Defaults to all connected Joulescopes.')
     return on_cmd
 
 
@@ -54,13 +57,15 @@ def _on_statistics_value(topic, value):
 def on_cmd(args):
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        devices = d.device_paths()
-        if len(args.device_path):
-            for device in args.device_path:
-                if device not in devices:
-                    print(f'device {device} not found')
-                    return 1
-            devices = args.device_path
+        device_paths = d.device_paths()
+        for spec in args.device_path:
+            if not device_filter(device_paths, spec):
+                print(f'device {spec} not found')
+                return 1
+        devices = device_filter(device_paths, args.device_path)
+        if not devices:
+            print('No Joulescopes found')
+            return 1
         # display the column header
         print("#device,sampled_id," +
             "i_avg,i_std,i_min,i_max," +
@@ -83,20 +88,13 @@ def on_cmd(args):
                 else:
                     # JS110 with sensor-side statistics (no standard deviation), fixed at 2 Hz
                     d.subscribe(device + '/s/sstats/value', 'pub', _on_statistics_value)
-            elif 'js220' in device:
-                # JS220, always sensor-side statistics
+            elif 'js220' in device or 'js320' in device:
+                # JS220 and JS320, always sensor-side statistics
                 d.publish(device + '/s/i/range/mode', 'auto')
                 scnt = int(round(1_000_000 / args.frequency))
                 d.publish(device + '/s/stats/scnt', scnt)
                 d.publish(device + '/s/stats/ctrl', 1)
                 d.subscribe(device + '/s/stats/value', 'pub', _on_statistics_value)
-            elif 'js320' in device:
-                # JS320, on-instrument statistics (matches example/jsdrv/statistics.c)
-                d.publish(device + '/s/i/range/mode', 5)
-                d.publish(device + '/s/stats/ctrl', 1)
-                d.subscribe(device + '/s/stats/value', 'pub', _on_statistics_value)
-            else:
-                print(f'Skip unsupported device {device}')
         try:
             t_start = time.time()
             while True:

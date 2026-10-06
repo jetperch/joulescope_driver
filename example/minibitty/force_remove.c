@@ -15,6 +15,7 @@
  */
 
 #include "minibitty_exe_prv.h"
+#include "device_match.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv/os_thread.h"
@@ -93,8 +94,7 @@ static const char * device_prefix(const struct jsdrv_union_s * value) {
 }
 
 static bool prefix_matches_target(const char * prefix) {
-    return prefix && target_device_
-        && jsdrv_cstr_starts_with(prefix, target_device_);
+    return prefix && target_device_ && device_match(prefix, target_device_);
 }
 
 static void on_device_add(void * user_data, const char * topic,

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
+from pyjoulescope_driver.device_filter import device_filter
 
 
 def parser_config(p):
@@ -34,11 +35,16 @@ def _query_gpi_value(d, device):
 def on_cmd(args):
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        for device in d.device_paths():
+        for device in device_filter(d.device_paths()):
             try:
                 d.open(device, 'restore')
-                gpi = _query_gpi_value(d, device)
-                print(f'{device}: 0x{gpi:08x}')
-                d.close(device)
             except Exception:
                 print(f'{device} unavailable')
+                continue
+            try:
+                gpi = _query_gpi_value(d, device)
+                print(f'{device}: 0x{gpi:08x}')
+            except Exception:
+                print(f'{device} unavailable')
+            finally:
+                d.close(device)

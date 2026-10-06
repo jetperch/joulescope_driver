@@ -21,6 +21,7 @@
  */
 
 #include "jsdrv_prv.h"
+#include "device_match.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv/log.h"
 #include "jsdrv/cstr.h"
@@ -109,7 +110,9 @@ int32_t app_match(struct app_s * self, const char * filter) {
             self->devices[i] = 0;
         }
         if (self->devices[i] == 0) {
-            if ((NULL == filter) || (jsdrv_cstr_starts_with(d, filter))) {
+            // Without a filter, skip non-Joulescope devices, such as u/mb/*.
+            bool match = (NULL == filter) ? device_is_joulescope(d) : device_match(d, filter);
+            if (match) {
                 jsdrv_topic_set(&self->device, d);
                 return 0;
             }

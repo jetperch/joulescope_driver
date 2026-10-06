@@ -13,6 +13,7 @@
 # limitations under the License.
 
 add_executable(jsdrv_exe
+        common/device_match.c
         jsdrv/jsdrv.c
         jsdrv/capture.c
         jsdrv/demo.c
@@ -31,11 +32,13 @@ add_executable(jsdrv_exe
         jsdrv/threads.c
         jsdrv/version.c
 )
+target_include_directories(jsdrv_exe PRIVATE common)
 add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
 add_executable(minibitty_exe
+        common/device_match.c
         minibitty/main.cpp
         minibitty/adapter.c
         minibitty/boot_info.c
@@ -67,6 +70,7 @@ add_executable(minibitty_exe
         minibitty/tracy/common/TracySocket.cpp
 )
 target_compile_features(minibitty_exe PUBLIC cxx_std_11)
+target_include_directories(minibitty_exe PRIVATE common)
 #set_target_properties(minibitty_exe PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
 add_dependencies(minibitty_exe jsdrv)
 if (WIN32)
@@ -77,6 +81,12 @@ endif()
 set_target_properties(minibitty_exe PROPERTIES OUTPUT_NAME minibitty)
 
 # Standalone unit test for the boot/personality decoders (no jsdrv dependency).
+# Standalone unit test for the device filter (no jsdrv dependency).
+add_executable(device_match_test
+        common/device_match.c
+        common/device_match_test.c
+)
+
 add_executable(boot_info_test
         minibitty/boot_info.c
         minibitty/boot_info_test.c

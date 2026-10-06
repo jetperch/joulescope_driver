@@ -53,6 +53,7 @@ add_test(dbc_test ${CMAKE_CURRENT_BINARY_DIR}/dbc_test)
 # built in example/, registered here (enable_testing scope);
 # the NAME/COMMAND form resolves the target to its executable path
 add_test(NAME boot_info_test COMMAND boot_info_test)
+add_test(NAME device_match_test COMMAND device_match_test)
 
 ADD_CMOCKA_TEST(downsample_test)
 ADD_CMOCKA_TEST(downsample_sinc_test)

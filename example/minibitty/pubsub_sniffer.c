@@ -24,7 +24,7 @@ static int sniff_usage(void) {
     printf("usage: minibitty sniff <device_filter> <topic>\n"
            "\n"
            "Subscribe to a device topic and print received values.\n"
-           "  device_filter  Device filter (e.g. \"mb\")\n"
+           "  device_filter  Device path, model or serial number (e.g. \"js320\")\n"
            "  topic          Full topic path (e.g. \"c/jtag_emulator/!log\")\n"
            "\nPress CTRL-C to exit.\n");
     return 1;

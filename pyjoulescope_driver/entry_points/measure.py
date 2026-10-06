@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver, time64
+from pyjoulescope_driver.device_filter import device_filter, device_model
 import sys
 import time
 
@@ -109,15 +110,12 @@ def measure(driver, device, duration=None, on_progress=None):
 
 def on_cmd(args):
     with Driver() as d:
-        devices = d.device_paths()
+        devices = device_filter(d.device_paths())
         if len(devices) != 1:
-            print('Found %d devices', len(devices))
+            print(f'Found {len(devices)} Joulescopes, but this command requires exactly 1')
             return 1
         device = devices[0]
-        model = device.split('/')[1]
-        if model not in ['js110', 'js220', 'js320']:
-            print(f'Unsupported device {device}')
-            return 1
+        model = device_model(device)
         d.open(device)
         d.publish(device + '/s/i/range/mode', 'auto')
         if model == 'js110':

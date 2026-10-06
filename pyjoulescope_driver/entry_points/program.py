@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
+from pyjoulescope_driver.device_filter import device_filter
 from pyjoulescope_driver.program import release_program
 from pyjoulescope_driver.program_js320 import program_js320
 from pyjoulescope_driver.release import release_get
@@ -25,7 +26,8 @@ def parser_config(p):
                    default='stable',
                    help='JS220 only: maturity target (alpha, beta, stable).')
     p.add_argument('--device-path',
-                   help='The target device for this command.')
+                   help='The target device for this command: '
+                        + 'a device path, model or serial number.')
     p.add_argument('--force-download',
                    action='store_true',
                    help='JS220 only: force release download.')
@@ -71,14 +73,13 @@ def _on_progress(fract, message):
 
 
 def _select_device_path(d, args):
-    device_paths = d.device_paths()
-    if args.device_path is not None:
-        if args.device_path not in device_paths:
-            print(f'Device {args.device_path} not found in {device_paths}')
-            return None
-        return args.device_path
+    paths = d.device_paths()
+    device_paths = device_filter(paths, args.device_path)
     if len(device_paths) == 0:
-        print('No device found')
+        if args.device_path is not None:
+            print(f'Device {args.device_path} not found in {device_filter(paths)}')
+        else:
+            print('No device found')
         return None
     if len(device_paths) > 1:
         print('Multiple devices found.  Use "--device-path" to specify the desired device from:')

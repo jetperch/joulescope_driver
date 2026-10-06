@@ -551,11 +551,73 @@ static void test_timeout(void ** state) {
 }
 #endif
 
+static volatile uint32_t log_warn_count_ = 0;
+static volatile uint32_t log_marker_count_ = 0;
+#define LOG_MARKER "frontend_test log marker"
+
 void log_recv(void * user_data, struct jsdrv_log_header_s const * header,
               const char * filename, const char * message) {
     (void) user_data;
     printf("%c %s[%d]: %s\n", jsdrv_log_level_to_char(header->level),
            filename, header->line, message);
+    if (0 == strcmp(LOG_MARKER, message)) {
+        ++log_marker_count_;
+    } else if (header->level <= JSDRV_LOG_LEVEL_WARNING) {
+        ++log_warn_count_;
+    }
+}
+
+// The log thread delivers in order, so a marker flushes earlier messages.
+static void log_flush(void) {
+    uint32_t count = log_marker_count_;
+    JSDRV_LOGI(LOG_MARKER);
+    for (int i = 0; (i < 1000) && (count == log_marker_count_); ++i) {
+        jsdrv_thread_sleep_ms(1);
+    }
+    assert_int_not_equal(count, log_marker_count_);
+}
+
+static void test_backend_fwup_topic(void ** state) {
+    SETUP();
+    assert_int_equal(0, jsdrv_subscribe(self->context, "fwup", JSDRV_SFLAG_PUB,
+                                        subscribe_cmd_fn, self, 1000));
+    log_flush();
+    log_warn_count_ = 0;
+
+    // The JS320 firmware update manager publishes fwup/... topics through
+    // the backend.  They belong to no device, so they must not warn.
+    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc_value(self->context, "fwup/@/list",
+                                                       &jsdrv_union_u32(0));
+    jsdrvp_backend_send(self->context, msg);
+    expect_subscribe_cmd(self, "fwup/@/list", &jsdrv_union_u32_r(0));
+
+    log_flush();
+    assert_int_equal(0, log_warn_count_);
+    assert_int_equal(0, jsdrv_unsubscribe(self->context, "fwup", subscribe_cmd_fn, self, 1000));
+    ASSERT_QUEUES_EMPTY(self);
+    TEARDOWN();
+}
+
+static void test_publish_scalar_ignores_app(void ** state) {
+    SETUP();
+    assert_int_equal(0, jsdrv_subscribe(self->context, "test", JSDRV_SFLAG_PUB,
+                                        subscribe_cmd_fn, self, 1000));
+
+    // Callers may leave app uninitialized for scalar values.  The
+    // pyjoulescope_driver Driver.close did, and app == BUFFER_INFO made
+    // jsdrvp_msg_free dereference the scalar as a buffer info pointer.
+    struct jsdrv_union_s v = jsdrv_union_i32(0);
+    v.value.u64 = 0x0000DEAD00000000ULL;  // invalid as a pointer
+    v.app = JSDRV_PAYLOAD_TYPE_BUFFER_INFO;
+    assert_int_equal(0, jsdrv_publish(self->context, "test/value", &v, 0));
+    v.app = JSDRV_PAYLOAD_TYPE_BUFFER_RSP;
+    assert_int_equal(0, jsdrv_publish(self->context, "test/value", &v, 0));
+    expect_subscribe_cmd(self, "test/value", NULL);
+    expect_subscribe_cmd(self, "test/value", NULL);
+
+    assert_int_equal(0, jsdrv_unsubscribe(self->context, "test", subscribe_cmd_fn, self, 1000));
+    ASSERT_QUEUES_EMPTY(self);
+    TEARDOWN();
 }
 
 int main(void) {
@@ -567,6 +629,8 @@ int main(void) {
     //setvbuf(stdout, NULL, _IONBF, 0);
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_discovery),
+            cmocka_unit_test(test_backend_fwup_topic),
+            cmocka_unit_test(test_publish_scalar_ignores_app),
             //cmocka_unit_test(test_device_open),
             //cmocka_unit_test(test_stream_raw_0),
             //cmocka_unit_test(test_timeout),

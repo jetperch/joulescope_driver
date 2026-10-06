@@ -181,7 +181,7 @@ int on_capture(struct app_s * self, int argc, char * argv[]) {
     ROE(app_match(self, NULL));
     char * device = self->device.topic;
     ROE(publish(self, device, JSDRV_MSG_OPEN, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT));
-    if (jsdrv_cstr_starts_with(device, "u/js220")) {
+    if (jsdrv_cstr_starts_with(device, "u/js220") || jsdrv_cstr_starts_with(device, "u/js320")) {
         ROE(publish(self, device, "s/i/range/mode", &jsdrv_union_cstr_r("auto"), 0));
     } else if (jsdrv_cstr_starts_with(device, "u/js110")) {
         ROE(publish(self, device, "s/i/range/select", &jsdrv_union_cstr_r("auto"), 0));

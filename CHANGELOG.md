@@ -6,6 +6,8 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.4.3
 
+2026 Oct 6 [in progress]
+
 * Added offline topic metadata for documentation.
   * Moved JS320 host-side and buffer manager metadata into declarative
     jsdrvp_param_s tables, extracted into the packaged host_params.json.
@@ -15,6 +17,31 @@ This file contains the list of changes made to the Joulescope driver.
     against a connected device.
 * Fixed pyjoulescope_driver "info" entry point to use open restore by default.
 * Fixed pyjoulescope_driver "record" entry point to support the JS320.
+  It also warns when "--open restore" leaves the JS220 or JS320 current
+  range off.
+* Fixed JS320 current reading about 0 A in pyjoulescope_driver "statistics"
+  and jsdrv "statistics" and "capture".  They now set s/i/range/mode to
+  "auto", and "statistics" now applies --frequency on the JS320.
+* Fixed four "fwup/..." device_lookup warnings logged at every startup.
+  The frontend now publishes backend fwup/ topics directly.
+* Fixed device selection to ignore non-Joulescope devices, such as a
+  MiniBitty at u/mb/{serial}.  The pyjoulescope_driver entry points, jsdrv
+  and minibitty now accept a device path, model or exact serial number.
+  "record --serial_number 1" no longer matches serial number 31.
+* Fixed an intermittent access violation (0xC0000005) when a device closes
+  from pyjoulescope_driver or joulescope.v1, on every model.
+  Driver.close left the app field of its i32 value uninitialized, and
+  jsdrvp_msg_free treated a stale app of BUFFER_INFO or BUFFER_RSP as a
+  buffer pointer.  Driver.close and Driver.query now zero the value, and
+  jsdrvp_msg_free reads app only for binary values.
+* Fixed a pyjoulescope_driver use-after-free.  Driver.unsubscribe with a
+  new bound method object, such as obj.method accessed again, left the C
+  callback subscribed to a freed object, which caused an access violation
+  on the next publish.  Driver now unsubscribes the registered object and
+  holds each callback until C confirms the unsubscribe.
+* Fixed jsdrv_finalize freeing the context while the frontend thread still
+  runs after a join timeout.  Driver.finalize now uses the C default
+  timeout instead of 1 second, and finalize twice is safe.
 
 
 ## 2.4.2
