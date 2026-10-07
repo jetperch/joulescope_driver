@@ -99,6 +99,7 @@ cdef extern from "jsdrv/union.h":
 
 
 cdef extern from "jsdrv.h":
+    int JSDRV_STATISTICS_I128_Q
 
     struct jsdrv_context_s
     ctypedef void (*jsdrv_subscribe_fn)(void * user_data, const char * topic, const jsdrv_union_s * value) nogil

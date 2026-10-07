@@ -101,10 +101,13 @@ int32_t js320_stats_convert(
     dst->energy_f64 = js220_i128_to_f64(src->p.integ, JS320_STATS_Q)
                     / decimated_freq;
 
+    // The FPGA integrates in Q52; the API uses JSDRV_STATISTICS_I128_Q.
     js220_i128 charge = js220_i128_compute_integral(
         src->i.integ, decimated_freq);
     js220_i128 energy = js220_i128_compute_integral(
         src->p.integ, decimated_freq);
+    charge = js220_i128_lshift(charge, JSDRV_STATISTICS_I128_Q - JS320_STATS_Q);
+    energy = js220_i128_lshift(energy, JSDRV_STATISTICS_I128_Q - JS320_STATS_Q);
     dst->charge_i128[0] = charge.u64[0];
     dst->charge_i128[1] = charge.u64[1];
     dst->energy_i128[0] = energy.u64[0];

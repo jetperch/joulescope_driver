@@ -14,6 +14,7 @@ path = [
     "doc/doxygen/footer.html",
     "doc/doxygen/header.html",
     "doc/js220.txt",
+    "doc/js320.json",
     "doc/sphinx/_static/**",
     "joulescope_driver.cppcheck",
     "node_api/package.json",

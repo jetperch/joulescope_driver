@@ -131,14 +131,17 @@ struct jsdrv_statistics_s * js110_stats_compute(struct js110_stats_s * self, flo
         self->valid_count = 0;
 
         uint32_t sampling_freq = s->sample_freq / s->decimate_factor;
+        // Host accumulates in Q31; the API uses JSDRV_STATISTICS_I128_Q.
         a = js220_i128_compute_integral(self->charge, sampling_freq);
+        s->charge_f64 = js220_i128_to_f64(a, 31);
+        a = js220_i128_lshift(a, JSDRV_STATISTICS_I128_Q - 31);
         s->charge_i128[0] = a.u64[0];
         s->charge_i128[1] = a.u64[1];
-        s->charge_f64 = js220_i128_to_f64(a, 31);
         a = js220_i128_compute_integral(self->energy, sampling_freq);
+        s->energy_f64 = js220_i128_to_f64(a, 31);
+        a = js220_i128_lshift(a, JSDRV_STATISTICS_I128_Q - 31);
         s->energy_i128[0] = a.u64[0];
         s->energy_i128[1] = a.u64[1];
-        s->energy_f64 = js220_i128_to_f64(a, 31);
 
         FIELD_COPY(0, i);
         FIELD_COPY(1, v);

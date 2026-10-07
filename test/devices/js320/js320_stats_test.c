@@ -169,6 +169,11 @@ static void test_constant_signal(void ** state) {
 
     double expected_energy = p_val * n / decimated_freq;
     ASSERT_DOUBLE_NEAR(expected_energy, dst.energy_f64, 1e-9);
+    // i128 accumulators use JSDRV_STATISTICS_I128_Q fractional bits
+    js220_i128 charge = {.u64 = {dst.charge_i128[0], dst.charge_i128[1]}};
+    js220_i128 energy = {.u64 = {dst.energy_i128[0], dst.energy_i128[1]}};
+    ASSERT_DOUBLE_NEAR(expected_charge, js220_i128_to_f64(charge, JSDRV_STATISTICS_I128_Q), 1e-12);
+    ASSERT_DOUBLE_NEAR(expected_energy, js220_i128_to_f64(energy, JSDRV_STATISTICS_I128_Q), 1e-12);
 }
 
 static void test_struct_size(void ** state) {

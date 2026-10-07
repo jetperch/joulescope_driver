@@ -210,11 +210,20 @@ cdef class TimeMap:
         return out
 
 
-cdef object _i128_to_int(uint64_t high, uint64_t low):
-    i = int(high) << 64
-    i |= int(low)
-    if i & 0x8000_0000_0000_0000:
-        i = ((~i) & 0xffff_ffff_ffff_ffff) - 1
+#: The scale for the statistics charge and energy int_value fields.
+_STATISTICS_I128_SCALE = 2.0 ** -c_jsdrv.JSDRV_STATISTICS_I128_Q
+
+
+def _i128_to_int(high, low):
+    """Convert a two's complement 128-bit integer to a Python int.
+
+    :param high: The most significant 64 bits as an unsigned integer.
+    :param low: The least significant 64 bits as an unsigned integer.
+    :return: The signed Python int.
+    """
+    i = (int(high) << 64) | int(low)
+    if int(high) & (1 << 63):
+        i -= 1 << 128
     return i
 
 
@@ -469,13 +478,13 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                         'charge': {
                             'value': stats[0].charge_f64,
                             'int_value': charge,
-                            'int_scale': 2 ** -31,
+                            'int_scale': _STATISTICS_I128_SCALE,
                             'units': 'C',
                         },
                         'energy': {
                             'value': stats[0].energy_f64,
                             'int_value': energy,
-                            'int_scale': 2 ** -27,
+                            'int_scale': _STATISTICS_I128_SCALE,
                             'units': 'J',
                         },
                     },

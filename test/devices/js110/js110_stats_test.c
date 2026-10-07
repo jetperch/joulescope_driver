@@ -22,6 +22,7 @@
 #include <string.h>
 #include <math.h>
 #include "jsdrv_prv/devices/js110/js110_stats.h"
+#include "jsdrv_prv/devices/js220/js220_i128.h"
 #include "jsdrv.h"
 
 
@@ -41,6 +42,12 @@ static void test_positive_signal(void ** state) {
     assert_float_equal(3.0, stats->i_max, 1e-6);
     assert_float_equal(4.0, stats->v_avg, 1e-6);
     assert_float_equal(8.0, stats->p_avg, 1e-6);
+    // i128 accumulators match the f64 fields with JSDRV_STATISTICS_I128_Q bits
+    js220_i128 charge = {.u64 = {stats->charge_i128[0], stats->charge_i128[1]}};
+    js220_i128 energy = {.u64 = {stats->energy_i128[0], stats->energy_i128[1]}};
+    assert_true(stats->charge_f64 > 0.0);
+    assert_float_equal(stats->charge_f64, js220_i128_to_f64(charge, JSDRV_STATISTICS_I128_Q), 1e-12);
+    assert_float_equal(stats->energy_f64, js220_i128_to_f64(energy, JSDRV_STATISTICS_I128_Q), 1e-12);
 }
 
 static void test_negative_signal_max(void ** state) {

@@ -1,5 +1,5 @@
 ..
-   SPDX-FileCopyrightText: Copyright 2022-2026 Jetperch LLC
+   SPDX-FileCopyrightText: Copyright 2026 Jetperch LLC
    SPDX-License-Identifier: Apache-2.0
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,32 +14,14 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 
-.. Joulescope Driver documentation master file
+.. _js320_topics:
 
+JS320 topics
+============
 
+The JS320 pubsub topic reference, generated with
+``python -m pyjoulescope_driver metadata --out doc/js320.json`` and
+verified against a device with ``metadata --diff doc/js320.json``.
 
-Table of Contents
-=================
-
-.. toctree::
-    :maxdepth: 2
-
-    readme.md
-    getting_started.md
-    streaming_topics.md
-    c_api
-    py_api
-    js220_topics
-    js320_topics
-    js320_cal.md
-    js320_fwup.md
-    changelog.md
-
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+.. literalinclude:: ../js320.json
+    :language: json

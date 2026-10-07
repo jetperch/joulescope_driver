@@ -38,6 +38,10 @@ add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
+add_executable(jsdrv_quickstart quickstart.c)
+add_dependencies(jsdrv_quickstart jsdrv)
+target_link_libraries(jsdrv_quickstart jsdrv)
+
 add_executable(minibitty_exe
         common/device_match.c
         minibitty/main.cpp

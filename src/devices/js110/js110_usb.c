@@ -654,8 +654,9 @@ static void statistics_fwd(struct js110_dev_s * d, struct js110_host_status_s co
     dst->charge_f64 = a_scale * (double) s->charge;
     dst->energy_f64 = a_scale * (double) s->energy;
 
-    js220_i128 charge = js220_i128_lshift(js220_i128_init_i64(s->charge), 4);
-    js220_i128 energy = js220_i128_lshift(js220_i128_init_i64(s->energy), 4);
+    // The instrument accumulates in Q27; the API uses JSDRV_STATISTICS_I128_Q.
+    js220_i128 charge = js220_i128_lshift(js220_i128_init_i64(s->charge), JSDRV_STATISTICS_I128_Q - 27);
+    js220_i128 energy = js220_i128_lshift(js220_i128_init_i64(s->energy), JSDRV_STATISTICS_I128_Q - 27);
 
     dst->charge_i128[0] = charge.u64[0];
     dst->charge_i128[1] = charge.u64[1];

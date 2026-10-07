@@ -39,6 +39,8 @@ with the first-generation python driver including:
 
 For more information, see:
 
+* [getting started](doc/getting_started.md) (Python and C lifecycle)
+* [streaming topics](doc/streaming_topics.md) (statistics and sample payloads)
 * [source code](https://github.com/jetperch/joulescope_driver)
 * [documentation](https://joulescope-driver.readthedocs.io/en/latest/)
 * [pypi](https://pypi.org/project/pyjoulescope-driver/)
@@ -117,6 +119,10 @@ This package includes a command-line tool, jsdrv:
     jsdrv --help
     jsdrv scan
 
+The build also produces `jsdrv_quickstart` from
+[example/quickstart.c](example/quickstart.c), the minimal C program
+described in [doc/getting_started.md](doc/getting_started.md).
+
 
 ### Build python bindings
 
@@ -124,7 +130,7 @@ Install a compatible version of Python 3.12 or later.  To install
 the pyjoulescope_driver dependencies:
 
     cd {your/repos/joulescope_driver}
-    python -m pip install -U requirements.txt
+    python -m pip install -U -r requirements.txt
 
 You should then be able to build the native bindings:
 

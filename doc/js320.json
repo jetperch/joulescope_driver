@@ -1,0 +1,1294 @@
+{
+  "h/fs": {
+    "dtype": "u32",
+    "brief": "The sampling frequency.",
+    "default": 1000000,
+    "options": [
+      [
+        1000000,
+        "1 MHz"
+      ],
+      [
+        200000,
+        "200 kHz"
+      ],
+      [
+        100000,
+        "100 kHz"
+      ],
+      [
+        50000,
+        "50 kHz"
+      ],
+      [
+        20000,
+        "20 kHz"
+      ],
+      [
+        10000,
+        "10 kHz"
+      ],
+      [
+        5000,
+        "5 kHz"
+      ],
+      [
+        2000,
+        "2 kHz"
+      ],
+      [
+        1000,
+        "1 kHz"
+      ],
+      [
+        500,
+        "500 Hz"
+      ],
+      [
+        200,
+        "200 Hz"
+      ],
+      [
+        100,
+        "100 Hz"
+      ],
+      [
+        50,
+        "50 Hz"
+      ],
+      [
+        20,
+        "20 Hz"
+      ],
+      [
+        10,
+        "10 Hz"
+      ],
+      [
+        5,
+        "5 Hz"
+      ],
+      [
+        2,
+        "2 Hz"
+      ],
+      [
+        1,
+        "1 Hz"
+      ]
+    ]
+  },
+  "h/fp": {
+    "dtype": "u32",
+    "brief": "The approximate sample publish frequency.",
+    "default": 20,
+    "options": [
+      [
+        100000,
+        "100 kHz"
+      ],
+      [
+        50000,
+        "50 kHz"
+      ],
+      [
+        20000,
+        "20 kHz"
+      ],
+      [
+        10000,
+        "10 kHz"
+      ],
+      [
+        5000,
+        "5 kHz"
+      ],
+      [
+        2000,
+        "2 kHz"
+      ],
+      [
+        1000,
+        "1 kHz"
+      ],
+      [
+        500,
+        "500 Hz"
+      ],
+      [
+        200,
+        "200 Hz"
+      ],
+      [
+        100,
+        "100 Hz"
+      ],
+      [
+        50,
+        "50 Hz"
+      ],
+      [
+        20,
+        "20 Hz"
+      ],
+      [
+        10,
+        "10 Hz"
+      ],
+      [
+        5,
+        "5 Hz"
+      ],
+      [
+        2,
+        "2 Hz"
+      ],
+      [
+        1,
+        "1 Hz"
+      ]
+    ]
+  },
+  "h/i_scale": {
+    "dtype": "f32",
+    "brief": "The current signal scale factor.",
+    "default": 1.0
+  },
+  "h/v_scale": {
+    "dtype": "f32",
+    "brief": "The voltage signal scale factor.",
+    "default": 1.0
+  },
+  "c/ts/!req": {
+    "dtype": "bin",
+    "brief": "Timesync request",
+    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_TIMESYNC_SYNC. The host receives this, populates utc_recv and utc_send, and responds to !rsp."
+  },
+  "c/ts/!map": {
+    "dtype": "bin",
+    "brief": "Timesync map announcement",
+    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_TIMESYNC_MAP containing the computed counter-to-UTC mapping."
+  },
+  "c/ts/!rsp": {
+    "dtype": "bin",
+    "brief": "Timesync response",
+    "detail": "The host responds to !req with a MB_VALUE_STDMSG containing MB_STDMSG_TIMESYNC_SYNC with utc_recv and utc_send populated."
+  },
+  "c/ts/!resync": {
+    "dtype": "u8",
+    "brief": "Force a timesync resynchronization burst."
+  },
+  "c/comm/sensor/!req": {
+    "dtype": "u8",
+    "brief": "Request to open (true) or close (false) the link interface."
+  },
+  "c/comm/sensor/state": {
+    "dtype": "u8",
+    "brief": "The link state: 0=disconnected, 1=connected.",
+    "default": 0,
+    "flags": [
+      "ro"
+    ]
+  },
+  "c/comm/sensor/tx/!stat": {
+    "dtype": "bin",
+    "brief": "The link transmit statistics."
+  },
+  "c/comm/sensor/rx/!stat": {
+    "dtype": "bin",
+    "brief": "The link receive statistics."
+  },
+  "c/comm/tpt/0/tx/cnt": {
+    "dtype": "u8",
+    "brief": "The target number of outstanding transmit frames.",
+    "detail": "0 is off or any positive number is enabled.",
+    "default": 0
+  },
+  "c/comm/tpt/0/tx/sz": {
+    "dtype": "u16",
+    "brief": "The transmit frame size in bytes.",
+    "default": 0
+  },
+  "c/comm/tpt/0/tx/task": {
+    "dtype": "u8",
+    "brief": "The target task for transmit messages.",
+    "default": 0
+  },
+  "c/comm/tpt/0/rx/!stat": {
+    "dtype": "bin",
+    "brief": "The receive statistics."
+  },
+  "c/comm/usbd/state": {
+    "dtype": "u8",
+    "brief": "The link state: 0=disconnected, 1=connected.",
+    "default": 0,
+    "flags": [
+      "ro"
+    ]
+  },
+  "c/comm/usbd/wd_en": {
+    "dtype": "u8",
+    "brief": "Comm watchdog enable. 1=normal, 0=inhibit the watchdog reset.",
+    "default": 1
+  },
+  "c/comm/usbd/tx/!stat": {
+    "dtype": "bin",
+    "brief": "The device transmit (USB IN) statistics."
+  },
+  "c/comm/usbd/rx/!stat": {
+    "dtype": "bin",
+    "brief": "The device receive (USB OUT) statistics."
+  },
+  "c/./info": {
+    "dtype": "stdmsg",
+    "brief": "PubSub instance information.",
+    "detail": "MB_STDMSG_PUBSUB_INFO with blob descriptors for memory-accessible binary data.",
+    "flags": [
+      "ro"
+    ]
+  },
+  "c/./!ping": {
+    "dtype": "bin",
+    "brief": "Ping a message, replies on !pong."
+  },
+  "c/./!pong": {
+    "dtype": "bin",
+    "brief": "Response to a ping message."
+  },
+  "c/./!err": {
+    "dtype": "stdmsg",
+    "brief": "Asynchronous error reporting."
+  },
+  "c/./!state": {
+    "dtype": "bin",
+    "brief": "A state get or set command."
+  },
+  "c/./comm/./!add": {
+    "dtype": "u8",
+    "brief": "Comm link connected.",
+    "detail": "Published by any comm task on this pubsub instance when its link transitions to CONNECTED.  Value is the publishing comm task id (u8).  Subscribers use this to drive connection-dependent behavior such as immediate timesync resync."
+  },
+  "c/./comm/./!rm": {
+    "dtype": "u8",
+    "brief": "Comm link disconnected.",
+    "detail": "Published by any comm task on this pubsub instance when its upstream link leaves CONNECTED (disconnect request, link loss, or peer restart).  Value is the publishing comm task id (u8)."
+  },
+  "c/sys/tick/en": {
+    "dtype": "bool",
+    "brief": "Enable the statistics tick",
+    "detail": "Manually disabling the tick when pwr==0 can result in unexpected system behavior.",
+    "default": 1
+  },
+  "c/sys/tick/!ev": {
+    "dtype": "u64",
+    "brief": "The statistics system tick",
+    "detail": "Modules should generate statistics using this tick. The value is the time of the system tick. This tick is automatically suppressed when pwr != 0.",
+    "default": 0
+  },
+  "c/sys/pwr": {
+    "dtype": "u8",
+    "brief": "The system power state",
+    "detail": "0 is fully on, 0x7f is normal sleep, 0xff is deepest sleep. Each specific system is free to define intermediate values.",
+    "default": 0,
+    "range": [
+      0,
+      255
+    ]
+  },
+  "c/sys/fw/slot": {
+    "dtype": "u8",
+    "brief": "The active firmware image slot reported by the bootloader.",
+    "default": 0,
+    "flags": [
+      "ro"
+    ]
+  },
+  "c/sys/fw/version": {
+    "dtype": "u32",
+    "brief": "The firmware version reported by the bootloader.",
+    "detail": "The version is formatted as major8.minor8.patch16",
+    "default": 0,
+    "format": "version",
+    "flags": [
+      "ro"
+    ]
+  },
+  "c/sys/hw/version": {
+    "dtype": "u8",
+    "brief": "The hardware board version.",
+    "detail": "The version is an integer",
+    "default": 0,
+    "flags": [
+      "ro"
+    ]
+  },
+  "c/sys/!reset": {
+    "dtype": "u8",
+    "detail": "Perform a system reset using the selected mb_chip_reset_type_e method",
+    "options": [
+      [
+        0,
+        "complete"
+      ],
+      [
+        1,
+        "bootloader"
+      ],
+      [
+        2,
+        "software"
+      ],
+      [
+        3,
+        "watchdog"
+      ]
+    ]
+  },
+  "c/sys/!cmd": {
+    "dtype": "bin",
+    "brief": "Boot and personality info command",
+    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_MEM containing a mb_stdmsg_mem_s read request. Target 1 reads the mb_boot_s structure. Target 2 reads the public mb_personality_app_s (through the app field, 76 bytes). The response is published to {origin_prefix}/!rsp."
+  },
+  "c/sys/util/!stat": {
+    "dtype": "bin",
+    "brief": "Resource utilization report",
+    "detail": "Published as a MB_STDMSG_UTILIZATION stdmsg (mb_sys_util_v1_s) once per tick when the utilization option is enabled.  Reports CPU, stack, and heap utilization as measured/total u32 pairs so the receiver performs the division."
+  },
+  "c/fw/version": {
+    "dtype": "u32",
+    "brief": "The controller firmware version.",
+    "detail": "The version is formatted as major8.minor8.patch16",
+    "default": 0,
+    "format": "version",
+    "flags": [
+      "ro"
+    ]
+  },
+  "c/hw/version": {
+    "dtype": "u8",
+    "brief": "The hardware board version.",
+    "detail": "The version is an integer",
+    "default": 0,
+    "flags": [
+      "ro"
+    ]
+  },
+  "c/mode": {
+    "dtype": "u8",
+    "brief": "Configure the operation mode.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "normal"
+      ],
+      [
+        1,
+        "fw_update"
+      ],
+      [
+        2,
+        "jtag"
+      ]
+    ]
+  },
+  "c/trigger/dir": {
+    "dtype": "bool",
+    "brief": "Enable trigger output driver.",
+    "default": 0
+  },
+  "c/trigger/filt": {
+    "dtype": "bool",
+    "brief": "Enable trigger output analog low-pass filter.",
+    "default": 0
+  },
+  "c/gpio/vref": {
+    "dtype": "u8",
+    "brief": "The GPIO Vref source.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "external"
+      ],
+      [
+        1,
+        "3v3"
+      ]
+    ]
+  },
+  "c/led/en": {
+    "dtype": "u8",
+    "brief": "Enable software control for Controller Status LED.",
+    "default": 0
+  },
+  "c/led/red": {
+    "dtype": "u8",
+    "brief": "The red LED blink pattern.",
+    "default": 0
+  },
+  "c/led/green": {
+    "dtype": "u8",
+    "brief": "The green LED blink pattern.",
+    "default": 0
+  },
+  "c/led/blue": {
+    "dtype": "u8",
+    "brief": "The blue LED blink pattern.",
+    "default": 0
+  },
+  "c/fwup/!cmd": {
+    "dtype": "bin",
+    "brief": "Firmware update command",
+    "detail": "Binary mb_stdmsg_mem_s header with optional data payload. See mb/stdmsg.h."
+  },
+  "c/jtag/!cmd": {
+    "dtype": "bin",
+    "brief": "Issue a JTAG command."
+  },
+  "c/xspi/!cmd": {
+    "dtype": "bin",
+    "brief": "XSPI flash command",
+    "detail": "Binary mb_stdmsg_mem_s header with optional data payload. See mb/stdmsg.h."
+  },
+  "s/./!err": {
+    "dtype": "stdmsg",
+    "brief": "Asynchronous error reporting."
+  },
+  "s/./info": {
+    "dtype": "stdmsg",
+    "brief": "PubSub instance information.",
+    "detail": "MB_STDMSG_PUBSUB_INFO with blob descriptors for memory-accessible binary data.",
+    "flags": [
+      "ro"
+    ]
+  },
+  "s/./!ping": {
+    "dtype": "bin",
+    "brief": "Ping a message, replies on !pong."
+  },
+  "s/./!pong": {
+    "dtype": "bin",
+    "brief": "Response to a ping message."
+  },
+  "s/./!state": {
+    "dtype": "bin",
+    "brief": "A state get or set command."
+  },
+  "s/./comm/./!add": {
+    "dtype": "u8",
+    "brief": "Comm link connected.",
+    "detail": "Published by any comm task on this pubsub instance when its link transitions to CONNECTED.  Value is the publishing comm task id (u8).  Subscribers use this to drive connection-dependent behavior such as immediate timesync resync."
+  },
+  "s/./comm/./!rm": {
+    "dtype": "u8",
+    "brief": "Comm link disconnected.",
+    "detail": "Published by any comm task on this pubsub instance when its upstream link leaves CONNECTED (disconnect request, link loss, or peer restart).  Value is the publishing comm task id (u8)."
+  },
+  "s/ts/!req": {
+    "dtype": "bin",
+    "brief": "Timesync request",
+    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_TIMESYNC_SYNC. The host receives this, populates utc_recv and utc_send, and responds to !rsp."
+  },
+  "s/ts/!map": {
+    "dtype": "bin",
+    "brief": "Timesync map announcement",
+    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_TIMESYNC_MAP containing the computed counter-to-UTC mapping."
+  },
+  "s/ts/!rsp": {
+    "dtype": "bin",
+    "brief": "Timesync response",
+    "detail": "The host responds to !req with a MB_VALUE_STDMSG containing MB_STDMSG_TIMESYNC_SYNC with utc_recv and utc_send populated."
+  },
+  "s/ts/!resync": {
+    "dtype": "u8",
+    "brief": "Force a timesync resynchronization burst."
+  },
+  "s/sys/tick/!ev": {
+    "dtype": "u64",
+    "brief": "The statistics system tick",
+    "detail": "Modules should generate statistics using this tick. The value is the time of the system tick. This tick is automatically suppressed when pwr != 0.",
+    "default": 0
+  },
+  "s/sys/tick/en": {
+    "dtype": "bool",
+    "brief": "Enable the statistics tick",
+    "detail": "Manually disabling the tick when pwr==0 can result in unexpected system behavior.",
+    "default": 1
+  },
+  "s/sys/pwr": {
+    "dtype": "u8",
+    "brief": "The system power state",
+    "detail": "0 is fully on, 0x7f is normal sleep, 0xff is deepest sleep. Each specific system is free to define intermediate values.",
+    "default": 0,
+    "range": [
+      0,
+      255
+    ]
+  },
+  "s/sys/fw/slot": {
+    "dtype": "u8",
+    "brief": "The active firmware image slot reported by the bootloader.",
+    "default": 0,
+    "flags": [
+      "ro"
+    ]
+  },
+  "s/sys/fw/version": {
+    "dtype": "u32",
+    "brief": "The firmware version reported by the bootloader.",
+    "detail": "The version is formatted as major8.minor8.patch16",
+    "default": 0,
+    "format": "version",
+    "flags": [
+      "ro"
+    ]
+  },
+  "s/sys/hw/version": {
+    "dtype": "u8",
+    "brief": "The hardware board version.",
+    "detail": "The version is an integer",
+    "default": 0,
+    "flags": [
+      "ro"
+    ]
+  },
+  "s/sys/!reset": {
+    "dtype": "u8",
+    "detail": "Perform a system reset using the selected mb_chip_reset_type_e method",
+    "options": [
+      [
+        0,
+        "complete"
+      ],
+      [
+        1,
+        "bootloader"
+      ],
+      [
+        2,
+        "software"
+      ],
+      [
+        3,
+        "watchdog"
+      ]
+    ]
+  },
+  "s/sys/!cmd": {
+    "dtype": "bin",
+    "brief": "Boot and personality info command",
+    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_MEM containing a mb_stdmsg_mem_s read request. Target 1 reads the mb_boot_s structure. Target 2 reads the public mb_personality_app_s (through the app field, 76 bytes). The response is published to {origin_prefix}/!rsp."
+  },
+  "s/sys/util/!stat": {
+    "dtype": "bin",
+    "brief": "Resource utilization report",
+    "detail": "Published as a MB_STDMSG_UTILIZATION stdmsg (mb_sys_util_v1_s) once per tick when the utilization option is enabled.  Reports CPU, stack, and heap utilization as measured/total u32 pairs so the receiver performs the division."
+  },
+  "s/fpga/version": {
+    "dtype": "u32",
+    "brief": "The FPGA version.",
+    "detail": "The version is formatted as major8.minor8.patch16",
+    "default": 0,
+    "format": "version",
+    "flags": [
+      "ro"
+    ]
+  },
+  "s/adc/0/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable ADC0 streaming.",
+    "default": 0
+  },
+  "s/adc/0/sel": {
+    "dtype": "u8",
+    "brief": "Select the ADC channel for ADC0 streaming.",
+    "default": 0
+  },
+  "s/adc/0/!data": {
+    "dtype": "bin",
+    "brief": "The ADC0 streaming data."
+  },
+  "s/adc/1/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable ADC1 streaming.",
+    "default": 0
+  },
+  "s/adc/1/sel": {
+    "dtype": "u8",
+    "brief": "Select the ADC channel for ADC1 streaming.",
+    "default": 0
+  },
+  "s/adc/1/!data": {
+    "dtype": "bin",
+    "brief": "The ADC1 streaming data."
+  },
+  "s/adc/mode": {
+    "dtype": "u8",
+    "brief": "ADC forward mode (PCTS use only).",
+    "detail": "Mode 1 decimates every ADC channel by 2 and interleaves\nch0/ch1 onto adc/0 and ch2/ch3 onto adc/1 (ignoring adc/N/sel).\nThe host deinterleaves with data[0::2] / data[1::2].",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "normal"
+      ],
+      [
+        1,
+        "pcts"
+      ]
+    ]
+  },
+  "s/adc/epoch": {
+    "dtype": "bool",
+    "brief": "ADC frame epoch tag (PCTS use only).",
+    "detail": "Toggle after advancing the calibration point.  The bit rides in\nthe ADC frame header (commit source bit 3 -> host index bit 3),\nso stale in-flight frames from the previous point carry the old\nvalue and can be discarded by the host.",
+    "default": 0
+  },
+  "s/i/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable current streaming.",
+    "default": 0
+  },
+  "s/i/range/mode": {
+    "dtype": "u8",
+    "brief": "Select the current range mode.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "off",
+        "1",
+        "2",
+        "3"
+      ],
+      [
+        4,
+        "auto"
+      ],
+      [
+        5,
+        "manual"
+      ],
+      [
+        6,
+        "test_dir"
+      ],
+      [
+        7,
+        "test_seq"
+      ]
+    ]
+  },
+  "s/i/range/mb4b": {
+    "dtype": "u32",
+    "brief": "Make-before-break MOSFET counter value.",
+    "default": 15
+  },
+  "s/i/range/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable current range streaming.",
+    "default": 0
+  },
+  "s/i/range/src": {
+    "dtype": "u32",
+    "brief": "The source for the current range streaming channel.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "current range",
+        "i range"
+      ],
+      [
+        1,
+        "voltage range",
+        "v range"
+      ],
+      [
+        2,
+        "ovr[3:0]"
+      ],
+      [
+        3,
+        "ovr[7:4]"
+      ],
+      [
+        4,
+        "gpio_in (gpi[3:0])"
+      ],
+      [
+        5,
+        "{trigger_in, trigger_out_w, gpio_out_w}"
+      ]
+    ]
+  },
+  "s/i/range/select": {
+    "dtype": "u32",
+    "brief": "The current range manual shunt resistor selection.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "off"
+      ],
+      [
+        129,
+        "10 A"
+      ],
+      [
+        130,
+        "180 mA"
+      ],
+      [
+        132,
+        "18 mA"
+      ],
+      [
+        136,
+        "1.8 mA"
+      ],
+      [
+        144,
+        "180 \u00b5A",
+        "180 uA"
+      ],
+      [
+        160,
+        "18 \u00b5A",
+        "18 uA"
+      ]
+    ]
+  },
+  "s/i/range/min": {
+    "dtype": "u8",
+    "brief": "The least sensitive current range for autoranging",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "10 A"
+      ],
+      [
+        1,
+        "180 mA"
+      ],
+      [
+        2,
+        "18 mA"
+      ],
+      [
+        3,
+        "1.8 mA"
+      ],
+      [
+        4,
+        "180 \u00b5A",
+        "180 uA"
+      ],
+      [
+        5,
+        "18 \u00b5A",
+        "18 uA"
+      ]
+    ]
+  },
+  "s/i/range/max": {
+    "dtype": "u8",
+    "brief": "The most sensitive current range for autoranging",
+    "default": 5,
+    "options": [
+      [
+        0,
+        "10 A"
+      ],
+      [
+        1,
+        "180 mA"
+      ],
+      [
+        2,
+        "18 mA"
+      ],
+      [
+        3,
+        "1.8 mA"
+      ],
+      [
+        4,
+        "180 \u00b5A",
+        "180 uA"
+      ],
+      [
+        5,
+        "18 \u00b5A",
+        "18 uA"
+      ]
+    ]
+  },
+  "s/i/range/predict": {
+    "dtype": "u8",
+    "brief": "Overflow-predict current range (0 = off).",
+    "detail": "On overflow, the autoranger first hops to this range (when it is\nbelow the active range and ADC1 is parked and settled there)\nbefore falling through to i/range/min if the current still\noverflows.  0 disables prediction: overflow snaps straight to\ni/range/min.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "10 A",
+        "off"
+      ],
+      [
+        1,
+        "180 mA"
+      ],
+      [
+        2,
+        "18 mA"
+      ],
+      [
+        3,
+        "1.8 mA"
+      ],
+      [
+        4,
+        "180 \u00b5A",
+        "180 uA"
+      ],
+      [
+        5,
+        "18 \u00b5A",
+        "18 uA"
+      ]
+    ]
+  },
+  "s/i/i0_sel": {
+    "dtype": "u8",
+    "brief": "The manual shunt resistor selection for ADC0.",
+    "default": 0
+  },
+  "s/i/i1_sel": {
+    "dtype": "u8",
+    "brief": "The manual shunt resistor selection for ADC1.",
+    "default": 5
+  },
+  "s/i/i2_sel": {
+    "dtype": "u8",
+    "brief": "The manual shunt resistor selection for ADC2.",
+    "default": 5
+  },
+  "s/i/order": {
+    "dtype": "u8",
+    "brief": "The priority order for which ADC input to use.",
+    "default": 5,
+    "options": [
+      [
+        0,
+        "012",
+        "adc0"
+      ],
+      [
+        1,
+        "021"
+      ],
+      [
+        2,
+        "102",
+        "adc1"
+      ],
+      [
+        3,
+        "120"
+      ],
+      [
+        4,
+        "201",
+        "adc2"
+      ],
+      [
+        5,
+        "210"
+      ]
+    ]
+  },
+  "s/v/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable voltage streaming.",
+    "default": 0
+  },
+  "s/v/range/mode": {
+    "dtype": "u8",
+    "brief": "Select the voltage range mode.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "auto"
+      ],
+      [
+        1,
+        "manual"
+      ]
+    ]
+  },
+  "s/v/range/select": {
+    "dtype": "u32",
+    "brief": "The voltage source selection.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "15 V"
+      ],
+      [
+        1,
+        "2 V"
+      ],
+      [
+        2,
+        "+16 V rail"
+      ],
+      [
+        3,
+        "-16 V rail"
+      ]
+    ]
+  },
+  "s/p/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable power streaming.",
+    "default": 0
+  },
+  "s/stats/scnt": {
+    "dtype": "u32",
+    "brief": "Number of 1 Msps samples per block.",
+    "default": 500000,
+    "range": [
+      0,
+      10000000
+    ]
+  },
+  "s/stats/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable stats input data stream messages.",
+    "default": 0
+  },
+  "s/stats/!clear": {
+    "dtype": "bool",
+    "brief": "Clear statistics."
+  },
+  "s/gpi/0/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable general purpose input 0 data stream",
+    "default": 0
+  },
+  "s/gpi/1/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable general purpose input 1 data stream",
+    "default": 0
+  },
+  "s/gpi/2/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable general purpose input 2 data stream",
+    "default": 0
+  },
+  "s/gpi/3/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable general purpose input 3 data stream",
+    "default": 0
+  },
+  "s/gpi/7/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable trigger input data stream",
+    "default": 0
+  },
+  "s/gpi/+/dwnN/mode": {
+    "dtype": "u32",
+    "brief": "The general purpose inputs and trigger downsampling mode",
+    "default": 2,
+    "options": [
+      [
+        0,
+        "off"
+      ],
+      [
+        1,
+        "toggle"
+      ],
+      [
+        2,
+        "first"
+      ],
+      [
+        3,
+        "majority"
+      ]
+    ]
+  },
+  "s/gpi/+/dwnN/N": {
+    "dtype": "u32",
+    "brief": "The general purpose inputs and trigger downsample factor 0 - 16383",
+    "default": 16
+  },
+  "s/gpi/+/dwnN/!ack": {
+    "dtype": "u64",
+    "brief": "Acknowledge gpi/+/dwnN/{mode,N} applied.  Value is the 16 MHz sample_id at which the new GPI decimation takes effect.",
+    "default": 0
+  },
+  "s/gpi/+/!req": {
+    "dtype": "bool",
+    "brief": "Request the general-purpose input value.",
+    "default": 0
+  },
+  "s/gpi/+/!value": {
+    "dtype": "u32",
+    "brief": "The requested general-purpose input values.",
+    "default": 0
+  },
+  "s/gpi/src": {
+    "dtype": "u8",
+    "brief": "Source for the GPI streaming bus (diagnostic).",
+    "detail": "Selects what feeds the gpi_decimate path. Mode 0 is the normal hardware GPI bus; modes 1 and 2 route internal ovr bits for autorange diagnostics.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "normal"
+      ],
+      [
+        1,
+        "ovr_lo"
+      ],
+      [
+        2,
+        "ovr_hi"
+      ]
+    ]
+  },
+  "s/gpo/0/src": {
+    "dtype": "u8",
+    "brief": "Source byte for gpo[0] (8-bit {N[3:0], rsv, src[2:0]}).",
+    "detail": "[2:0] = source code\n0  register   (drives the *_reg input from regfile)\n1  pps        (future, drives 0)\n2  uart       (future, drives 0)\n3  analog PCM (dsm_out from the shared analog_out instance)\n4  trigger N  (future, drives 0)\n5  overflow N (ovr[N])\n6  select N   (select[N])\n7  reserved   (drives 0)\n[7:4] N: 4-bit channel index for sources 4-6.",
+    "default": 0
+  },
+  "s/gpo/1/src": {
+    "dtype": "u8",
+    "brief": "Source byte for gpo[1] (8-bit {N[3:0], rsv, src[2:0]}).",
+    "detail": "See gpo/0/src for usage.",
+    "default": 0
+  },
+  "s/gpo/7/src": {
+    "dtype": "u8",
+    "brief": "Source byte for trigger_out (8-bit {N[3:0], rsv, src[2:0]}).",
+    "detail": "See gpo/0/src for usage.",
+    "default": 0
+  },
+  "s/gpo/+/!value": {
+    "dtype": "u32",
+    "brief": "Force the GPO register bits (8-bit, used when the corresponding gpo/N/src is 0).",
+    "default": 0
+  },
+  "s/gpo/+/!set": {
+    "dtype": "u32",
+    "brief": "Set the indicated GPO register bits (only bits [7] trigger_out and [1:0] gpo).",
+    "default": 0
+  },
+  "s/gpo/+/!clr": {
+    "dtype": "u32",
+    "brief": "Clear the indicated GPO register bits (only bits [7] trigger_out and [1:0] gpo).",
+    "default": 0
+  },
+  "s/gpo/+/!req": {
+    "dtype": "u8",
+    "brief": "GPO read-back request; 0=gpo_val register, 1=post-mux output (gpo_status). Result on gpo/+/!raw.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "register"
+      ],
+      [
+        1,
+        "output"
+      ]
+    ]
+  },
+  "s/gpo/+/!raw": {
+    "dtype": "u32",
+    "brief": "Most recent gpo read-back result.",
+    "default": 0
+  },
+  "s/aout/value": {
+    "dtype": "u32",
+    "brief": "Manual 16-bit signed value driven to the PCM when src=4.",
+    "default": 0
+  },
+  "s/aout/src": {
+    "dtype": "u8",
+    "brief": "Analog-out source selector (3 bits).",
+    "default": 4,
+    "options": [
+      [
+        0,
+        "sample_id"
+      ],
+      [
+        1,
+        "current"
+      ],
+      [
+        2,
+        "voltage"
+      ],
+      [
+        3,
+        "power"
+      ],
+      [
+        4,
+        "register"
+      ]
+    ]
+  },
+  "s/aout/shift": {
+    "dtype": "u8",
+    "brief": "Left-shift count applied to the 48-bit latch (0..32).",
+    "default": 0
+  },
+  "s/aout/!req": {
+    "dtype": "bool",
+    "brief": "Read back the actual analog_out FPGA register; result on aout/!raw."
+  },
+  "s/aout/!raw": {
+    "dtype": "u32",
+    "brief": "Most recent analog_out FPGA register raw u32 reading.",
+    "default": 0
+  },
+  "s/dwnN/N": {
+    "dtype": "u32",
+    "brief": "The downsampling factor 0 - 1027 for i, v, p from 1 Msps",
+    "detail": "Downsampling factors 0, 1 are passthrough.  2, 3 promote to 4.  Values 4-1000 perform downsampling.",
+    "default": 0
+  },
+  "s/dwnN/mode": {
+    "dtype": "u32",
+    "brief": "The downsampling filter for i, v, p",
+    "detail": "The sincN CIC order.  bypass passes through regardless of N.  The first order-1 outputs after a change are settling transients (0 for sinc1, 1 for sinc2, 2 for sinc3).",
+    "default": 1,
+    "options": [
+      [
+        0,
+        "bypass"
+      ],
+      [
+        1,
+        "sinc1"
+      ],
+      [
+        2,
+        "sinc2"
+      ],
+      [
+        3,
+        "sinc3"
+      ]
+    ]
+  },
+  "s/dwnN/!ack": {
+    "dtype": "u64",
+    "brief": "Acknowledge dwnN/{N,mode} applied.  Value is the 16 MHz sample_id at which the new decimation takes effect.",
+    "default": 0
+  },
+  "s/fuse/0/F": {
+    "dtype": "u32",
+    "brief": "Fuse accumulation constant 4q14.",
+    "default": 0
+  },
+  "s/fuse/0/K": {
+    "dtype": "u32",
+    "brief": "Fuse dissipation constant 8q10.",
+    "default": 0
+  },
+  "s/fuse/0/en": {
+    "dtype": "bool",
+    "brief": "Enable/disable the fuse.",
+    "default": 0
+  },
+  "s/fuse/0/engaged": {
+    "dtype": "bool",
+    "brief": "Set to 1 when engaged, publish 0 to clear.",
+    "default": 0
+  },
+  "s/fuse/1/F": {
+    "dtype": "u32",
+    "brief": "Fuse accumulation constant 4q14.",
+    "default": 0
+  },
+  "s/fuse/1/K": {
+    "dtype": "u32",
+    "brief": "Fuse dissipation constant 8q10.",
+    "default": 0
+  },
+  "s/fuse/1/en": {
+    "dtype": "bool",
+    "brief": "Enable/disable the fuse.",
+    "default": 0
+  },
+  "s/fuse/1/engaged": {
+    "dtype": "bool",
+    "brief": "Set to 1 when engaged, publish 0 to clear.",
+    "default": 0
+  },
+  "s/fuse/30/en": {
+    "dtype": "bool",
+    "brief": "Enable/disable the global per-channel fuse.  DISABLE AT YOUR OWN RISK.",
+    "default": 1
+  },
+  "s/fuse/30/engaged": {
+    "dtype": "bool",
+    "brief": "Set to 1 when engaged, publish 0 to clear.",
+    "default": 0
+  },
+  "s/fuse/31/en": {
+    "dtype": "bool",
+    "brief": "Enable/disable the global max fuse.  DISABLE AT YOUR OWN RISK.",
+    "default": 1
+  },
+  "s/fuse/31/engaged": {
+    "dtype": "bool",
+    "brief": "Set to 1 when engaged, publish 0 to clear.",
+    "default": 0
+  },
+  "s/fuse/+/!clear": {
+    "dtype": "bool",
+    "brief": "Clear all engaged fuses."
+  },
+  "s/led/en": {
+    "dtype": "u8",
+    "brief": "Enable software control for Sensor Status LED.",
+    "default": 0
+  },
+  "s/led/red": {
+    "dtype": "u8",
+    "brief": "The red LED blink pattern.",
+    "default": 0
+  },
+  "s/led/green": {
+    "dtype": "u8",
+    "brief": "The green LED blink pattern.",
+    "default": 0
+  },
+  "s/led/blue": {
+    "dtype": "u8",
+    "brief": "The blue LED blink pattern.",
+    "default": 0
+  },
+  "s/cal/!reload": {
+    "dtype": "bool",
+    "brief": "Reload ACTIVE cal from flash into FPGA cal memory."
+  },
+  "s/flash/!cmd": {
+    "dtype": "bin",
+    "brief": "SPI flash command",
+    "detail": "Binary mb_stdmsg_mem_s header with optional data payload. See mb/stdmsg.h."
+  }
+}

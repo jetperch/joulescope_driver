@@ -39,3 +39,19 @@ when working with code in this repository.
    maximum, with a goal of 80 characters. Do not wrap early.
 7. When working on a feature, read the relevant documentation
    file(s) in doc/ first.
+
+
+## Orientation
+
+* `include/` public C API (`jsdrv.h`), `src/` C library, `example/` C
+  programs (`quickstart.c` is the minimal one), `test/` C unit tests.
+* `pyjoulescope_driver/` Python binding (`binding.pyx`) and entry points,
+  `pyjoulescope_driver/test/` Python unit tests, `test/hw/` tests that need
+  a connected device.
+* `node_api/` Node.js binding: out of scope unless asked.
+* Usage docs: `doc/getting_started.md`, `doc/streaming_topics.md`, the
+  topic references `doc/js220.txt` and `doc/js320.json`.
+* Build and test C: `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
+* Build and test Python: `python setup.py build_ext --inplace` then
+  `python -m pytest pyjoulescope_driver/test`.  Rebuild after editing
+  `binding.pyx` or any C source, or Python runs stale code.

@@ -79,6 +79,11 @@ static void test_basic(void ** state) {
 
     assert_float_equal(2.0, dst.charge_f64, 0.0);
     assert_float_equal(-6.0, dst.energy_f64, 0.0);
+    // i128 accumulators use JSDRV_STATISTICS_I128_Q fractional bits
+    assert_int_equal(2LL << JSDRV_STATISTICS_I128_Q, (int64_t) dst.charge_i128[0]);
+    assert_int_equal(0, dst.charge_i128[1]);
+    assert_int_equal(-(6LL << JSDRV_STATISTICS_I128_Q), (int64_t) dst.energy_i128[0]);
+    assert_int_equal(-1, (int64_t) dst.energy_i128[1]);
 }
 
 int main(void) {

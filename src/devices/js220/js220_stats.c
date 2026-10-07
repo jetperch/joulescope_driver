@@ -62,8 +62,11 @@ int32_t js220_stats_convert(struct js220_statistics_raw_s const * src, struct js
     dst->charge_f64 = js220_i128_to_f64(src->i_int, 31) / sample_freq;
     dst->energy_f64 = js220_i128_to_f64(src->p_int, 31) / sample_freq;
 
+    // The instrument integrates in Q31; the API uses JSDRV_STATISTICS_I128_Q.
     js220_i128 charge = js220_i128_compute_integral(src->i_int, sample_freq);
     js220_i128 energy = js220_i128_compute_integral(src->p_int, sample_freq);
+    charge = js220_i128_lshift(charge, JSDRV_STATISTICS_I128_Q - 31);
+    energy = js220_i128_lshift(energy, JSDRV_STATISTICS_I128_Q - 31);
 
     dst->charge_i128[0] = charge.u64[0];
     dst->charge_i128[1] = charge.u64[1];

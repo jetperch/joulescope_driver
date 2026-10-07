@@ -75,6 +75,20 @@ This file contains the list of changes made to the Joulescope driver.
   BREAKING: The backend/model ("u/js320") and trailing "/" prefix
   ("u/js320/") filters are no longer supported.  minibitty fuzz_fwup now
   defaults to "js320".
+* Added doc/getting_started.md (Python and C lifecycle, command-line tools,
+  model differences, pitfalls), doc/streaming_topics.md (statistics and
+  streaming payload formats), example/quickstart.c (minimal C program using
+  only the public API, built as jsdrv_quickstart), and the JS320 topic
+  reference doc/js320.json.
+* BREAKING: jsdrv_statistics_s charge_i128 and energy_i128 now use a
+  2**-52 scale on every model, defined as JSDRV_STATISTICS_I128_Q.  The
+  JS320 already produced 2**-52, but the JS110 and JS220 produced 2**-31,
+  and pyjoulescope_driver int_scale claimed 2**-31 for charge and 2**-27
+  for energy on every model.  The f64 fields are unchanged.
+* Fixed pyjoulescope_driver statistics int_value, which was wrong for
+  negative accumulators and for values with bit 63 set.
+* Added tools/stats_i128_scale.py, which measures the int_value scale
+  against the f64 fields on a connected Joulescope.
 * Added the device selection, DeviceContext and SubscribeContext API
   documentation, and documented that applications must finalize each
   Driver, with a context manager or by calling finalize().
