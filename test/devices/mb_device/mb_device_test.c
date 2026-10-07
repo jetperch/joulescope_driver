@@ -117,9 +117,21 @@ void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_
     (void) context; (void) dev_topic; (void) topic; (void) flags;
 }
 
+static char subscribe_done_topic_[JSDRV_TOPIC_LENGTH_MAX];
+static uint8_t subscribe_done_flags_;
+static uint32_t unsubscribe_count_;
+
+void jsdrvp_device_subscribe_done(struct jsdrv_context_s * context, const char * dev_topic,
+                                  const char * topic, uint8_t flags) {
+    (void) context; (void) dev_topic;
+    jsdrv_cstr_copy(subscribe_done_topic_, topic, sizeof(subscribe_done_topic_));
+    subscribe_done_flags_ = flags;
+}
+
 void jsdrvp_device_unsubscribe(struct jsdrv_context_s * context, const char * dev_topic,
                                const char * topic, uint8_t flags) {
     (void) context; (void) dev_topic; (void) topic; (void) flags;
+    ++unsubscribe_count_;
 }
 
 // --- Device fixture ---
@@ -537,6 +549,61 @@ static void test_stream_in_non_bin_dropped(void ** state) {
 
 // --- Test: device publishes are rejected while not open ---
 
+static void cmd_in(struct jsdrvp_mb_dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, topic, value);
+    if (value->type == JSDRV_UNION_STR) {
+        jsdrv_cstr_copy(m->payload.str, value->value.str, sizeof(m->payload.str));
+        m->value.value.str = m->payload.str;
+    }
+    assert_true(handle_cmd(d, m));  // frees m
+}
+
+static void test_gather_ends_on_subscribe_done(void ** state) {
+    (void) state;
+    struct jsdrvp_mb_dev_s * d = device_alloc();
+    struct state_fetch_s * sf = &d->state_fetch;
+    sf->prefix_buf[0] = 's';
+    sf->prefix_buf[1] = 0;
+    sf->prefixes = sf->prefix_buf;
+    const char * topics[] = {"s/i/range/min", "s/led/red"};
+    for (uint16_t i = 0; i < 2; ++i) {
+        struct open_set_entry_s * e = &sf->set_entries[sf->set_count++];
+        jsdrv_cstr_copy(e->topic, topics[i], sizeof(e->topic));
+        e->value_type = JSDRV_UNION_U8;
+        e->value_size = 1;
+        e->value[0] = 0;
+    }
+    unsubscribe_count_ = 0;
+
+    open_seq_start_gather(d);
+    assert_true(sf->gathering);
+    assert_string_equal("u/js320/test/s", subscribe_done_topic_);
+    assert_int_equal(JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB, subscribe_done_flags_);
+
+    cmd_in(d, "u/js320/test/s/i/range/min", &jsdrv_union_u8_r(3));  // host value
+    assert_int_equal(3, sf->set_entries[0].value[0]);
+    cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/c"));  // other gather
+    assert_true(sf->gathering);
+    assert_null(msg_queue_pop_immediate(d->ll.cmd_q));  // nothing sent yet
+
+    cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/s"));
+    assert_false(sf->gathering);
+    assert_int_equal(1, unsubscribe_count_);
+    assert_int_equal(OPEN_PHASE_SET, sf->open_phase);
+    struct jsdrvp_msg_s * m = msg_queue_pop_immediate(d->ll.cmd_q);
+    const uint8_t * inner = NULL;
+    uint32_t inner_size = 0;
+    assert_non_null(m);
+    assert_true(frame_is_state_set(m, "s/./!state", &inner, &inner_size));
+    jsdrvp_msg_free(d->context, m);
+
+    // A late completion is ignored.
+    backend_send_count_ = 0;
+    cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/s"));
+    assert_int_equal(0, backend_send_count_);
+    device_free(d);
+}
+
 static void test_publish_rejected_when_closed(void ** state) {
     (void) state;
     struct jsdrvp_mb_dev_s * d = device_alloc();
@@ -554,6 +621,7 @@ static void test_publish_rejected_when_closed(void ** state) {
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_state_set_chunking),
+            cmocka_unit_test(test_gather_ends_on_subscribe_done),
             cmocka_unit_test(test_close_request_in_closed_acks),
             cmocka_unit_test(test_ll_terminated_stops_drain),
             cmocka_unit_test(test_stream_in_non_bin_dropped),

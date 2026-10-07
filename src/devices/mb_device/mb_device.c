@@ -159,9 +159,9 @@ struct state_fetch_s {
     uint16_t set_count;
     uint16_t set_cursor;   // next entry to pack into a SET_CMD frame
     bool     set_overflow; // settable topics exceeded OPEN_SET_ENTRY_MAX
-    // DEFAULTS: host-value gather via loopback sentinel
+    // DEFAULTS: host-value gather, ended by JSDRVP_MSG_SUBSCRIBE_DONE
     bool     gathering;        // handle_cmd buffers retained host values
-    char     gather_topic[24]; // unique out-of-prefix sentinel topic
+    char     gather_topic[JSDRV_TOPIC_LENGTH_MAX];  // {dev}/<instance>
     bool     emit_open;        // send OPEN# when this sequence completes
     bool     is_core;          // the core link-identity instance open
                                // (consult drv->open_children before OPEN#)
@@ -1078,55 +1078,29 @@ static void open_seq_on_meta_end(struct jsdrvp_mb_dev_s * self) {
 }
 
 // DEFAULTS host-value gather.  Subscribe RETAIN to the instance subtree
-// so the host's pre-existing retained values flow into cmd_q, then
-// publish a marker to an out-of-prefix topic that the device also
-// subscribes to.  See JSDRVP_GATHER_TOPIC_PREFIX.
+// so the host's retained values flow into cmd_q, followed by
+// JSDRVP_MSG_SUBSCRIBE_DONE for this subscription.
 static void open_seq_start_gather(struct jsdrvp_mb_dev_s * self) {
     struct state_fetch_s * sf = &self->state_fetch;
     sf->open_phase = OPEN_PHASE_GATHER;
     sf->phase = STATE_FETCH_PHASE_IDLE;  // no device exchange during gather
 
-    char inst[MB_TOPIC_SIZE_MAX];
+    char inst[2] = {sf->prefix_buf[0], 0};  // the instance being synced ('c' or 's')
     struct jsdrv_topic_s sub;
     jsdrv_topic_set(&sub, self->ll.prefix);
-    inst[0] = sf->prefix_buf[0];  // the instance being synced ('c' or 's')
-    inst[1] = '\0';
-    jsdrv_topic_append(&sub, inst);  // {dev}/<instance>
-
-    // Each path segment must be <= 7 chars (JSDRV_TOPIC_LENGTH_PER_LEVEL).
-    snprintf(sf->gather_topic, sizeof(sf->gather_topic),
-             JSDRVP_GATHER_TOPIC_PREFIX "%04x", (unsigned) (sf->transaction_id & 0xffffu));
+    jsdrv_topic_append(&sub, inst);
+    jsdrv_cstr_copy(sf->gather_topic, sub.topic, sizeof(sf->gather_topic));
 
     sf->gathering = true;
-    jsdrvp_device_subscribe(self->context, self->ll.prefix, sub.topic,
-                            JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
-    jsdrvp_device_subscribe(self->context, self->ll.prefix, sf->gather_topic,
-                            JSDRV_SFLAG_PUB);
-
-    // Publish the marker last; it loops back through the frontend after
-    // the retained values delivered by the RETAIN subscribe above.
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(self->context);
-    jsdrv_cstr_copy(m->topic, sf->gather_topic, sizeof(m->topic));
-    m->value = jsdrv_union_i32(1);
-    jsdrvp_backend_send(self->context, m);
-
-    timeout_set(self);  // fall back if the marker never returns
+    jsdrvp_device_subscribe_done(self->context, self->ll.prefix, sf->gather_topic,
+                                 JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
+    timeout_set(self);  // fall back if the completion never arrives
 }
 
 static void open_seq_gather_unsubscribe(struct jsdrvp_mb_dev_s * self) {
     struct state_fetch_s * sf = &self->state_fetch;
-    char inst[MB_TOPIC_SIZE_MAX];
-    struct jsdrv_topic_s sub;
-    jsdrv_topic_set(&sub, self->ll.prefix);
-    inst[0] = sf->prefix_buf[0];
-    inst[1] = '\0';
-    jsdrv_topic_append(&sub, inst);
-    jsdrvp_device_unsubscribe(self->context, self->ll.prefix, sub.topic,
+    jsdrvp_device_unsubscribe(self->context, self->ll.prefix, sf->gather_topic,
                               JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
-    if (sf->gather_topic[0]) {
-        jsdrvp_device_unsubscribe(self->context, self->ll.prefix, sf->gather_topic,
-                                  JSDRV_SFLAG_PUB);
-    }
 }
 
 // Override a settable entry's default with a gathered host retained
@@ -1421,7 +1395,7 @@ static bool on_open_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     struct state_fetch_s * sf = &self->state_fetch;
     if (sf->open_phase == OPEN_PHASE_GATHER) {
-        // Loopback sentinel never returned: proceed with whatever host
+        // Completion never arrived: proceed with whatever host
         // values were captured (possibly none -> all metadata defaults).
         JSDRV_LOGW("open_seq: gather timeout; proceeding with %u host values",
                    sf->set_count);
@@ -1713,11 +1687,13 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
 
     const char * topic = prefix_match_and_strip(d->ll.prefix, msg->topic);
 
-    // DEFAULTS host-value gather: while gathering, the loopback sentinel
-    // signals completion and retained instance values are buffered into
-    // the SET target (not forwarded to the device).  See open_seq_start_gather.
+    // DEFAULTS host-value gather: while gathering, retained instance values
+    // are buffered into the SET target (not forwarded to the device) until
+    // the subscribe completion.  See open_seq_start_gather.
     if (d->state_fetch.gathering) {
-        if (0 == strcmp(msg->topic, d->state_fetch.gather_topic)) {
+        if ((0 == strcmp(msg->topic, JSDRVP_MSG_SUBSCRIBE_DONE))
+                && (msg->value.type == JSDRV_UNION_STR)
+                && (0 == strcmp(msg->value.value.str, d->state_fetch.gather_topic))) {
             jsdrvp_msg_free(d->context, msg);
             open_seq_on_gathered(d);
             return true;
@@ -1739,6 +1715,8 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
             d->finalize_pending = true;
             state_machine_process(d, EV_API_CLOSE_REQUEST);
+        } else if (0 == strcmp(JSDRVP_MSG_SUBSCRIBE_DONE, msg->topic)) {
+            // late completion: the gather already timed out
         } else {
             JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
         }
