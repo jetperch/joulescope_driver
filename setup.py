@@ -245,9 +245,6 @@ setuptools.setup(
         'Intended Audience :: End Users/Desktop',
         'Intended Audience :: Science/Research',
 
-        # Pick your license as you wish
-        'License :: OSI Approved :: Apache Software License',
-
         # Operating systems
         'Operating System :: Microsoft :: Windows :: Windows 10',
         'Operating System :: Microsoft :: Windows :: Windows 11',

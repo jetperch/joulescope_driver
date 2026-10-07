@@ -24,7 +24,7 @@ requires = [
     "numpy>=2.1.0,<3",
     "pywin32; sys_platform == 'win32'",
     "requests",
-    "setuptools>=42",
+    "setuptools>=77",  # SPDX license expression (PEP 639)
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
