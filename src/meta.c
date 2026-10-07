@@ -15,12 +15,15 @@
  * limitations under the License.
  */
 
+#include "jsdrv.h"
 #include "jsdrv/meta.h"
+#include "jsdrv_prv/meta_settable.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/json.h"
 #include "jsdrv_prv/log.h"
 #include "jsdrv_prv/platform.h"
+#include <string.h>
 
 
 struct dtype_map_s {
@@ -420,4 +423,20 @@ int32_t jsdrv_meta_flags(const char * meta, uint32_t * flags) {
     jsdrv_json_parse(meta, on_flags, &self);
     *flags = self.flags;
     return 0;
+}
+
+bool jsdrv_union_type_is_scalar(uint8_t type) {
+    return (type >= JSDRV_UNION_F32) && (type <= JSDRV_UNION_I64);
+}
+
+bool jsdrv_meta_is_settable(const char * topic, const char * meta) {
+    uint32_t flags = 0;
+    uint8_t dtype = 0;
+    if (!topic || jsdrv_meta_flags(meta, &flags) || (flags & JSDRV_META_FLAG_RO)) {
+        return false;
+    }
+    if (strchr(topic, JSDRV_SUBTOPIC_PREFIX_COMMAND)) {
+        return false;  // command, event, or stream: not retained
+    }
+    return (0 == jsdrv_meta_dtype(meta, &dtype)) && jsdrv_union_type_is_scalar(dtype);
 }

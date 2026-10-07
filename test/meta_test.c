@@ -22,6 +22,7 @@
 #include <string.h>
 #include "jsdrv/meta.h"
 #include "jsdrv/error_code.h"
+#include "jsdrv_prv/meta_settable.h"
 
 #define cstr(_value) ((struct jsdrv_union_s){.type=JSDRV_UNION_STR, .op=0, .flags=JSDRV_UNION_FLAG_CONST, .app=0, .value={.str=_value}, .size=(uint32_t) (strlen(_value) + 1)})
 
@@ -183,6 +184,26 @@ static void test_no_default(void **state) {
     assert_false(value.flags & JSDRV_UNION_FLAG_RETAIN);
 }
 
+static void test_is_settable(void **state) {
+    (void) state;
+    assert_true(jsdrv_meta_is_settable("s/x/sel", META1));
+    assert_true(jsdrv_meta_is_settable("h/scale", META_F32));
+    assert_true(jsdrv_meta_is_settable("s/x/none", META_NO_DEFAULT));  // caller checks default
+}
+
+static void test_is_settable_excluded(void **state) {
+    (void) state;
+    const char * meta_ro = "{\"dtype\": \"u8\", \"default\": 1, \"flags\": [\"ro\"]}";
+    const char * meta_str = "{\"dtype\": \"str\", \"default\": \"hi\"}";
+    const char * meta_clear = "{\"dtype\": \"bool\", \"default\": 0}";
+    assert_false(jsdrv_meta_is_settable("s/x/ro", meta_ro));
+    assert_false(jsdrv_meta_is_settable("s/stats/!clear", meta_clear));  // JS220 fw 1.3.0
+    assert_false(jsdrv_meta_is_settable("s/gpo/+/!set", META1));
+    assert_false(jsdrv_meta_is_settable("s/x/str", meta_str));
+    assert_false(jsdrv_meta_is_settable(NULL, META1));
+    assert_false(jsdrv_meta_is_settable("s/x/sel", NULL));
+}
+
 static void test_flags_none(void **state) {
     (void) state;
     uint32_t flags = 0xFFFFFFFF;
@@ -296,6 +317,8 @@ int main(void) {
             cmocka_unit_test(test_bool_dtype),
             cmocka_unit_test(test_range_too_long_rejected),
             cmocka_unit_test(test_no_default),
+            cmocka_unit_test(test_is_settable),
+            cmocka_unit_test(test_is_settable_excluded),
             cmocka_unit_test(test_flags_none),
             cmocka_unit_test(test_flags_no_flags_key),
             cmocka_unit_test(test_flags_ro_string),

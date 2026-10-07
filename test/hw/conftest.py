@@ -12,5 +12,5 @@
 # device path as a parameter (supplied by each script's main()), which
 # pytest would misread as a missing fixture.  Keep them out of pytest
 # collection; run them directly, e.g.:
-#     JSDRV_HW_DEVICE=u/js320/X2VJ python test/hw/test_open_state_js320.py
+#     JSDRV_HW_DEVICE=u/js320/X2VJ python test/hw/test_open_state.py
 collect_ignore_glob = ['test_*.py']

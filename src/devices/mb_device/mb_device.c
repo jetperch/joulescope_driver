@@ -38,6 +38,7 @@
 #include "mb/stdmsg.h"
 #include "mb/timesync.h"
 #include "jsdrv_prv/meta_binary.h"
+#include "jsdrv_prv/meta_settable.h"
 
 
 #define FRAME_SIZE_U8           (512U)
@@ -799,33 +800,17 @@ static uint16_t union_scalar_size(uint8_t type) {
     }
 }
 
-// Record a settable topic for the DEFAULTS SET_CMD push: skip read-only
-// and non-retained (leaf starts with '!') topics, and topics without a
-// usable scalar default.  The default value is stored now and may be
-// overridden later by a gathered host value.
+// Record a settable topic for the DEFAULTS SET_CMD push.  The default
+// value is stored now and may be overridden later by a gathered host value.
 static void open_set_record(struct jsdrvp_mb_dev_s * self,
                             const char * topic, const char * json_meta) {
     struct state_fetch_s * sf = &self->state_fetch;
-    uint32_t flags = 0;
-    if (jsdrv_meta_flags(json_meta, &flags) || (flags & JSDRV_META_FLAG_RO)) {
-        return;  // read-only (or unparseable) -> never push
-    }
-    const char * leaf = topic;
-    for (const char * p = topic; *p; ++p) {
-        if (*p == '/') { leaf = p + 1; }
-    }
-    if (leaf[0] == '!') {
-        return;  // command / event / stream: not retained, not settable
-    }
     struct jsdrv_union_s def;
-    if (jsdrv_meta_default(json_meta, &def) || (def.type == JSDRV_UNION_NULL)) {
-        return;  // no default -> exclude
-    }
-    uint16_t size = union_scalar_size(def.type);
-    if ((size == 0) || (size > OPEN_SET_VALUE_CAP)) {
-        JSDRV_LOGI("open_set: skip non-scalar default %s", topic);
+    if (!jsdrv_meta_is_settable(topic, json_meta)
+            || jsdrv_meta_default(json_meta, &def) || (def.type == JSDRV_UNION_NULL)) {
         return;
     }
+    uint16_t size = union_scalar_size(def.type);
     if (sf->set_count >= OPEN_SET_ENTRY_MAX) {
         if (!sf->set_overflow) {  // log once: do not silently cap
             JSDRV_LOGW("open_set: settable topics exceed %d; dropping overflow (e.g. %s)",
@@ -1094,11 +1079,8 @@ static void open_seq_on_meta_end(struct jsdrvp_mb_dev_s * self) {
 
 // DEFAULTS host-value gather.  Subscribe RETAIN to the instance subtree
 // so the host's pre-existing retained values flow into cmd_q, then
-// publish a marker to a unique OUT-OF-PREFIX topic that the device also
-// subscribes to.  Because the frontend delivers to cmd_q in FIFO order,
-// the marker arrives after every retained value, signalling completion.
-// (An out-of-prefix topic is required: publishes under the device prefix
-// are tagged with the device as origin and suppressed from echoing back.)
+// publish a marker to an out-of-prefix topic that the device also
+// subscribes to.  See JSDRVP_GATHER_TOPIC_PREFIX.
 static void open_seq_start_gather(struct jsdrvp_mb_dev_s * self) {
     struct state_fetch_s * sf = &self->state_fetch;
     sf->open_phase = OPEN_PHASE_GATHER;
@@ -1111,12 +1093,9 @@ static void open_seq_start_gather(struct jsdrvp_mb_dev_s * self) {
     inst[1] = '\0';
     jsdrv_topic_append(&sub, inst);  // {dev}/<instance>
 
-    // Unique sentinel topic.  Constraints: each path segment must be
-    // <= 7 chars (JSDRV_TOPIC_LENGTH_PER_LEVEL), and it must have < 3
-    // path segments so device_lookup never matches it (hence it is not
-    // origin-suppressed when republished back to this device).
+    // Each path segment must be <= 7 chars (JSDRV_TOPIC_LENGTH_PER_LEVEL).
     snprintf(sf->gather_topic, sizeof(sf->gather_topic),
-             "mbg/%04x", (unsigned) (sf->transaction_id & 0xffffu));
+             JSDRVP_GATHER_TOPIC_PREFIX "%04x", (unsigned) (sf->transaction_id & 0xffffu));
 
     sf->gathering = true;
     jsdrvp_device_subscribe(self->context, self->ll.prefix, sub.topic,
@@ -1763,6 +1742,8 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         } else {
             JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
         }
+    } else if (jsdrv_cstr_starts_with(msg->topic, JSDRVP_GATHER_TOPIC_PREFIX)) {
+        // late or shared gather sentinel: the gather already completed
     } else if (!topic) {
         JSDRV_LOGE("handle_cmd mismatch %s, %s", msg->topic, d->ll.prefix);
     } else if (topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {

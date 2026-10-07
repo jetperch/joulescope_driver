@@ -221,8 +221,9 @@ commands also take `--brand`.
 
 The JS220 and JS320 open with the current range off, so publish
 `s/i/range/mode` `auto` (or a fixed range) before expecting current
-readings.  The JS220 driver does not yet push metadata defaults on a
-`defaults` open, so the instrument keeps its power-on state.
+readings.  Before 2.5.0, a JS220 `defaults` open did not push anything,
+so the instrument kept the settings from the previous session until it
+was power cycled.  Use `restore` to keep the instrument's settings.
 
 The JS220 and JS320 compute statistics on the instrument.  The JS110
 `s/sstats/value` is on-instrument at a fixed 2 Hz without standard

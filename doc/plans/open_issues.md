@@ -161,7 +161,7 @@ mini-plan first.
       Add `assert_false(isnan(x))` where the value must be a number.
 - [ ] `test/buffer_test.c:36`: `TIMEOUT_MS = 100000;  // todo 100`, and
       `:600` `// todo check range?`.
-- [ ] `test/hw/` (`test_open_state_js320.py`, `test_examples_js320.py`)
+- [ ] `test/hw/` (`test_open_state.py`, `test_examples_js320.py`)
       runs by hand only.  Document how to run it, in the README or
       `doc/`.
 

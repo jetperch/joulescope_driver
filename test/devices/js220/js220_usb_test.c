@@ -189,6 +189,8 @@ static int setup(void ** state) {
     jsdrv_cstr_copy(d->ll.prefix, PREFIX, sizeof(d->ll.prefix));
     d->ll.cmd_q = msg_queue_init();
     d->ll.rsp_q = msg_queue_init();
+    d->ul.cmd_q = msg_queue_init();
+    jsdrv_list_initialize(&d->open_deferred);
     d->publish_rate = PUB_RATE_DEFAULT;
     d->i_scale = 1.0f;
     d->v_scale = 1.0f;
@@ -224,6 +226,11 @@ static int teardown(void ** state) {
         }
     }
     cmd_q_clear(d);
+    struct jsdrv_list_s * item;
+    while (NULL != (item = jsdrv_list_remove_head(&d->open_deferred))) {
+        jsdrvp_msg_free(d->context, JSDRV_CONTAINER_OF(item, struct jsdrvp_msg_s, item));
+    }
+    msg_queue_finalize(d->ul.cmd_q, d->context);
     msg_queue_finalize(d->ll.cmd_q, d->context);
     msg_queue_finalize(d->ll.rsp_q, d->context);
     jsdrv_free(d);
@@ -305,6 +312,112 @@ static void fill_pattern(uint8_t * data, uint32_t length, uint8_t seed) {
     for (uint32_t i = 0; i < length; ++i) {
         data[i] = (uint8_t) (seed + i * 7U);
     }
+}
+
+
+// --- DEFAULTS open helpers ---
+
+// Fill a port 1 pubsub frame payload, return its length.
+static uint16_t pubsub_pack(uint8_t * buf, const char * topic, const struct jsdrv_union_s * value) {
+    memset(buf, 0, JS220_USB_FRAME_LENGTH);
+    struct js220_publish_s * p = (struct js220_publish_s *) buf;
+    jsdrv_cstr_copy(p->topic, topic, sizeof(p->topic));
+    p->type = value->type;
+    p->flags = value->flags;
+    uint16_t sz = (uint16_t) sizeof(*p);
+    if ((value->type == JSDRV_UNION_JSON) || (value->type == JSDRV_UNION_STR)) {
+        size_t n = strlen(value->value.str) + 1;
+        memcpy(p->data, value->value.str, n);
+        sz += (uint16_t) n;
+    } else {
+        memcpy(p->data, &value->value.u64, sizeof(uint64_t));
+        sz += (uint16_t) sizeof(uint64_t);
+    }
+    return sz;
+}
+
+static void pubsub_in(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
+    uint8_t buf[JS220_USB_FRAME_LENGTH];
+    frame_in(d, 1, buf, pubsub_pack(buf, topic, value));
+}
+
+static void meta_in(struct dev_s * d, const char * topic, const char * meta) {
+    pubsub_in(d, topic, &jsdrv_union_json(meta));
+}
+
+// Queue the instrument's "c/!pong" for a later ping_wait().
+static void pong_queue(struct dev_s * d, uint32_t value) {
+    uint8_t buf[JS220_USB_FRAME_LENGTH];
+    uint16_t sz = pubsub_pack(buf, JS220_TOPIC_PONG, &jsdrv_union_u32(value));
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
+    jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_STREAM_IN_DATA, sizeof(m->topic));
+    uint32_t * frame = (uint32_t *) m->payload.bin;
+    memset(frame, 0, FRAME_SIZE_BYTES);
+    frame[0] = js220_frame_hdr_pack(d->in_frame_id, sz, 1);
+    memcpy(&frame[1], buf, sz);
+    m->value = jsdrv_union_bin(m->payload.bin, FRAME_SIZE_BYTES);
+    msg_queue_push(d->ll.rsp_q, m);
+}
+
+// Queue a message from the frontend, such as a host retained value.
+static void ul_queue(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, topic, value);
+    msg_queue_push(d->ul.cmd_q, m);
+}
+
+// Pop the next pubsub publish sent to the instrument, skipping others.
+static bool publish_pop(struct dev_s * d, char * topic, struct jsdrv_union_s * value) {
+    struct jsdrvp_msg_s * m;
+    while (NULL != (m = msg_queue_pop_immediate(d->ll.cmd_q))) {
+        if (0 == strcmp(JSDRV_USBBK_MSG_BULK_OUT_DATA, m->topic)
+                && (1 == ((union js220_frame_hdr_u *) m->payload.bin)->h.port_id)) {
+            struct js220_publish_s * p = (struct js220_publish_s *) &m->payload.bin[4];
+            jsdrv_cstr_copy(topic, p->topic, JS220_TOPIC_LENGTH);
+            value->type = p->type;
+            memcpy(&value->value.u64, p->data, sizeof(uint64_t));
+            jsdrvp_msg_free(d->context, m);
+            return true;
+        }
+        jsdrvp_msg_free(d->context, m);
+    }
+    return false;
+}
+
+static void publish_expect_u(struct dev_s * d, const char * topic, uint64_t value) {
+    char t[JS220_TOPIC_LENGTH];
+    struct jsdrv_union_s v;
+    assert_true(publish_pop(d, t, &v));
+    assert_string_equal(topic, t);
+    assert_true(jsdrv_union_type_is_scalar(v.type));
+    struct jsdrv_union_s u = v;
+    assert_int_equal(0, jsdrv_union_as_type(&u, JSDRV_UNION_U64));
+    assert_int_equal(value, u.value.u64);
+}
+
+static void publish_expect(struct dev_s * d, const char * topic) {
+    char t[JS220_TOPIC_LENGTH];
+    struct jsdrv_union_s v;
+    assert_true(publish_pop(d, t, &v));
+    assert_string_equal(topic, t);
+}
+
+static const char * META_U8_0 = "{\"dtype\": \"u8\", \"default\": 0}";
+static const char * META_U8_5 = "{\"dtype\": \"u8\", \"default\": 5}";
+static const char * META_BOOL = "{\"dtype\": \"bool\", \"default\": 0}";
+static const char * META_U32_0 = "{\"dtype\": \"u32\", \"default\": 0}";
+static const char * META_RO = "{\"dtype\": \"u32\", \"default\": 0, \"flags\": [\"ro\"]}";
+
+static void open_defaults_meta_in(struct dev_s * d) {
+    d->open_defaults_recording = true;
+    meta_in(d, "s/i/range/min$", META_U8_0);
+    meta_in(d, "s/i/range/max$", META_U8_5);
+    meta_in(d, "s/i/ctrl$", META_BOOL);
+    meta_in(d, "c/fw/version$", META_RO);      // read-only
+    meta_in(d, "s/dwnN/N$", META_U32_0);       // host-owned
+    meta_in(d, "s/i/!data$", META_U32_0);      // stream
+    pubsub_in(d, "s/i/range/max", &jsdrv_union_u8(2));  // value, not metadata
+    d->open_defaults_recording = false;
+    meta_in(d, "s/v/range/mode$", META_U8_0);  // after recording
 }
 
 // --- Memory operation tests ---
@@ -625,6 +738,78 @@ static void test_scale(void ** state) {
     assert_float_equal(3.0f, d->v_scale, 0.0f);
 }
 
+// --- DEFAULTS open tests ---
+
+static void test_open_defaults_record(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    open_defaults_meta_in(d);
+    assert_int_equal(3, d->open_defaults_count);
+    assert_string_equal("s/i/range/min", d->open_defaults[0].topic);
+    assert_int_equal(0, d->open_defaults[0].value.value.u8);
+    assert_string_equal("s/i/range/max", d->open_defaults[1].topic);
+    assert_int_equal(5, d->open_defaults[1].value.value.u8);
+    assert_string_equal("s/i/ctrl", d->open_defaults[2].topic);
+    assert_non_null(backend_find("s/i/range/min$"));  // still forwarded
+}
+
+static void test_open_defaults_restore(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    open_defaults_meta_in(d);
+    cmd_q_clear(d);
+    ul_queue(d, PREFIX "/s/i/range/min", &jsdrv_union_u8_r(3));  // host value
+    ul_queue(d, PREFIX "/s/i/ctrl", &jsdrv_union_u8_r(1));       // never restarts
+    ul_queue(d, PREFIX "/c/fw/version", &jsdrv_union_u32_r(7));  // read-only
+    ul_queue(d, PREFIX "/h/fs", &jsdrv_union_u32_r(1000));       // deferred
+    char sentinel[16];
+    uint32_t hash = 0;
+    for (const char * p = PREFIX; *p; ++p) {
+        hash = (hash * 31U) + (uint8_t) *p;
+    }
+    snprintf(sentinel, sizeof(sentinel), "mbg/j%06x", (unsigned) (hash & 0xffffffU));
+    ul_queue(d, sentinel, &jsdrv_union_i32(1));                  // end sentinel
+    pong_queue(d, 2);
+
+    assert_int_equal(0, open_defaults_restore(d));
+    bool sentinel_sent = false;
+    for (uint32_t i = 0; i < backend_msg_count_; ++i) {
+        sentinel_sent |= (0 == strcmp(sentinel, backend_msg_[i]->topic));
+    }
+    assert_true(sentinel_sent);
+    publish_expect_u(d, "s/i/range/min", 3);
+    publish_expect_u(d, "s/i/range/max", 5);
+    publish_expect_u(d, "s/i/ctrl", 0);
+    publish_expect(d, "?");
+    publish_expect(d, JS220_TOPIC_PING);
+    char t[JS220_TOPIC_LENGTH];
+    struct jsdrv_union_s v;
+    assert_false(publish_pop(d, t, &v));
+
+    // h/fs waits for open to complete, then runs in order.
+    assert_int_equal(1, jsdrv_list_length(&d->open_deferred));
+    assert_null(backend_find_suffix("h/fs", JSDRV_TOPIC_SUFFIX_RETURN_CODE));
+    open_deferred_process(d);
+    assert_true(jsdrv_list_is_empty(&d->open_deferred));
+    assert_int_equal(0, backend_return_code("h/fs"));
+    assert_int_equal(1000, d->fs);
+}
+
+static void test_open_defaults_late_sentinel(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, "mbg/j000000", &jsdrv_union_i32(1));
+    assert_true(handle_cmd(d, m));  // frees m
+    assert_int_equal(0, backend_msg_count_);
+    assert_null(msg_queue_pop_immediate(d->ll.cmd_q));
+}
+
+static void test_open_defaults_reset(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    open_defaults_meta_in(d);
+    d->open_defaults_recording = true;
+    d_reset(d);
+    assert_int_equal(0, d->open_defaults_count);
+    assert_false(d->open_defaults_recording);
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test_setup_teardown(test_mem_read, setup, teardown),
@@ -647,6 +832,10 @@ int main(void) {
             cmocka_unit_test_setup_teardown(test_filter_requires_fw_1_3, setup, teardown),
             cmocka_unit_test_setup_teardown(test_filter, setup, teardown),
             cmocka_unit_test_setup_teardown(test_scale, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_defaults_record, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_defaults_restore, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_defaults_late_sentinel, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_defaults_reset, setup, teardown),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

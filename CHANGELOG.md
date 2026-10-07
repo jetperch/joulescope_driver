@@ -25,6 +25,20 @@ This file contains the list of changes made to the Joulescope driver.
 
 2026 Oct 7
 
+**JS220 behavior change: a `defaults` open now restores the default
+settings.**  Previously, opening a JS220 in `defaults` mode (the default
+mode, also used when mode is None) pushed nothing to the instrument.  The
+JS220 kept every setting from the previous session, such as
+`s/i/range/min`, `s/i/range/max`, `s/v/range/select` and `s/stats/scnt`,
+until it was power cycled, while the host reported no values for them.
+A `defaults` open now pushes each writable device topic's metadata default,
+or the host's retained value from the same Driver session, then reads the
+device state back to the host, matching the JS320.  Streaming stays off.
+Scripts that rely on settings from a previous session must now set them
+explicitly, or open with `mode='restore'` to keep the instrument's current
+settings.  See
+[#16](https://github.com/jetperch/joulescope_driver/issues/16).
+
 * Added DevicePath, a str subclass with backend, model, serial_number,
   brand and is_bootloader properties and a match(spec) method.
   Driver.device_paths() now returns DevicePath instances, which remain

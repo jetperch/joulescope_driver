@@ -262,7 +262,7 @@ the kind observed during the 2026-04-16 session must be gone.
 Implemented host-side in `src/devices/mb_device/mb_device.c`,
 `src/devices/js320/js320_drv.c`, and
 `include_private/jsdrv_prv/devices/mb_device/mb_drv.h`.  Validated on
-hardware via `test/hw/test_open_state_js320.py`.
+hardware via `test/hw/test_open_state.py`.
 
 What shipped, and how it differs from the original plan above:
 

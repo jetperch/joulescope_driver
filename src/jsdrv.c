@@ -697,7 +697,7 @@ static bool handle_backend_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s *
         }
     } else if (msg->topic[0] == JSDRV_TOPIC_PREFIX_LOCAL) {
         jsdrv_pubsub_publish(c->pubsub, msg);
-    } else if (msg->topic[0] == 'm') {  // buffer
+    } else if (msg->topic[0] == 'm') {  // buffer and JSDRVP_GATHER_TOPIC_PREFIX
         jsdrv_pubsub_publish(c->pubsub, msg);
     } else if (jsdrv_cstr_starts_with(msg->topic, "fwup/")) {  // firmware update manager
         jsdrv_pubsub_publish(c->pubsub, msg);

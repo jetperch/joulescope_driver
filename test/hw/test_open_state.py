@@ -18,13 +18,14 @@
 
 Validates the open-restore semantics implemented in
 ``src/devices/mb_device/mb_device.c`` and the JS320 sensor stopgap in
-``src/devices/js320/js320_drv.c`` against a physically connected JS320.
+``src/devices/js320/js320_drv.c`` against a physically connected JS320,
+or in ``src/devices/js220/js220_usb.c`` against a JS220.
 
 This test requires real hardware and is therefore NOT part of the
 unit-test (ctest) suite.  It is gated on an environment variable so it
 never runs accidentally in CI::
 
-    JSDRV_HW_DEVICE=u/js320/X2VJ python test/hw/test_open_state_js320.py
+    JSDRV_HW_DEVICE=u/js320/X2VJ python test/hw/test_open_state.py
 
 If JSDRV_HW_DEVICE is unset, the first device returned by
 ``device_paths()`` is used.  The binding under test must be rebuilt
@@ -251,10 +252,11 @@ def main():
         test_resume_adopts_and_defaults_resets,
         test_defaults_preserves_host_value,
         test_sensor_synced_at_open,
-        test_sensor_state_retained,
         test_host_instance_restored,
         test_stability,
     ]
+    if '/js320/' in dev:
+        tests.insert(-2, test_sensor_state_retained)  # JS320 sensor link
     failures = 0
     for t in tests:
         try:
