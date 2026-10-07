@@ -61,6 +61,13 @@ class TestDeviceFilter(unittest.TestCase):
         self.assertEqual([], device_filter.find(PATHS, 'mb', brand='joulescope'))
         self.assertEqual(JS, device_filter.find(PATHS, '', brand='joulescope'))
 
+    def test_find_bootloader(self):
+        paths = ['u/js220/000415', 'u/&js220/000416', 'u/&js110/1', 'u/mb/1']
+        self.assertEqual(paths[:3], device_filter.find(paths, brand='joulescope'))
+        self.assertEqual(paths[:2], device_filter.find(paths, 'js220'))
+        self.assertEqual(['u/&js220/000416'], device_filter.find(paths, '&js220'))
+        self.assertEqual('u/&js220/000416', device_filter.find_one(paths, '000416'))
+
     def test_find_brand_invalid(self):
         with self.assertRaises(ValueError) as cm:
             device_filter.find(PATHS, brand='acme')

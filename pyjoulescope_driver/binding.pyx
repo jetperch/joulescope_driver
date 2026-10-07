@@ -1405,6 +1405,22 @@ cdef class Driver:
         _handle_rc(rc, 'jsdrv_close', device_prefix)
 
 
+def _exit_cleanup(fn, exc_type, name):
+    """Call a context manager's cleanup on exit.
+
+    When the block raised, log a cleanup error instead of raising it, so
+    that it does not replace the block's exception.
+    """
+    if exc_type is None:
+        fn()
+        return
+    try:
+        fn()
+    except Exception:
+        _log.warning('%s failed while handling %s', name, exc_type.__name__,
+                     exc_info=True)
+
+
 class SubscribeContext:
     """The subscriptions returned by :meth:`Driver.subscribe`.
 
@@ -1442,7 +1458,7 @@ class SubscribeContext:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.unsubscribe()
+        _exit_cleanup(self.unsubscribe, exc_type, 'unsubscribe')
 
 
 class DeviceContext:
@@ -1527,7 +1543,7 @@ class DeviceContext:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
+        _exit_cleanup(self.close, exc_type, f'{self.device_path} close')
 
 
 cdef void _on_cmd_publish_cbk(void * user_data, const char * topic,

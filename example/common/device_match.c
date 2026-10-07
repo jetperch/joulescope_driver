@@ -80,7 +80,40 @@ static bool split(const char * device_path, const char ** model, size_t * model_
     return true;
 }
 
+// The model prefix for a device in bootloader mode, such as "u/&js220/000415".
+#define BOOTLOADER_PREFIX '&'
+
+// Remove the bootloader prefix from a model.
+static void model_strip(const char ** model, size_t * model_sz) {
+    if (*model_sz && ((*model)[0] == BOOTLOADER_PREFIX)) {
+        ++*model;
+        --*model_sz;
+    }
+}
+
+// Compare spec with "{a}{sep}{b}", ignoring case.
+static bool eq_join(const char * spec, size_t spec_sz,
+                    const char * a, size_t a_sz, char sep,
+                    const char * b, size_t b_sz) {
+    return (spec_sz == a_sz + 1 + b_sz)
+        && eq_nn(spec, a_sz, a, a_sz)
+        && (spec[a_sz] == sep)
+        && eq_nn(spec + a_sz + 1, b_sz, b, b_sz);
+}
+
+// Match the model specification forms for one model spelling.
+static bool spec_match_model(const char * spec, size_t spec_sz,
+                             const char * backend, size_t backend_sz,
+                             const char * model, size_t model_sz,
+                             const char * serial, size_t serial_sz) {
+    return eq_join(spec, spec_sz, backend, backend_sz, '/', model, model_sz)  // backend/model
+        || eq_nn(spec, spec_sz, model, model_sz)                              // model
+        || eq_join(spec, spec_sz, model, model_sz, '/', serial, serial_sz)    // model/serial
+        || eq_join(spec, spec_sz, model, model_sz, '-', serial, serial_sz);   // model-serial
+}
+
 // Match one specification of length spec_sz, already trimmed.
+// The model forms match both the "&" bootloader model and the model.
 static bool spec_match(const char * device_path, const char * spec, size_t spec_sz) {
     const char * model;
     size_t model_sz;
@@ -89,19 +122,17 @@ static bool spec_match(const char * device_path, const char * spec, size_t spec_
         return false;
     }
     size_t serial_sz = strlen(serial);
-    size_t backend_model_sz = (size_t) (model - device_path) + model_sz;
-    if (eq_n(spec, spec_sz, device_path)                               // backend/model/serial
-            || eq_nn(spec, spec_sz, device_path, backend_model_sz)     // backend/model
-            || eq_nn(spec, spec_sz, model, model_sz + 1 + serial_sz)   // model/serial
-            || eq_nn(spec, spec_sz, model, model_sz)                   // model
-            || eq_nn(spec, spec_sz, serial, serial_sz)) {              // serial
+    size_t backend_sz = (size_t) (model - device_path - 1);
+    if (eq_n(spec, spec_sz, device_path) || eq_nn(spec, spec_sz, serial, serial_sz)) {
         return true;
     }
-    // model-serial
-    return (spec_sz == model_sz + 1 + serial_sz)
-        && eq_nn(spec, model_sz, model, model_sz)
-        && (spec[model_sz] == '-')
-        && eq_nn(spec + model_sz + 1, serial_sz, serial, serial_sz);
+    if (spec_match_model(spec, spec_sz, device_path, backend_sz, model, model_sz,
+                         serial, serial_sz)) {
+        return true;
+    }
+    model_strip(&model, &model_sz);
+    return spec_match_model(spec, spec_sz, device_path, backend_sz, model, model_sz,
+                            serial, serial_sz);
 }
 
 bool device_match(const char * device_path, const char * filter) {
@@ -165,6 +196,7 @@ const char * device_brand(const char * device_path) {
     if (!device_path || !split(device_path, &model, &model_sz, &serial)) {
         return NULL;
     }
+    model_strip(&model, &model_sz);
     for (const struct brand_s * b = BRANDS_TO_MODELS; b->name; ++b) {
         for (const char * const * m = b->models; *m; ++m) {
             if (eq_n(model, model_sz, *m)) {
@@ -194,7 +226,18 @@ bool device_is_model(const char * device_path, const char * model) {
     if (!device_path || !model || !split(device_path, &p_model, &p_model_sz, &serial)) {
         return false;
     }
+    model_strip(&p_model, &p_model_sz);
     return eq_n(p_model, p_model_sz, model);
+}
+
+bool device_is_bootloader(const char * device_path) {
+    const char * model;
+    size_t model_sz;
+    const char * serial;
+    if (!device_path || !split(device_path, &model, &model_sz, &serial)) {
+        return false;
+    }
+    return model_sz && (model[0] == BOOTLOADER_PREFIX);
 }
 
 uint32_t device_match_list(const char * devices, const char * filter, const char * brand,

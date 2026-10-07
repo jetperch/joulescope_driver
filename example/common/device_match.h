@@ -50,6 +50,9 @@ extern "C" {
  *      - the model, such as "js320".
  *      - the serial number, such as "31NB".  Serial numbers must match
  *        exactly, so "8" does not match "u/js320/8W2A".
+ *      The model forms match a device in either application or bootloader
+ *      mode, such as "u/&js220/000415".  Use the "&" model prefix, such as
+ *      "&js220", to only match devices in bootloader mode.
  * @return true if the device path matches any specification,
  *      false otherwise.
  */
@@ -100,6 +103,16 @@ bool device_is_joulescope(const char * device_path);
  * @return true when the device path's model equals model.
  */
 bool device_is_model(const char * device_path, const char * model);
+
+/**
+ * @brief Check if a device path is a device in bootloader mode.
+ *
+ * @param device_path The device path, such as "u/&js220/000415".
+ * @return true when the model has the "&" bootloader prefix.
+ *      device_is_model(), device_brand() and device_is_joulescope() ignore
+ *      this prefix.
+ */
+bool device_is_bootloader(const char * device_path);
 
 /**
  * @brief Find the devices in a list that match device specifications.

@@ -25,7 +25,8 @@ Node.js bindings in `node_api/`, which this guide does not cover.
 
 The payload formats for statistics and streaming samples are in
 [streaming_topics.md](streaming_topics.md).  The per-model topic references
-are [js220.txt](js220.txt) and [js320.json](js320.json).
+are [js220.txt](https://github.com/jetperch/joulescope_driver/blob/main/doc/js220.txt)
+and [js320.json](https://github.com/jetperch/joulescope_driver/blob/main/doc/js320.json).
 
 
 ## Install

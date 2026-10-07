@@ -25,9 +25,13 @@ This file contains the list of changes made to the Joulescope driver.
 
 2026 Oct 7
 
-* Added DevicePath, a str subclass with backend, model, serial_number and
-  brand properties and a match(spec) method.  Driver.device_paths()
-  now returns DevicePath instances, which remain fully str compatible.
+* Added DevicePath, a str subclass with backend, model, serial_number,
+  brand and is_bootloader properties and a match(spec) method.
+  Driver.device_paths() now returns DevicePath instances, which remain
+  fully str compatible.  A device in bootloader mode, such as
+  "u/&js220/000415", has the same model and brand as in application mode.
+  Model specifications, such as "js220", match both modes, and the "&"
+  forms, such as "&js220", only match bootloader mode.
 * Added optional specs and brand arguments to Driver.device_paths(),
   such as d.device_paths('js320', brand='joulescope').  Brands are
   case-insensitive and support aliases, such as "js" for "Joulescope".
@@ -46,6 +50,9 @@ This file contains the list of changes made to the Joulescope driver.
   "with d.open(device_path) as device: device.publish('s/i/range/mode', 'auto')".
 * Driver.subscribe now returns a SubscribeContext, which unsubscribes on
   unsubscribe() or on exit: "with d.subscribe(topic, 'pub', fn): ...".
+* When a DeviceContext or SubscribeContext block raises, a close or
+  unsubscribe error on exit is logged instead of replacing the block's
+  exception.
 * Driver.finalize, including exiting "with Driver() as d:", now closes each
   device that the instance opened and that is still connected.
   Afterwards, close, unsubscribe and unsubscribe_all do nothing, and the
@@ -73,8 +80,9 @@ This file contains the list of changes made to the Joulescope driver.
   to match pyjoulescope_driver.device_filter: comma-separated
   specifications, "{model}-{serial_number}", and brands with aliases.
   The pre-2.5.0 backend/model prefix, "u/js320" or "u/js320/", remains
-  a valid specification in both.  minibitty fuzz_fwup now defaults to
-  "js320".
+  a valid specification in both.  Added device_is_bootloader, and the
+  model functions ignore the "&" bootloader prefix, like DevicePath.
+  minibitty fuzz_fwup now defaults to "js320".
 * Added doc/getting_started.md (Python and C lifecycle, command-line tools,
   model differences, pitfalls), doc/streaming_topics.md (statistics and
   streaming payload formats), example/quickstart.c (minimal C program using

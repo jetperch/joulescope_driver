@@ -66,6 +66,30 @@ class TestDevicePath(unittest.TestCase):
         for s in ['u/mb/1', 'u/js999/1']:
             self.assertIsNone(DevicePath(s).brand, s)
 
+    def test_bootloader(self):
+        p = DevicePath('u/&js220/000415')
+        self.assertTrue(p.is_bootloader)
+        self.assertEqual('u', p.backend)
+        self.assertEqual('js220', p.model)
+        self.assertEqual('000415', p.serial_number)
+        self.assertEqual('Joulescope', p.brand)
+        self.assertEqual('Joulescope', DevicePath('u/&JS110/1').brand)
+        for s in ['u/js220/000415', 'u/mb/1', 'u/js320', '']:
+            self.assertFalse(DevicePath(s).is_bootloader, s)
+
+    def test_bootloader_match(self):
+        p = DevicePath('u/&js220/000415')
+        # Model specifications match the device in either mode.
+        for spec in ['u/&js220/000415', 'js220', 'u/js220', 'js220/000415',
+                     'js220-000415', '000415', 'JS220']:
+            self.assertTrue(p.match(spec), spec)
+        # The "&" forms select bootloader devices.
+        for spec in ['&js220', 'u/&js220', 'u/&js220/', '&js220/000415', '&js220-000415']:
+            self.assertTrue(p.match(spec), spec)
+            self.assertFalse(DevicePath('u/js220/000415').match(spec), spec)
+        for spec in ['u/js220/000415', 'js320', '&js110']:
+            self.assertFalse(p.match(spec), spec)
+
     def test_brand_tables(self):
         brands = [brand.lower() for brand in BRANDS_TO_MODELS]
         self.assertEqual(len(brands), len(set(brands)))

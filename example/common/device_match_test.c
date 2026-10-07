@@ -145,6 +145,44 @@ static void test_brand(void) {
     CHECK(!device_is_brand("u/js320/1", "acme"));
 }
 
+static void test_bootloader(void) {
+    printf("test_bootloader:\n");
+    const char * p = "u/&js220/000415";
+    CHECK(device_is_bootloader(p));
+    CHECK(!device_is_bootloader("u/js220/000415"));
+    CHECK(!device_is_bootloader("u/js220"));
+    CHECK(!device_is_bootloader(NULL));
+    CHECK(device_is_model(p, "js220"));
+    CHECK(!device_is_model(p, "&js220"));
+    CHECK(device_is_joulescope(p));
+    CHECK(device_is_joulescope("u/&js110/1"));
+    CHECK(0 == strcmp("Joulescope", device_brand(p)));
+
+    // Model specifications match the device in either mode.
+    CHECK(device_match(p, "u/&js220/000415"));
+    CHECK(device_match(p, "js220"));
+    CHECK(device_match(p, "u/js220"));
+    CHECK(device_match(p, "js220/000415"));
+    CHECK(device_match(p, "js220-000415"));
+    CHECK(device_match(p, "000415"));
+    // The "&" forms select bootloader devices.
+    CHECK(device_match(p, "&js220"));
+    CHECK(device_match(p, "u/&js220/"));
+    CHECK(device_match(p, "&js220/000415"));
+    CHECK(device_match(p, "&js220-000415"));
+    CHECK(!device_match("u/js220/000415", "&js220"));
+    CHECK(!device_match("u/js220/000415", "u/&js220"));
+    CHECK(!device_match(p, "u/js220/000415"));
+    CHECK(!device_match(p, "&js110"));
+
+    const char * d = "u/js220/000415,u/&js220/000416,u/&js110/1,u/mb/1";
+    char m[64];
+    CHECK(3 == device_match_list(d, NULL, "joulescope", NULL, 0));
+    CHECK(2 == device_match_list(d, "js220", NULL, NULL, 0));
+    CHECK(1 == device_match_list(d, "&js220", NULL, m, sizeof(m)));
+    CHECK(0 == strcmp(m, "u/&js220/000416"));
+}
+
 static void test_is_joulescope(void) {
     printf("test_is_joulescope:\n");
     CHECK(device_is_joulescope("u/js110/000123"));
@@ -215,6 +253,7 @@ int main(void) {
     test_match_backend_model();
     test_match_malformed();
     test_brand();
+    test_bootloader();
     test_is_joulescope();
     test_is_model();
     test_match_list();

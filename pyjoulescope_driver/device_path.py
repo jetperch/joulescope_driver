@@ -58,12 +58,20 @@ def brand_validate(brand):
         raise ValueError(f'Unsupported brand "{brand}", expected one of: {expect}') from None
 
 
+# The model prefix for a device in bootloader mode, such as "u/&js220/000415".
+_BOOTLOADER_PREFIX = '&'
+
+
 class DevicePath(str):
     """A device path str, such as "u/js320/31NB".
 
     DevicePath is a str subclass, so it works anywhere a device path
     string does.  The field properties return None for paths that do
     not have the "{backend}/{model}/{serial_number}" form.
+
+    A device in bootloader mode has a "&" model prefix, such as
+    "u/&js220/000415".  Its model and brand are the same as in
+    application mode, and :attr:`is_bootloader` is True.
     """
 
     __slots__ = ()
@@ -80,9 +88,15 @@ class DevicePath(str):
 
     @property
     def model(self):
-        """The lowercase model, such as "js320", or None."""
+        """The lowercase model without the bootloader prefix, such as "js320", or None."""
         parts = self._parts()
-        return None if parts is None else parts[1].lower()
+        return None if parts is None else parts[1].lower().removeprefix(_BOOTLOADER_PREFIX)
+
+    @property
+    def is_bootloader(self):
+        """True if this path is a device in bootloader mode."""
+        parts = self._parts()
+        return parts is not None and parts[1].startswith(_BOOTLOADER_PREFIX)
 
     @property
     def serial_number(self):
@@ -109,13 +123,19 @@ class DevicePath(str):
             * the serial number, such as "31NB".
 
             Matching is case-insensitive, and serial numbers must match exactly.
+            The model forms match a device in either application or bootloader
+            mode.  Use the "&" model prefix, such as "&js220", to only match
+            devices in bootloader mode.
         :return: True on a match, False otherwise.
         """
         parts = self._parts()
         if parts is None or spec is None:
             return False
         spec = spec.lower().strip('/')
-        backend, model, serial_number = [p.lower() for p in parts]
-        return spec in (self.lower(), f'{backend}/{model}', model,
-                        f'{model}/{serial_number}', f'{model}-{serial_number}',
-                        serial_number)
+        backend, path_model, serial_number = [p.lower() for p in parts]
+        if spec in (self.lower(), serial_number):
+            return True
+        models = {path_model, path_model.removeprefix(_BOOTLOADER_PREFIX)}
+        return any(spec in (f'{backend}/{model}', model, f'{model}/{serial_number}',
+                            f'{model}-{serial_number}')
+                   for model in models)

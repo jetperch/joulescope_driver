@@ -81,6 +81,17 @@ class TestSubscribeContext(unittest.TestCase):
         _publish(self.d, TOPIC, 2)
         r.assert_empty(self)
 
+    def test_exit_unsubscribe_error_keeps_body_error(self):
+        s = SubscribeContext(FakeDriver(), [(TOPIC, print)])
+
+        def unsubscribe(topic, fn, timeout=None):
+            raise RuntimeError('unsubscribe failed')
+        s._driver.unsubscribe = unsubscribe
+        with self.assertLogs('pyjoulescope_driver.binding', 'WARNING'):
+            with self.assertRaises(ValueError):
+                with s:
+                    raise ValueError('body failed')
+
     def test_unsubscribe_after_finalize(self):
         s = self.d.subscribe(TOPIC, 'pub', Recorder())
         self.d.finalize()
@@ -139,6 +150,25 @@ class TestDeviceContext(unittest.TestCase):
         with self.dev as dev:
             self.assertIs(self.dev, dev)
         self.assertEqual([('close', ('u/js320/8W2A', None), {})], self.d.calls)
+
+    def _close_fails(self):
+        def close(device_prefix, timeout=None):
+            raise RuntimeError('close failed')
+        self.d.close = close
+
+    def test_exit_close_error_keeps_body_error(self):
+        self._close_fails()
+        with self.assertLogs('pyjoulescope_driver.binding', 'WARNING') as cm:
+            with self.assertRaises(ValueError):
+                with self.dev:
+                    raise ValueError('body failed')
+        self.assertIn('close failed', '\n'.join(cm.output))
+
+    def test_exit_close_error_raised(self):
+        self._close_fails()
+        with self.assertRaises(RuntimeError):
+            with self.dev:
+                pass
 
     def test_close_once(self):
         self.dev.close()

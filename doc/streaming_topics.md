@@ -46,9 +46,11 @@ The JS220 and JS320 also stream the trigger input as `s/gpi/7/!data`.
 The JS320 also streams the UART (`s/uart/!data`, u8) and the raw ADCs
 (`s/adc/{n}/!data`, i32) for development.  The JS110 also provides
 `s/sstats/value`, the on-instrument statistics without standard deviation.
-The per-model topic references are [js220.txt](js220.txt) and
-[js320.json](js320.json), and `python -m pyjoulescope_driver metadata`
-prints the reference for a connected device.
+The per-model topic references are
+[js220.txt](https://github.com/jetperch/joulescope_driver/blob/main/doc/js220.txt)
+and [js320.json](https://github.com/jetperch/joulescope_driver/blob/main/doc/js320.json),
+and `python -m pyjoulescope_driver metadata` prints the reference for a
+connected device.
 
 Related settings:
 
