@@ -1119,6 +1119,13 @@ static void device_close_all(struct backend_s * s) {
             d->usb_device = NULL;
         }
         device_close_respond(d, 0);
+        // transfer_free pools transfers while the handle is open.
+        struct jsdrv_list_s * item;
+        while (NULL != (item = jsdrv_list_remove_head(&d->transfers_free))) {
+            struct transfer_s * t = JSDRV_CONTAINER_OF(item, struct transfer_s, item);
+            libusb_free_transfer(t->transfer);
+            jsdrv_free(t);
+        }
     }
 }
 

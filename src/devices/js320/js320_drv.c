@@ -154,6 +154,7 @@ struct js320_drv_s {
     struct jsdrvp_mb_drv_s drv;  // MUST BE FIRST
     const struct mb_link_identity_s * identity;
     struct jsdrvp_mb_dev_s * dev;
+    struct jsdrv_context_s * context;  // kept after close, for finalize
     struct js320_jtag_s * jtag;
     struct js320_fwup_s * fwup;
     struct js320_cal_s * cal;
@@ -740,6 +741,7 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
                            const struct mb_link_identity_s * identity) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     self->dev = dev;
+    self->context = jsdrvp_mb_dev_context(dev);
     self->identity = identity;
     js320_jtag_on_open(self->jtag, dev);
     js320_fwup_on_open(self->fwup, dev);
@@ -1482,9 +1484,13 @@ static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
 static void js320_finalize(struct jsdrvp_mb_drv_s * drv) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     JSDRV_LOGI("JS320 driver finalized");
-    // Forced removal (LL_TERMINATED) finalizes without on_close.
+    // Free in-flight port messages: forced removal (LL_TERMINATED) skips
+    // on_close, and stream data can still arrive after on_close.
     for (uint8_t ch = 0U; ch < JS320_CH_COUNT; ++ch) {
-        js320_port_reset(self, self->dev, ch);
+        if (NULL != self->ports[ch].msg_in) {
+            jsdrvp_msg_free(self->context, self->ports[ch].msg_in);
+            self->ports[ch].msg_in = NULL;
+        }
     }
     for (uint8_t ch = 5U; ch <= 7U; ++ch) {
         jsdrv_downsample_sinc_free(self->ports[ch].host_filter);

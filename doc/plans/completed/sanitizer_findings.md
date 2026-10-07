@@ -69,8 +69,11 @@ Library fixes:
 * `jsdrv_platform_initialize` allocates the heap mutex once.  Each
   `jsdrv_initialize` previously leaked the old mutex and replaced it while
   other threads could hold it.
-* `js320_finalize` releases in-flight port messages.  A forced removal
-  (`LL_TERMINATED`) closes the device without `on_close`.
+* `js320_finalize` releases in-flight port messages, using the context
+  saved at open.  A forced removal (`LL_TERMINATED`) closes the device
+  without `on_close`, and stream data can still arrive after `on_close`.
+* The libusb backend frees its pooled transfers (`transfers_free`) in
+  `device_close_all`.
 * `jsdrvp_msg_alloc_value` skips the `memcpy` for a zero size.
 * `js220_usb.c` stream suspend and resume use unsigned masks.
 
@@ -81,3 +84,8 @@ copy), `tmap_test`, `js220_stats_test` (signed shifts) and
 
 CI: the `sanitizers` job in `.github/workflows/packaging.yml` runs on
 ubuntu-latest and gates `publish_python`.
+
+Dynamic analysis on hardware: `cmake-build/example/jsdrv capture` with a
+JS320 (8W2A), built with both sanitizers, runs clean for 3 to 15 second
+captures at the default rate and at 1 kHz, a current-only capture, and
+CTRL-C.  The first run found the two items above.

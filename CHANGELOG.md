@@ -134,7 +134,9 @@ This file contains the list of changes made to the Joulescope driver.
 * Fixed memory leaks and undefined behavior found by AddressSanitizer and
   UndefinedBehaviorSanitizer, and added a CI job that runs the C unit tests
   with both:
-  * A JS320 removed while streaming leaked its partial sample messages.
+  * A JS320 leaked its partial sample messages when removed while streaming
+    or when stream data arrived after close.
+  * The libusb backend leaked its pooled USB transfers on exit.
   * Each initialize after the first leaked the heap mutex, and replaced it
     while other threads could hold it.
   * A thread join that timed out leaked 16 bytes.

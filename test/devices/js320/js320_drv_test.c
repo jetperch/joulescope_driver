@@ -580,6 +580,21 @@ static void push_voltage_frame(struct js320_drv_s * self,
     self->drv.handle_app(&self->drv, NULL, /*ch=*/6, buf, length);
 }
 
+// Stream data can arrive after on_close (the device is still flushing),
+// which starts a new accumulator.  finalize must free it without a dev.
+// The leak only shows under LeakSanitizer (CI sanitizers job).
+static void test_finalize_frees_data_after_close(void ** state) {
+    struct js320_drv_s * self = *state;
+    struct mb_link_identity_s identity = {.vendor_id = 0x1234, .product_id = 0x0003};
+    float samples[10] = {0};
+    self->drv.on_open(&self->drv, NULL, &identity);
+    self->drv.on_close(&self->drv, NULL);
+    push_current_frame(self, 0ULL, samples, 10);
+    assert_non_null(self->ports[5].msg_in);
+    self->drv.finalize(&self->drv);
+    *state = NULL;
+}
+
 static void test_frame_combining_rate_budget(void ** state) {
     struct js320_drv_s * self = *state;
     // publish_rate=20 -> element_count_max=50000 (1 MHz / 20).  Pick a
@@ -1333,6 +1348,7 @@ int main(void) {
         cmocka_unit_test_setup_teardown(test_smart_power_fs_transition_clears_compute, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_smart_power_no_double_forward,  test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_frame_combining_rate_budget,    test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_finalize_frees_data_after_close, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_group_alignment_ivp,            test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_compute_power_correctness,      test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_signal_tracked_and_forwarded, test_setup, test_teardown),
