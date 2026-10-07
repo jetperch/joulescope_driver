@@ -201,7 +201,8 @@ API, and `example/jsdrv/` contains the larger `jsdrv` tool.
 | `jsdrv scan`, `jsdrv statistics` | The C equivalents. |
 
 Each command accepts `--help`.  Most take `--device` (`-d`) with a device
-path, model, serial number or `model-serial_number`, and the generic
+path, `backend/model` such as `u/js320/`, model, serial number or
+`model-serial_number`, and the generic
 commands also take `--brand`.
 
 

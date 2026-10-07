@@ -101,6 +101,8 @@ class DevicePath(str):
         :param spec: The device specification, which is one of:
 
             * the full device path, such as "u/js320/31NB".
+            * the backend and model, such as "u/js320" or "u/js320/",
+              which selects every JS320 on that interface.
             * the model and serial number, such as "js320/31NB".
             * the model and serial number, such as "js320-31NB".
             * the model, such as "js320".
@@ -113,6 +115,7 @@ class DevicePath(str):
         if parts is None or spec is None:
             return False
         spec = spec.lower().strip('/')
-        _, model, serial_number = [p.lower() for p in parts]
-        return spec in (self.lower(), model, f'{model}/{serial_number}',
-                        f'{model}-{serial_number}', serial_number)
+        backend, model, serial_number = [p.lower() for p in parts]
+        return spec in (self.lower(), f'{backend}/{model}', model,
+                        f'{model}/{serial_number}', f'{model}-{serial_number}',
+                        serial_number)

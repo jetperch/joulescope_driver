@@ -46,11 +46,15 @@ static void test_match(void) {
     CHECK(device_match(p, "js320"));
     CHECK(device_match(p, "8W2A"));
     CHECK(device_match(p, "8w2a"));
+    CHECK(device_match(p, "u/js320"));     // backend/model
+    CHECK(device_match(p, "u/js320/"));
+    CHECK(device_match(p, "U/JS320/"));
 
     CHECK(!device_match(NULL, NULL));
     CHECK(!device_match(p, "u"));
-    CHECK(!device_match(p, "u/js320"));
-    CHECK(!device_match(p, "u/js320/"));
+    CHECK(!device_match(p, "u/"));
+    CHECK(!device_match(p, "x/js320"));
+    CHECK(!device_match(p, "u/js32"));
     CHECK(!device_match(p, "u/js320/8"));
     CHECK(!device_match(p, "8"));
     CHECK(!device_match(p, "W2A"));

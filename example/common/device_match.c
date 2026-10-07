@@ -89,7 +89,9 @@ static bool spec_match(const char * device_path, const char * spec, size_t spec_
         return false;
     }
     size_t serial_sz = strlen(serial);
+    size_t backend_model_sz = (size_t) (model - device_path) + model_sz;
     if (eq_n(spec, spec_sz, device_path)                               // backend/model/serial
+            || eq_nn(spec, spec_sz, device_path, backend_model_sz)     // backend/model
             || eq_nn(spec, spec_sz, model, model_sz + 1 + serial_sz)   // model/serial
             || eq_nn(spec, spec_sz, model, model_sz)                   // model
             || eq_nn(spec, spec_sz, serial, serial_sz)) {              // serial

@@ -90,9 +90,10 @@ class TestDevicePath(unittest.TestCase):
     def test_match(self):
         p = DevicePath('u/js320/31NB')
         for spec in ['u/js320/31NB', 'U/JS320/31nb', '/u/js320/31NB/', 'js320/31NB',
-                     'js320', '31NB', '31nb']:
+                     'js320', '31NB', '31nb', 'u/js320', 'u/js320/', 'U/JS320/']:
             self.assertTrue(p.match(spec), spec)
-        for spec in [None, '', 'u', 'u/js320', '31', 'NB', 'js220', 'js320/31', 'u/js320/31']:
+        for spec in [None, '', 'u', 'u/', '31', 'NB', 'js220', 'js320/31', 'u/js320/31',
+                     'u/js220', 'x/js320', 'u/js32']:
             self.assertFalse(p.match(spec), spec)
 
     def test_match_model_dash_serial_number(self):

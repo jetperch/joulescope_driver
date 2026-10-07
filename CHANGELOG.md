@@ -72,9 +72,9 @@ This file contains the list of changes made to the Joulescope driver.
 * Updated the C example device matching (example/common/device_match.c)
   to match pyjoulescope_driver.device_filter: comma-separated
   specifications, "{model}-{serial_number}", and brands with aliases.
-  BREAKING: The backend/model ("u/js320") and trailing "/" prefix
-  ("u/js320/") filters are no longer supported.  minibitty fuzz_fwup now
-  defaults to "js320".
+  The pre-2.5.0 backend/model prefix, "u/js320" or "u/js320/", remains
+  a valid specification in both.  minibitty fuzz_fwup now defaults to
+  "js320".
 * Added doc/getting_started.md (Python and C lifecycle, command-line tools,
   model differences, pitfalls), doc/streaming_topics.md (statistics and
   streaming payload formats), example/quickstart.c (minimal C program using
@@ -108,7 +108,8 @@ This file contains the list of changes made to the Joulescope driver.
   * Added comma-separated device specification strings to find,
     such as "31NB,js220".
   * Added "{model}-{serial_number}" device specifications, such as
-    "js320-31NB", to DevicePath.match.
+    "js320-31NB", and "{backend}/{model}" specifications, such as
+    "u/js320/" for every JS320 on USB, to DevicePath.match.
 
 ## 2.4.3
 

@@ -21,7 +21,8 @@ from pyjoulescope_driver.device_path import BRANDS_TO_MODELS, BRAND_ALIASES, bra
 
 
 DEVICE_HELP = ('The device specification: a comma-separated list of device paths, '
-               'models, model-serial_number or serial numbers, such as "js320" or "31NB".')
+               'backend/model, models, model-serial_number or serial numbers, '
+               'such as "js320", "u/js320/" or "31NB".')
 
 
 def add_device_argument(p, help=None, aliases=None):

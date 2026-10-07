@@ -17,8 +17,10 @@
 
 The driver reports all devices, including Joulescope instruments and
 other devices, such as a MiniBitty at "u/mb/{serial_number}".  Use the
-brand argument to select only Joulescope instruments.  See
-:class:`DevicePath` for the device path and specification formats.
+brand argument to select only Joulescope instruments, or a backend and
+model specification such as "u/js320/" to select every JS320 on one
+interface.  See :class:`DevicePath` for the device path and specification
+formats.
 
 Use this module as a namespace::
 
