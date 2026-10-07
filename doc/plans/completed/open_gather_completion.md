@@ -16,7 +16,7 @@
 -->
 # Replace the open gather sentinel with a subscribe completion
 
-**Status**: proposed
+**Status**: complete (2026-10-07)
 **Created**: 2026-10-07
 
 ## Context
@@ -122,3 +122,24 @@ on its own.
    that no `mbg/` publishes and no warnings appear.  If two JS320s are
    available, open them concurrently in `defaults` mode and confirm both
    restore host values.
+
+## Outcome
+
+Completed 2026-10-07 in commits 01ce3ae, 3c13dde, d6f8234, 0bdc9c6
+and the stage 4 cleanup.
+
+* The completion is requested with its own pubsub command topic,
+  `JSDRV_PUBSUB_SUBSCRIBE_DONE` (`"_/!subd"`), not with the proposed
+  `done_rsp` payload field.  The field version (01ce3ae) failed on
+  hardware: `jsdrvp_msg_alloc()` reuses pooled messages without clearing
+  the payload, and the other subscribe paths never set the field.  Stray
+  completions reached the JS320 fwup worker and failed its FPGA step with
+  rc=9.  `test_subscribe_dirty_payload_no_done` in `test/pubsub_test.c`
+  covers this.
+* The JS220 still pumps `ul.cmd_q` during the gather, with a 1 s safety
+  timeout.  Both drivers ignore a late completion.
+* Hardware: `test/hw/test_open_state.py` passes on JS220+ 002122
+  (fw 1.3.0) and JS320 8W2A (fw 1.1.11).  An application subscribed to
+  `mbg` sees no publishes during repeated opens of either model, and no
+  gather timeout warnings appear.  Concurrent opens of two JS320s were
+  not tested (one unit available).

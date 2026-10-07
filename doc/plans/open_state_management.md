@@ -283,9 +283,11 @@ What shipped, and how it differs from the original plan above:
   *suppressed* (it only captures the `././info` blob descriptors), then
   reads metadata, then a second GET publishes the read-back values.
 
-* **Host-value gather via loopback sentinel.**  After subscribing
-  RETAIN to the instance subtree, the device publishes a marker to a
-  unique **out-of-prefix** topic (`mbg/<txn>`) it also subscribes to.
+* **Host-value gather via loopback sentinel** (replaced 2026-10-07 by
+  the subscribe completion, see `completed/open_gather_completion.md`).
+  After subscribing RETAIN to the instance subtree, the device published
+  a marker to a unique **out-of-prefix** topic (`mbg/<txn>`) it also
+  subscribed to.
   Two non-obvious constraints, both learned the hard way:
   - The sentinel topic must NOT match a device prefix (`device_lookup`
     keys on the first 3 path segments): publishes under the device

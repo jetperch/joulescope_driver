@@ -167,6 +167,10 @@ settings.  See
   other signals found no data.  The reset now drops pending requests, a
   request for a signal without data logs at INFO, and "signal add" and
   "signal remove" log the signal index instead of 0.
+* Replaced the "mbg/" sentinel that ended the `defaults` open gather of
+  host values with a pubsub subscribe completion.  Applications no longer
+  receive "mbg/..." publishes, and concurrent JS320 opens no longer share
+  sentinel topics.
 
 ## 2.4.3
 

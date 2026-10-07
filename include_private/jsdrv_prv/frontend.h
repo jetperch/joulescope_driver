@@ -49,19 +49,6 @@ enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
 #define JSDRV_MSG_TYPE_LL_TERMINATED 0x3c5aa53cU
 
 /**
- * @brief The topic prefix for a device's open gather sentinel.
- *
- * A DEFAULTS open subscribes to the host's retained device values, then
- * publishes a sentinel to its own "mbg/..." topic.  The frontend delivers
- * in FIFO order, so the sentinel marks the end of the retained values.
- * The sentinel must not use the device prefix, which is suppressed as an
- * echo.  The frontend routes backend topics that start with 'm' without
- * a device lookup, which keeps "mbg/" free of lookup warnings.  See
- * doc/plans/open_gather_completion.md to replace the sentinel.
- */
-#define JSDRVP_GATHER_TOPIC_PREFIX "mbg/"
-
-/**
  * @brief The subscribe completion message topic.
  *
  * A JSDRV_PUBSUB_SUBSCRIBE_DONE subscribe delivers this message to the

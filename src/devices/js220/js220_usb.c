@@ -1318,8 +1318,6 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         } else {
             JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
         }
-    } else if (jsdrv_cstr_starts_with(msg->topic, JSDRVP_GATHER_TOPIC_PREFIX)) {
-        // late gather sentinel: the gather already timed out
     } else if (!topic) {
         JSDRV_LOGE("handle_cmd mismatch %s, %s", msg->topic, d->ll.prefix);
     } else if (topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
