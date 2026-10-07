@@ -138,6 +138,14 @@ void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_
     (void) context; (void) dev_topic; (void) topic; (void) flags;
 }
 
+static char subscribe_done_topic_[JSDRV_TOPIC_LENGTH_MAX];
+
+void jsdrvp_device_subscribe_done(struct jsdrv_context_s * context, const char * dev_topic,
+                                  const char * topic, uint8_t flags) {
+    (void) context; (void) dev_topic; (void) flags;
+    jsdrv_cstr_copy(subscribe_done_topic_, topic, sizeof(subscribe_done_topic_));
+}
+
 void jsdrvp_device_unsubscribe(struct jsdrv_context_s * context, const char * dev_topic,
                                const char * topic, uint8_t flags) {
     (void) context; (void) dev_topic; (void) topic; (void) flags;
@@ -760,29 +768,26 @@ static void test_open_defaults_restore(void ** state) {
     ul_queue(d, PREFIX "/s/i/ctrl", &jsdrv_union_u8_r(1));       // never restarts
     ul_queue(d, PREFIX "/c/fw/version", &jsdrv_union_u32_r(7));  // read-only
     ul_queue(d, PREFIX "/h/fs", &jsdrv_union_u32_r(1000));       // deferred
-    char sentinel[16];
-    uint32_t hash = 0;
-    for (const char * p = PREFIX; *p; ++p) {
-        hash = (hash * 31U) + (uint8_t) *p;
-    }
-    snprintf(sentinel, sizeof(sentinel), "mbg/j%06x", (unsigned) (hash & 0xffffffU));
-    ul_queue(d, sentinel, &jsdrv_union_i32(1));                  // end sentinel
+    ul_queue(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str(PREFIX "/c"));  // not last
+    ul_queue(d, PREFIX "/s/i/range/max", &jsdrv_union_u8_r(4));  // host value
+    ul_queue(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str(PREFIX "/s"));  // gather end
+    ul_queue(d, PREFIX "/s/i/range/max", &jsdrv_union_u8_r(2));  // after open
     pong_queue(d, 2);
 
     assert_int_equal(0, open_defaults_restore(d));
-    bool sentinel_sent = false;
-    for (uint32_t i = 0; i < backend_msg_count_; ++i) {
-        sentinel_sent |= (0 == strcmp(sentinel, backend_msg_[i]->topic));
-    }
-    assert_true(sentinel_sent);
+    assert_string_equal(PREFIX "/s", subscribe_done_topic_);
     publish_expect_u(d, "s/i/range/min", 3);
-    publish_expect_u(d, "s/i/range/max", 5);
+    publish_expect_u(d, "s/i/range/max", 4);
     publish_expect_u(d, "s/i/ctrl", 0);
     publish_expect(d, "?");
     publish_expect(d, JS220_TOPIC_PING);
     char t[JS220_TOPIC_LENGTH];
     struct jsdrv_union_s v;
     assert_false(publish_pop(d, t, &v));
+    struct jsdrvp_msg_s * m = msg_queue_pop_immediate(d->ul.cmd_q);  // left for handle_cmd
+    assert_non_null(m);
+    assert_string_equal(PREFIX "/s/i/range/max", m->topic);
+    jsdrvp_msg_free(d->context, m);
 
     // h/fs waits for open to complete, then runs in order.
     assert_int_equal(1, jsdrv_list_length(&d->open_deferred));
@@ -793,9 +798,10 @@ static void test_open_defaults_restore(void ** state) {
     assert_int_equal(1000, d->fs);
 }
 
-static void test_open_defaults_late_sentinel(void ** state) {
+static void test_open_defaults_late_done(void ** state) {
     struct dev_s * d = (struct dev_s *) *state;
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, "mbg/j000000", &jsdrv_union_i32(1));
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRVP_MSG_SUBSCRIBE_DONE,
+                                                     &jsdrv_union_str(PREFIX "/s"));
     assert_true(handle_cmd(d, m));  // frees m
     assert_int_equal(0, backend_msg_count_);
     assert_null(msg_queue_pop_immediate(d->ll.cmd_q));
@@ -834,7 +840,7 @@ int main(void) {
             cmocka_unit_test_setup_teardown(test_scale, setup, teardown),
             cmocka_unit_test_setup_teardown(test_open_defaults_record, setup, teardown),
             cmocka_unit_test_setup_teardown(test_open_defaults_restore, setup, teardown),
-            cmocka_unit_test_setup_teardown(test_open_defaults_late_sentinel, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_defaults_late_done, setup, teardown),
             cmocka_unit_test_setup_teardown(test_open_defaults_reset, setup, teardown),
     };
 

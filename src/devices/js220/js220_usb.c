@@ -1225,10 +1225,12 @@ static void open_defaults_override(struct dev_s * d, const char * topic, const s
 // Handle one ul.cmd_q message during the gather.  Retained device values
 // are captured, not forwarded.  Other messages are deferred until after
 // open completes.  Return true on the end sentinel.
-static bool open_defaults_gather_msg(struct dev_s * d, struct jsdrvp_msg_s * msg, const char * sentinel) {
-    if (0 == strcmp(msg->topic, sentinel)) {
+static bool open_defaults_gather_msg(struct dev_s * d, struct jsdrvp_msg_s * msg, const char * done_topic) {
+    if (0 == strcmp(msg->topic, JSDRVP_MSG_SUBSCRIBE_DONE)) {
+        bool done = (msg->value.type == JSDRV_UNION_STR)
+            && (0 == strcmp(msg->value.value.str, done_topic));
         jsdrvp_msg_free(d->context, msg);
-        return true;
+        return done;
     }
     const char * topic = prefix_match_and_strip(d->ll.prefix, msg->topic);
     if (topic && ((topic[0] == 's') || (topic[0] == 'c')) && (topic[1] == '/')
@@ -1241,39 +1243,20 @@ static bool open_defaults_gather_msg(struct dev_s * d, struct jsdrvp_msg_s * msg
     return false;
 }
 
-static void open_defaults_gather_subscribe(struct dev_s * d, const char * sentinel, bool subscribe) {
-    char topic[JSDRV_TOPIC_LENGTH_MAX];
-    const char * instances[] = {"c", "s"};
-    for (size_t i = 0; i < JSDRV_ARRAY_SIZE(instances); ++i) {
-        tfp_snprintf(topic, sizeof(topic), "%s/%s", d->ll.prefix, instances[i]);
-        if (subscribe) {
-            jsdrvp_device_subscribe(d->context, d->ll.prefix, topic, JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
-        } else {
-            jsdrvp_device_unsubscribe(d->context, d->ll.prefix, topic, JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
-        }
-    }
-    if (subscribe) {
-        jsdrvp_device_subscribe(d->context, d->ll.prefix, sentinel, JSDRV_SFLAG_PUB);
-    } else {
-        jsdrvp_device_unsubscribe(d->context, d->ll.prefix, sentinel, JSDRV_SFLAG_PUB);
-    }
-}
-
-// Gather the host's retained device values, see JSDRVP_GATHER_TOPIC_PREFIX.
-// The sentinel name is fixed per device: pubsub never frees topics.
+// Gather the host's retained device values.  The frontend delivers in
+// FIFO order, so the completion of the last subscription ("s") follows
+// the retained values of both instances.
 static void open_defaults_gather(struct dev_s * d) {
-    char sentinel[16];
-    uint32_t hash = 0;
-    for (const char * p = d->ll.prefix; *p; ++p) {
-        hash = (hash * 31U) + (uint8_t) *p;
-    }
-    tfp_snprintf(sentinel, sizeof(sentinel), JSDRVP_GATHER_TOPIC_PREFIX "j%06x",
-                 (unsigned) (hash & 0xffffffU));
-    open_defaults_gather_subscribe(d, sentinel, true);
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, sentinel, &jsdrv_union_i32(1));
-    jsdrvp_backend_send(d->context, m);
+    char topic_c[JSDRV_TOPIC_LENGTH_MAX];
+    char topic_s[JSDRV_TOPIC_LENGTH_MAX];
+    const uint8_t flags = JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB;
+    tfp_snprintf(topic_c, sizeof(topic_c), "%s/c", d->ll.prefix);
+    tfp_snprintf(topic_s, sizeof(topic_s), "%s/s", d->ll.prefix);
+    jsdrvp_device_subscribe(d->context, d->ll.prefix, topic_c, flags);
+    jsdrvp_device_subscribe_done(d->context, d->ll.prefix, topic_s, flags);
 
     uint32_t t_end = jsdrv_time_ms_u32() + OPEN_GATHER_TIMEOUT_MS;
+    struct jsdrvp_msg_s * m;
     bool done = false;
     while (!done && !d->do_exit) {
         uint32_t timeout_ms = t_end - jsdrv_time_ms_u32();
@@ -1292,10 +1275,11 @@ static void open_defaults_gather(struct dev_s * d) {
         poll(&fds, 1, (int) timeout_ms);
 #endif
         while (!done && (NULL != (m = msg_queue_pop_immediate(d->ul.cmd_q)))) {
-            done = open_defaults_gather_msg(d, m, sentinel);
+            done = open_defaults_gather_msg(d, m, topic_s);
         }
     }
-    open_defaults_gather_subscribe(d, sentinel, false);
+    jsdrvp_device_unsubscribe(d->context, d->ll.prefix, topic_c, flags);
+    jsdrvp_device_unsubscribe(d->context, d->ll.prefix, topic_s, flags);
 }
 
 static int32_t open_defaults_restore(struct dev_s * d) {
@@ -1329,6 +1313,8 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             // full driver shutdown
             d->do_exit = true;
             rv = false;
+        } else if (0 == strcmp(JSDRVP_MSG_SUBSCRIBE_DONE, msg->topic)) {
+            // late completion: the gather already timed out
         } else {
             JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
         }
