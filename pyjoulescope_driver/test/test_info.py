@@ -64,6 +64,26 @@ class TestInfo(unittest.TestCase):
         self.assertEqual(1, format_value(None, 1))
 
 
+class TestSysInfo(unittest.TestCase):
+
+    def test_sys_info(self):
+        txt = info._sys_info()
+        self.assertIn('SYSTEM INFORMATION', txt)
+        self.assertIn('pyjoulescope_driver', txt)
+
+    def test_cpu_freq_unavailable(self):
+        # psutil.cpu_freq() returns None without CPU frequency data, such
+        # as on many ARM Linux VMs.
+        with mock.patch.object(info.psutil, 'cpu_freq', return_value=None):
+            txt = info._sys_info()
+        self.assertIn('CPU frequency        unavailable', txt)
+
+    def test_cpu_count_unavailable(self):
+        with mock.patch.object(info.psutil, 'cpu_count', return_value=None):
+            txt = info._sys_info()
+        self.assertIn('CPU cores            unavailable', txt)
+
+
 class TestInfoDevices(unittest.TestCase):
 
     def run_info(self, device=None, brand=None):

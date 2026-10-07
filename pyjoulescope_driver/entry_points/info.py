@@ -66,7 +66,20 @@ def _sys_info():
     except ImportError:
         joulescope_version = 'uninstalled'
 
+    # psutil returns None for unavailable values, such as the CPU frequency
+    # on many ARM Linux VMs.
     cpufreq = psutil.cpu_freq()
+    if cpufreq is None:
+        cpufreq = 'unavailable'
+    else:
+        cpufreq = (f'{cpufreq.current:.0f} MHz ({cpufreq.min:.0f} MHz min '
+                   f'to {cpufreq.max:.0f} MHz max)')
+    cores_physical = psutil.cpu_count(logical=False)
+    cores_total = psutil.cpu_count(logical=True)
+    if cores_total is None:
+        cores = 'unavailable'
+    else:
+        cores = f'{cores_physical or "?"} physical, {cores_total} total'
     vm = psutil.virtual_memory()
     vm_available = (vm.total - vm.used) / (1024 ** 3)
     vm_total = vm.total / (1024 ** 3)
@@ -78,8 +91,8 @@ def _sys_info():
     python impl          {platform.python_implementation()}
     platform             {platform.platform()}
     processor            {platform.processor()}
-    CPU cores            {psutil.cpu_count(logical=False)} physical, {psutil.cpu_count(logical=True)} total
-    CPU frequency        {cpufreq.current:.0f} MHz ({cpufreq.min:.0f} MHz min to {cpufreq.max:.0f} MHz max)   
+    CPU cores            {cores}
+    CPU frequency        {cpufreq}
     RAM                  {vm_available:.1f} GB available, {vm_total:.1f} GB total ({vm_available/vm_total *100:.1f}%)
     
     PYTHON PACKAGE INFORMATION

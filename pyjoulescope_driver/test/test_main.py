@@ -17,27 +17,40 @@
 
 import contextlib
 import io
+import os
 import unittest
+from unittest import mock
 from pyjoulescope_driver.__main__ import run
+
+
+# The usage wraps at the terminal width, after a program name whose length
+# depends on how the tests run, such as a long cibuildwheel venv path.
+# Force a narrow terminal so every platform wraps.
+_COLUMNS = {'COLUMNS': '30'}
+
+
+def _usage_regex(command):
+    return r'usage: .*?\s' + command + r'\s+\[-h\]'
 
 
 class TestMain(unittest.TestCase):
 
     def run_error(self, args):
         err = io.StringIO()
-        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+        with mock.patch.dict(os.environ, _COLUMNS), contextlib.redirect_stderr(err), \
+                self.assertRaises(SystemExit) as cm:
             run(args)
         self.assertEqual(2, cm.exception.code)
         return err.getvalue()
 
     def test_subcommand_unrecognized(self):
         err = self.run_error(['info', '-v'])
-        self.assertRegex(err, r'usage: \S.* info \[-h\]')
-        self.assertIn('info: error: unrecognized arguments: -v', err)
+        self.assertRegex(err, '(?s)' + _usage_regex('info'))
+        self.assertRegex(err, r'info: error: unrecognized\s+arguments: -v')
 
     def test_subcommand_invalid_value(self):
         err = self.run_error(['scan', '--brand', 'acme'])
-        self.assertRegex(err, r'usage: \S.* scan \[-h\]')
+        self.assertRegex(err, '(?s)' + _usage_regex('scan'))
         self.assertIn('Unsupported brand "acme"', err)
 
     def test_top_level_unrecognized(self):
