@@ -93,6 +93,24 @@ static void test_match_comma_separated(void) {
     CHECK(!device_match(p, " / js320 / "));  // trim whitespace, then "/"
 }
 
+static void test_match_backend_model(void) {
+    printf("test_match_backend_model:\n");
+    const char * p = "u/js320/8W2A";
+    // "u/js320" and "u/js320/" select the same devices
+    CHECK(device_match(p, "u/js320"));
+    CHECK(device_match(p, "u/js320/"));
+    CHECK(device_match(p, " u/js320/ "));
+    CHECK(device_match(p, "/u/js320"));
+    CHECK(device_match(p, "u/js220/,u/js320/"));
+    CHECK(device_match(p, "u/js220,u/js320"));
+    CHECK(device_match("u/mb/93NP", "u/mb/"));
+    CHECK(!device_match("u/mb/93NP", "u/js320/"));
+    CHECK(!device_match("u/mb/93NP", "u/js320"));
+    CHECK(!device_match(p, "u/js220"));
+    CHECK(!device_match(p, "u/js220/"));
+    CHECK(!device_match(p, "x/js320/"));
+}
+
 static void test_match_malformed(void) {
     printf("test_match_malformed:\n");
     CHECK(!device_match("u/js320", "u/js320"));
@@ -194,6 +212,7 @@ int main(void) {
     test_match();
     test_match_model_dash_serial_number();
     test_match_comma_separated();
+    test_match_backend_model();
     test_match_malformed();
     test_brand();
     test_is_joulescope();

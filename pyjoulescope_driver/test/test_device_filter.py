@@ -85,6 +85,18 @@ class TestDeviceFilter(unittest.TestCase):
         self.assertEqual(['u/js320/1', 'u/js320/12', 'u/js320/31NB'],
                          device_filter.find(PATHS, 'js320'))
 
+    def test_filter_backend_model(self):
+        # "u/js320" and "u/js320/" select the same devices
+        expect = ['u/js320/1', 'u/js320/12', 'u/js320/31NB']
+        for spec in ['u/js320', 'u/js320/', 'U/JS320/', ' u/js320/ ', '/u/js320/']:
+            self.assertEqual(expect, device_filter.find(PATHS, spec), spec)
+        self.assertEqual(device_filter.find(PATHS, 'u/js320'),
+                         device_filter.find(PATHS, 'u/js320/'))
+        self.assertEqual(['u/mb/1', *expect], device_filter.find(PATHS, 'u/mb/,u/js320'))
+        self.assertEqual([], device_filter.find(PATHS, 'x/js320/'))
+        self.assertEqual('u/js220/000415', device_filter.find_one(PATHS, 'u/js220'))
+        self.assertEqual('u/js220/000415', device_filter.find_one(PATHS, 'u/js220/'))
+
     def test_filter_list(self):
         self.assertEqual(['u/js220/000415', 'u/js320/31NB'],
                          device_filter.find(PATHS, ['31NB', 'u/js220/000415']))

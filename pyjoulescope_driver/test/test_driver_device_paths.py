@@ -62,6 +62,10 @@ class TestDriverDevicePaths(unittest.TestCase):
         self.assertEqual(['u/js220/000415', 'u/js320/8W2A'],
                          self.d.device_paths('8w2a, js220'))
         self.assertEqual(['u/js320/8W2A'], self.d.device_paths(['js320-8W2A']))
+        self.assertEqual(['u/js320/8W2A'], self.d.device_paths('u/js320'))
+        self.assertEqual(['u/js320/8W2A'], self.d.device_paths('u/js320/'))
+        self.assertEqual('u/js320/8W2A', self.d.find_one_device('u/js320/'))
+        self.assertEqual('u/js320/8W2A', self.d.find_one_device('u/js320'))
 
     def test_brand(self):
         self.assertEqual(['u/js220/000415', 'u/js320/8W2A'],
