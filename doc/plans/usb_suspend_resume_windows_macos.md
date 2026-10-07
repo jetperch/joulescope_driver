@@ -235,8 +235,8 @@ Still to validate (needs other hardware / hands):
 - Unplug while asleep (item 4) and physical hot-unplug regression (item 5 unplug half).
 - macOS (unchanged plan above).
 
-The mb_device revalidate/replay logic has no host unit-test seam yet; see
-`doc/plans/mb_device_test_harness.md`.
+`test/devices/mb_device/mb_device_test.c` covers the mb_device
+revalidate/replay logic.
 
 ## Windows selective suspend (2026-07-14)
 

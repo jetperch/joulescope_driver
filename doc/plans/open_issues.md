@@ -153,8 +153,7 @@ mini-plan first.
 
 - [ ] No dedicated unit tests for `src/devices.c`, `js110_usb.c`,
       `js320/firmware.c`, `js320_jtag.c`, either backend, `posix.c` or
-      `windows.c`.  See `libusb_backend_test_harness.md` and
-      `mb_device_test_harness.md`.
+      `windows.c`.  See `libusb_backend_test_harness.md`.
 - [ ] cmocka `assert_float_equal` and `assert_double_equal` treat NaN as
       equal to anything.  149 uses in 13 files.  Six files never check
       `isnan`: `statistics_test.c`, `time_test.c`, `cstr_test.c`,
@@ -211,5 +210,5 @@ mini-plan first.
 Not merged here, since each one has its own scope: `pubsub_api.md`, `example_dedup.md`,
 `mem_transaction_dedup.md` (not started), `emulated_device.md`,
 `node_maintenance.md`, `libusb_backend_test_harness.md`,
-`mb_device_test_harness.md`, `open_state_management.md`,
+`open_state_management.md`,
 `usb_suspend_resume_windows_macos.md`, `linux_host_sleep_repro.md`.
