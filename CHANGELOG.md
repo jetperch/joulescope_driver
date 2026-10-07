@@ -53,6 +53,19 @@ This file contains the list of changes made to the Joulescope driver.
 * When a DeviceContext or SubscribeContext block raises, a close or
   unsubscribe error on exit is logged instead of replacing the block's
   exception.
+* Publish errors that no caller receives now log at ERROR level, such as
+  "publish u/js320/8W2A/s/nope failed: 16 NOT_FOUND" for a publish with
+  timeout=0.  MiniBitty-based devices, including the JS320, now confirm
+  every publish so that device-side errors, such as an unknown topic,
+  always return.  Use a blocking publish to raise the error instead.
+* The Python Driver now defaults the native log level to "error" (was
+  "off"), so these errors reach the Python "jsdrv" logger.
+* Fixed the host retaining a value that a device rejected.  The rejected
+  value is no longer cached: the previous value is restored and published
+  to subscribers, or cleared when none existed.  Previously, a query
+  returned the rejected value, and publishing the same value again
+  succeeded without reaching the device.  A CLOSED device still keeps the
+  value for the next "defaults" open.
 * Driver.finalize, including exiting "with Driver() as d:", now closes each
   device that the instance opened and that is still connected.
   Afterwards, close, unsubscribe and unsubscribe_all do nothing, and the

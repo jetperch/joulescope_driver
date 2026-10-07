@@ -1817,7 +1817,9 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGW("handle_cmd %s but device not open", topic);
         send_return_code_to_frontend(d, topic, JSDRV_ERROR_CLOSED);
     } else {
-        publish_to_device_confirmed(d, topic, &msg->value, msg->source != 0);
+        // Always confirm, so the device reports errors even when no caller
+        // waits, such as for a publish with timeout_ms=0.
+        publish_to_device_confirmed(d, topic, &msg->value, true);
     }
     jsdrvp_msg_free(d->context, msg);
     return rv;
@@ -2048,7 +2050,7 @@ static void handle_in_publish(struct jsdrvp_mb_dev_s * d, uint32_t metadata, str
                     + sizeof(struct mb_stdmsg_pubsub_response_s))) {
             struct mb_stdmsg_pubsub_response_s * rsp =
                 (struct mb_stdmsg_pubsub_response_s *) (rsp_hdr + 1);
-            JSDRV_LOGI("confirmed delivery rsp topic=%s rc=%d", rsp->topic, (int) rsp->return_code);
+            JSDRV_LOGD1("confirmed delivery rsp topic=%s rc=%d", rsp->topic, (int) rsp->return_code);
             send_return_code_to_frontend(d, rsp->topic, (int32_t) rsp->return_code);
             jsdrvp_msg_free(d->context, m);
         } else if (d->drv && d->drv->handle_publish

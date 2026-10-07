@@ -320,7 +320,17 @@ static uint8_t on_return_code(void * user_data, struct jsdrvp_msg_s * msg) {
         return 0;
     }
 
-    timeout_complete(c, msg->topic, rc);
+    if (timeout_complete(c, msg->topic, rc) && rc) {
+        // No caller waits for this return code, such as for a publish with
+        // timeout_ms=0, so the log is the only place the error surfaces.
+        char topic[JSDRV_TOPIC_LENGTH_MAX];
+        jsdrv_cstr_copy(topic, msg->topic, sizeof(topic));
+        size_t sz = strlen(topic);
+        if (sz && (topic[sz - 1] == JSDRV_TOPIC_SUFFIX_RETURN_CODE)) {
+            topic[sz - 1] = 0;
+        }
+        JSDRV_LOGE("publish %s failed: %d %s", topic, (int) rc, jsdrv_error_code_name(rc));
+    }
     return 0;
 }
 

@@ -772,6 +772,7 @@ _DEVICE_OPEN_MODES = {
 
 
 cdef int32_t _driver_count = 0
+cdef bint _log_level_defaulted = False
 _TIMEOUT_MS_DEFAULT = 1000
 _TIMEOUT_MS_INIT = 5000
 
@@ -813,11 +814,28 @@ def _handle_rc(rc, src, cause=None):
             raise RuntimeError(f'{src} failed {rc} {name} | {description}{cause}')
 
 
+cdef _log_level_default():
+    """Default the native log level to ERROR, once per process.
+
+    Errors that no caller receives, such as a publish with timeout=0 that
+    the device rejects, only surface in the log.  Respect any level that the
+    application set before the first Driver.
+    """
+    global _log_level_defaulted
+    if not _log_level_defaulted:
+        _log_level_defaulted = True
+        if c_jsdrv.jsdrv_log_level_get() == LogLevel.OFF:
+            c_jsdrv.jsdrv_log_level_set(LogLevel.ERROR)
+
+
 cdef class Driver:
     """The Joulescope driver class.
 
     :param timeout: The optional timeout for open.
         None (default) uses the default timeout.
+
+    The native driver log forwards to the Python "jsdrv" logger at
+    :attr:`log_level`, which defaults to "error".
 
     The application must finalize each Driver instance, either with a
     context manager or by calling :meth:`finalize` directly.  Finalize
@@ -861,6 +879,7 @@ cdef class Driver:
         if _driver_count == 0:
             c_jsdrv.jsdrv_log_initialize()
             c_jsdrv.jsdrv_log_register(_on_log_recv, NULL)
+        _log_level_default()
         _driver_count += 1
 
     cdef c_jsdrv.jsdrv_context_s * _context_get(self) except NULL:
@@ -947,7 +966,11 @@ cdef class Driver:
         :param topic: The topic string.
         :param value: The value, which must pass validation for the topic.
         :param timeout: The timeout in seconds.  None (default) uses
-            the default timeout.
+            the default timeout and waits for the return code.  0 does
+            not wait, so publish cannot raise for an invalid topic or value.
+            The driver logs the error at ERROR level to the "jsdrv" logger
+            instead, such as "publish u/js320/8W2A/s/nope failed: 16 NOT_FOUND".
+            Use a blocking publish when the caller must handle the error.
         :raise: On error.
         """
         cdef c_jsdrv.jsdrv_union_s v

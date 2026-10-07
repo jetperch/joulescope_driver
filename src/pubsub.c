@@ -36,6 +36,9 @@ struct subscriber_s {
 struct topic_s {
     char name[JSDRV_TOPIC_LENGTH_PER_LEVEL];
     struct jsdrvp_msg_s * value;
+    // The retained value that the last publish replaced, until its return
+    // code arrives.  A rejection restores it, see value_reject().
+    struct jsdrvp_msg_s * value_prev;
     struct jsdrvp_msg_s * meta;
     struct topic_s * parent;
     struct jsdrv_list_s item;  // used by parent->children list
@@ -125,6 +128,7 @@ static struct topic_s * topic_alloc(struct jsdrv_pubsub_s * self, const char * n
     (void) self;
     struct topic_s * topic = jsdrv_alloc_clr(sizeof(struct topic_s));
     topic->value = NULL;
+    topic->value_prev = NULL;
     jsdrv_list_initialize(&topic->item);
     jsdrv_list_initialize(&topic->children);
     jsdrv_list_initialize(&topic->subscribers);
@@ -142,6 +146,10 @@ static void topic_free(struct jsdrv_pubsub_s * self, struct topic_s * topic) {
     if (topic->value) {
         jsdrvp_msg_free(self->context, topic->value);
         topic->value = NULL;
+    }
+    if (topic->value_prev) {
+        jsdrvp_msg_free(self->context, topic->value_prev);
+        topic->value_prev = NULL;
     }
     if (topic->meta) {
         jsdrvp_msg_free(self->context, topic->meta);
@@ -363,6 +371,57 @@ static void query_value_copy(const struct jsdrvp_msg_s * src, struct jsdrvp_msg_
     }
 }
 
+static void value_prev_free(struct jsdrv_pubsub_s * self, struct topic_s * t) {
+    if (t->value_prev) {
+        jsdrvp_msg_free(self->context, t->value_prev);
+        t->value_prev = NULL;
+    }
+}
+
+/**
+ * @brief Handle a rejected publish to a topic.
+ *
+ * Do not retain a value that a device or subscriber rejected: restore the
+ * value that the publish replaced, and publish it so that subscribers
+ * update, or clear the value when none existed.
+ */
+static void value_reject(struct jsdrv_pubsub_s * self, struct topic_s * t) {
+    if (t->value) {
+        jsdrvp_msg_free(self->context, t->value);
+        t->value = NULL;
+    }
+    if (t->value_prev) {
+        t->value = t->value_prev;
+        t->value_prev = NULL;
+        publish(t, t->value, 0);
+    }
+}
+
+/**
+ * @brief Update the retained value for a publish return code.
+ *
+ * Success confirms the value.  CLOSED keeps it: the host retains values
+ * published to a closed device, and the "defaults" open pushes them.
+ */
+static void value_on_return_code(struct jsdrv_pubsub_s * self, struct topic_s * t, int32_t rc) {
+    if (0 == rc) {
+        value_prev_free(self, t);
+    } else if (JSDRV_ERROR_CLOSED != rc) {
+        value_reject(self, t);
+    }
+}
+
+static bool return_code_value(const struct jsdrvp_msg_s * msg, int32_t * rc) {
+    if (msg->value.type == JSDRV_UNION_I32) {
+        *rc = msg->value.value.i32;
+        return true;
+    } else if ((msg->value.type == JSDRV_UNION_BIN) && (msg->value.size >= sizeof(int32_t))) {
+        memcpy(rc, msg->value.value.bin, sizeof(*rc));  // extended response: rc first
+        return true;
+    }
+    return false;
+}
+
 static void publish_return_code(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg) {
     size_t sz = strlen(msg->topic);
     switch (msg->topic[sz - 1]) {
@@ -379,6 +438,10 @@ static void publish_return_code(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_
     }
     struct topic_s * t = topic_find(self, msg->topic, true);
     if (t) {
+        int32_t rc;
+        if (return_code_value(msg, &rc)) {
+            value_on_return_code(self, t, rc);  // before the waiter wakes
+        }
         msg->topic[sz] = JSDRV_TOPIC_SUFFIX_RETURN_CODE;
         msg->topic[sz + 1] = 0;
         publish(t, msg, JSDRV_SFLAG_RETURN_CODE);
@@ -582,20 +645,25 @@ static void publish_normal(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * m
             jsdrvp_msg_free(self->context, msg);
             return;
         }
-        if (t->value) {
-            jsdrvp_msg_free(self->context, t->value);  // free old value
-            t->value = NULL;
-        }
-        if ((msg->value.flags & JSDRV_UNION_FLAG_RETAIN) && (t->name[0] != '!')) {
+        value_prev_free(self, t);
+        bool retained = (msg->value.flags & JSDRV_UNION_FLAG_RETAIN) && (t->name[0] != '!');
+        if (retained) {
+            t->value_prev = t->value;  // until the return code confirms msg
             t->value = msg;
         } else {
+            if (t->value) {
+                jsdrvp_msg_free(self->context, t->value);  // free old value
+            }
             t->value = NULL;
         }
         status = publish(t, msg, 0);
         if (status) {
-            local_return_code(self, msg->topic, status);
+            char topic[JSDRV_TOPIC_LENGTH_MAX];
+            jsdrv_cstr_copy(topic, msg->topic, sizeof(topic));
+            value_on_return_code(self, t, status);  // may free a retained msg
+            local_return_code(self, topic, status);
         }
-        if (!t->value) {
+        if (!retained) {
             jsdrvp_msg_free(self->context, msg);
         }
     } else {

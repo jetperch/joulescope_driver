@@ -364,6 +364,125 @@ static void test_query(void ** state) {
     TEARDOWN();
 }
 
+static void return_code(struct jsdrv_pubsub_s * p, const char * topic, int32_t rc) {
+    char buf[JSDRV_TOPIC_LENGTH_MAX];
+    jsdrv_cstr_join(buf, topic, "#", sizeof(buf));
+    jsdrv_pubsub_publish(p, jsdrvp_msg_alloc_value(NULL, buf, &jsdrv_union_i32(rc)));
+}
+
+static struct jsdrv_union_s query_value(struct jsdrv_pubsub_s * p, const char * topic) {
+    struct jsdrv_union_s v = jsdrv_union_u32(0xDEADBEEF);
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(NULL, JSDRV_PUBSUB_QUERY, &jsdrv_union_i32(0));
+    jsdrv_cstr_copy(m->payload.query.topic, topic, sizeof(m->payload.query.topic));
+    m->payload.query.value = &v;
+    jsdrv_pubsub_publish(p, m);
+    jsdrv_pubsub_process(p);
+    return v;
+}
+
+#define TOPIC_DEV "u/js320/8W2A/s/x"
+
+// A device rejects a publish: restore the previous value and notify.
+static void test_rejected_restores_previous(void ** state) {
+    SETUP();
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(1));
+    jsdrv_pubsub_process(p);
+    subscribe_internal(p, TOPIC_DEV, JSDRV_SFLAG_PUB);
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(2));
+    expect_publish_internal(TOPIC_DEV, &jsdrv_union_u32_r(2));
+    jsdrv_pubsub_process(p);
+    return_code(p, TOPIC_DEV, JSDRV_ERROR_NOT_FOUND);
+    expect_publish_internal(TOPIC_DEV, &jsdrv_union_u32_r(1));
+    jsdrv_pubsub_process(p);
+    struct jsdrv_union_s v = query_value(p, TOPIC_DEV);
+    assert_int_equal(JSDRV_UNION_U32, v.type);
+    assert_int_equal(1, v.value.u32);
+    TEARDOWN();
+}
+
+// A device rejects a publish to a topic without a previous value: clear it.
+static void test_rejected_without_previous_clears(void ** state) {
+    SETUP();
+    subscribe_internal(p, TOPIC_DEV, JSDRV_SFLAG_PUB);
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(2));
+    expect_publish_internal(TOPIC_DEV, &jsdrv_union_u32_r(2));
+    jsdrv_pubsub_process(p);
+    return_code(p, TOPIC_DEV, JSDRV_ERROR_NOT_FOUND);
+    jsdrv_pubsub_process(p);
+    struct jsdrv_union_s v = query_value(p, TOPIC_DEV);
+    assert_int_equal(JSDRV_UNION_NULL, v.type);
+    TEARDOWN();
+}
+
+// A rejected value is not retained, so publishing it again is not deduplicated.
+static void test_rejected_repeat_forwarded(void ** state) {
+    SETUP();
+    subscribe_internal(p, TOPIC_DEV, JSDRV_SFLAG_PUB);
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(2));
+    expect_publish_internal(TOPIC_DEV, &jsdrv_union_u32_r(2));
+    jsdrv_pubsub_process(p);
+    return_code(p, TOPIC_DEV, JSDRV_ERROR_NOT_FOUND);
+    jsdrv_pubsub_process(p);
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(2));
+    expect_publish_internal(TOPIC_DEV, &jsdrv_union_u32_r(2));
+    jsdrv_pubsub_process(p);
+    TEARDOWN();
+}
+
+// A closed device keeps the value for the next "defaults" open.
+static void test_closed_keeps_value(void ** state) {
+    SETUP();
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(1));
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(2));
+    jsdrv_pubsub_process(p);
+    subscribe_internal(p, TOPIC_DEV, JSDRV_SFLAG_PUB);
+    return_code(p, TOPIC_DEV, JSDRV_ERROR_CLOSED);
+    jsdrv_pubsub_process(p);
+    struct jsdrv_union_s v = query_value(p, TOPIC_DEV);
+    assert_int_equal(2, v.value.u32);
+    TEARDOWN();
+}
+
+// Success keeps the new value, and a later error cannot restore the old one.
+static void test_success_keeps_value(void ** state) {
+    SETUP();
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(1));
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(2));
+    jsdrv_pubsub_process(p);
+    subscribe_internal(p, TOPIC_DEV, JSDRV_SFLAG_PUB);
+    return_code(p, TOPIC_DEV, 0);
+    jsdrv_pubsub_process(p);
+    struct jsdrv_union_s v = query_value(p, TOPIC_DEV);
+    assert_int_equal(2, v.value.u32);
+    TEARDOWN();
+}
+
+static int on_reject_count = 0;
+
+static uint8_t on_reject(void * user_data, struct jsdrvp_msg_s * msg) {
+    (void) user_data;
+    (void) msg;
+    ++on_reject_count;
+    return JSDRV_ERROR_PARAMETER_INVALID;
+}
+
+// A local subscriber rejects a publish: restore the previous value.
+static void test_subscriber_rejects_restores_previous(void ** state) {
+    SETUP();
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(1));
+    jsdrv_pubsub_process(p);
+    struct jsdrvp_msg_s * m = subscribe_msg(p, TOPIC_DEV, JSDRV_SFLAG_PUB, JSDRV_PUBSUB_SUBSCRIBE);
+    m->payload.sub.subscriber.internal_fn = on_reject;
+    jsdrv_pubsub_publish(p, m);
+    on_reject_count = 0;
+    publish(p, TOPIC_DEV, &jsdrv_union_u32_r(2));
+    jsdrv_pubsub_process(p);
+    assert_int_equal(2, on_reject_count);  // the publish, then the restore
+    struct jsdrv_union_s v = query_value(p, TOPIC_DEV);
+    assert_int_equal(1, v.value.u32);
+    TEARDOWN();
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_subscribe_then_publish),
@@ -379,6 +498,12 @@ int main(void) {
             cmocka_unit_test(test_return_code),
             cmocka_unit_test(test_meta),
             cmocka_unit_test(test_query),
+            cmocka_unit_test(test_rejected_restores_previous),
+            cmocka_unit_test(test_rejected_without_previous_clears),
+            cmocka_unit_test(test_rejected_repeat_forwarded),
+            cmocka_unit_test(test_closed_keeps_value),
+            cmocka_unit_test(test_success_keeps_value),
+            cmocka_unit_test(test_subscriber_rejects_restores_previous),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
