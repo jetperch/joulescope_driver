@@ -223,6 +223,32 @@ jobs:
           path: jci
           if-no-files-found: error
 
+  sanitizers:
+    name: C unit tests with ASan and UBSan
+    runs-on: ubuntu-latest
+    env:
+      SANITIZE: -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Install Ubuntu dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libudev-dev
+
+      # ASan cannot map its shadow memory with the runner's 32-bit mmap ASLR.
+      - name: Reduce ASLR entropy
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Build
+        run: |
+          cmake -S . -B cmake_build_sanitize -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="$SANITIZE" -DCMAKE_EXE_LINKER_FLAGS="$SANITIZE"
+          cmake --build cmake_build_sanitize -j 4
+
+      - name: Run tests
+        run: ctest --test-dir cmake_build_sanitize --output-on-failure
+
   build_python_sdist:
     name: Build python sdist
     needs:
@@ -326,6 +352,7 @@ jobs:
       - reuse
       - build_native_win
       - build_native_posix
+      - sanitizers
       - build_python_wheels
     runs-on: ubuntu-latest
     permissions:

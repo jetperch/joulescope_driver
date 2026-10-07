@@ -250,7 +250,11 @@ void * jsdrv_alloc(size_t size_bytes) {
 // --- Platform ---
 
 int32_t jsdrv_platform_initialize(void) {
-    heap_mutex = jsdrv_os_mutex_alloc("heap");
+    // Allocate once: the heap outlives each context, and replacing the
+    // mutex while another thread holds it would break that thread's unlock.
+    if (NULL == heap_mutex) {
+        heap_mutex = jsdrv_os_mutex_alloc("heap");
+    }
 
     if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
         WINDOWS_LOGE("Could not raise process priority using %s", "SetPriorityClass");

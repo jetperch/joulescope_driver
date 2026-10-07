@@ -47,6 +47,14 @@ const char SRC_TOPIC[] = "src/topic/!data";
     b.active = true;                                        \
     jsdrv_bufsig_alloc(&b, 1000000, 10, 10)
 
+// The response info holds a tmap copy that the receiver must free.
+static int32_t process_request(struct bufsig_s * b, struct jsdrv_buffer_request_s * req,
+        struct jsdrv_buffer_response_s * rsp) {
+    int32_t rc = jsdrv_bufsig_process_request(b, req, rsp);
+    jsdrv_tmap_free(rsp->info.tmap);
+    rsp->info.tmap = NULL;
+    return rc;
+}
 
 
 static void test_initialize_finalize(void **state) {
@@ -218,7 +226,7 @@ static void check_samples_uint(struct bufsig_s * b, uint8_t bits, uint64_t start
     req.time.samples.length = length;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    assert_int_equal(0, jsdrv_bufsig_process_request(b, &req, rsp));
+    assert_int_equal(0, process_request(b, &req, rsp));
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SAMPLES, rsp->response_type);
     assert_int_equal(length, rsp->info.time_range_samples.length);
     for (uint64_t i = 0; i < length; ++i) {
@@ -272,7 +280,7 @@ static void test_samples_u1_skip_fill(void **state) {
     req.time.samples.length = 26;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    assert_int_equal(0, jsdrv_bufsig_process_request(&b, &req, rsp));
+    assert_int_equal(0, process_request(&b, &req, rsp));
     assert_int_equal(26, rsp->info.time_range_samples.length);
     for (uint64_t i = 0; i < 26; ++i) {
         uint64_t sample_id = 1000 + i;
@@ -345,6 +353,7 @@ static void test_samples_start_length(void **state) {
     assert_int_equal(0, jsdrv_tmap_sample_id_to_timestamp(b.tmap, 1000, &offset_time));
     assert_int_equal(offset_time, info.time_range_utc.start);
     assert_int_equal(offset_time + JSDRV_TIME_MILLISECOND - JSDRV_TIME_MICROSECOND, info.time_range_utc.end);
+    jsdrv_tmap_free(info.tmap);
 
     struct jsdrv_buffer_request_s req;
     memset(&req, 0, sizeof(req));
@@ -354,7 +363,7 @@ static void test_samples_start_length(void **state) {
     req.time.samples.length = 1000;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     check_samples(rsp, 1000, 1000);
 
     jsdrv_bufsig_free(&b);
@@ -371,7 +380,7 @@ static void test_samples_start_end(void **state) {
     req.time.samples.end = 1999;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     check_samples(rsp, 1000, 1000);
 
     jsdrv_bufsig_free(&b);
@@ -389,7 +398,7 @@ static void test_samples_all(void **state) {
     req.time.samples.length = 1000;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     check_samples(rsp, 1000, 1000);
 
     jsdrv_bufsig_free(&b);
@@ -409,7 +418,7 @@ static void test_samples_wrap(void **state) {
     req.time.samples.length = 1000;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     check_samples(rsp, 999990, 1000);
 
     jsdrv_bufsig_free(&b);
@@ -427,7 +436,7 @@ static void test_summary_simple(void **state) {
     req.time.samples.length = 2;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     assert_float_equal(1001 / 1000000.0, entries[0].avg, 1e-9);
@@ -448,7 +457,7 @@ static void test_summary_level1(void **state) {
     req.time.samples.length = 1;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     assert_float_equal(0.0, entries[0].avg, 1e-9);
@@ -467,7 +476,7 @@ static void test_summary_nan_on_out_of_range(void **state) {
     req.time.samples.length = 3;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     assert_true(isnan(entries[0].avg));
@@ -479,7 +488,7 @@ static void test_summary_nan_on_out_of_range(void **state) {
     req.time.samples.start = 1994;
     req.time.samples.end = 2002;
     req.time.samples.length = 3;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     assert_false(isnan(entries[0].avg));
     assert_false(isnan(entries[1].avg));
@@ -505,7 +514,7 @@ static void test_summary_wrap(void **state) {
     req.time.samples.length = 2;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     assert_false(isnan(entries[0].avg));
@@ -529,7 +538,7 @@ static void test_summary_response_end_inclusive(void **state) {
     req.time.samples.length = 1;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     // end must be inclusive, matching the codebase convention
     assert_int_equal(1099, rsp->info.time_range_samples.end);
@@ -550,7 +559,7 @@ static void test_summary_single_entry_time_range(void **state) {
     req.time.samples.length = 1;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     // Range [1000, 1001] = 2 samples, 1 entry
     assert_int_equal(1000, rsp->info.time_range_samples.start);
@@ -596,7 +605,7 @@ static float request_std(struct bufsig_s * b, uint64_t start, uint64_t end) {
     req.time.samples.length = 1;
     uint64_t rsp_u64[1 << 14];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(b, &req, rsp);
+    process_request(b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     return entries[0].std;
@@ -711,7 +720,7 @@ static void test_summary_std_gaussian_small_mean(void **state) {
     req.time.samples.length = 1000;
     static uint64_t rsp_u64[1 << 14];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     float * data = (float *) rsp->data;
     double sum = 0.0;
     for (int i = 0; i < 1000; ++i) sum += data[i];
@@ -764,7 +773,7 @@ static void test_summary_integration_accuracy(void **state) {
     req.time.samples.length = 1;
     uint64_t rsp_u64[1 << 12];
     struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
-    jsdrv_bufsig_process_request(&b, &req, rsp);
+    process_request(&b, &req, rsp);
     assert_int_equal(JSDRV_BUFFER_RESPONSE_SUMMARY, rsp->response_type);
     struct jsdrv_summary_entry_s * entries = (struct jsdrv_summary_entry_s *) rsp->data;
     assert_float_equal(1.0, entries[0].avg, 1e-9);

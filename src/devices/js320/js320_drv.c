@@ -1482,6 +1482,10 @@ static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
 static void js320_finalize(struct jsdrvp_mb_drv_s * drv) {
     struct js320_drv_s * self = (struct js320_drv_s *) drv;
     JSDRV_LOGI("JS320 driver finalized");
+    // Forced removal (LL_TERMINATED) finalizes without on_close.
+    for (uint8_t ch = 0U; ch < JS320_CH_COUNT; ++ch) {
+        js320_port_reset(self, self->dev, ch);
+    }
     for (uint8_t ch = 5U; ch <= 7U; ++ch) {
         jsdrv_downsample_sinc_free(self->ports[ch].host_filter);
         self->ports[ch].host_filter = NULL;

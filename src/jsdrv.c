@@ -201,7 +201,9 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_value(struct jsdrv_context_s * context, c
                 m->value.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
             } else {
                 m->value.value.bin = m->payload.bin;
-                memcpy(m->payload.bin, value->value.bin, m->value.size);
+                if (m->value.size) {  // value.bin may be NULL
+                    memcpy(m->payload.bin, value->value.bin, m->value.size);
+                }
             }
             break;
         default:

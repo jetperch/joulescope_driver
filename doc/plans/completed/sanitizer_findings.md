@@ -16,8 +16,9 @@
 -->
 # Fix the C unit test sanitizer findings
 
-**Status**: proposed
+**Status**: complete
 **Created**: 2026-10-07
+**Completed**: 2026-10-07
 
 ## Context
 
@@ -53,3 +54,30 @@ failures also occur at `962ca8c`, before that change:
    and runs ctest, so new findings fail the build.
 
 Each step builds and passes the unit tests on its own.
+
+
+## Outcome
+
+With `-fno-sanitize-recover=all`, which the CI job uses so that UBSan
+findings fail, and a rebuild, the baseline had more findings than listed
+above.  All 37 tests now pass with both sanitizers.
+
+Library fixes:
+
+* `jsdrv_thread_join`: the joiner and the helper thread exchange an atomic
+  state, and whichever finishes last frees the helper.
+* `jsdrv_platform_initialize` allocates the heap mutex once.  Each
+  `jsdrv_initialize` previously leaked the old mutex and replaced it while
+  other threads could hold it.
+* `js320_finalize` releases in-flight port messages.  A forced removal
+  (`LL_TERMINATED`) closes the device without `on_close`.
+* `jsdrvp_msg_alloc_value` skips the `memcpy` for a zero size.
+* `js220_usb.c` stream suspend and resume use unsigned masks.
+
+Test fixture fixes: `buffer_test` (publish now owns and frees the message,
+like `jsdrv_pubsub_publish`), `buffer_signal_test` (free the response tmap
+copy), `tmap_test`, `js220_stats_test` (signed shifts) and
+`js320_fwup_test` (null `memcpy`).
+
+CI: the `sanitizers` job in `.github/workflows/packaging.yml` runs on
+ubuntu-latest and gates `publish_python`.

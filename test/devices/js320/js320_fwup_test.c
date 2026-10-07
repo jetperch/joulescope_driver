@@ -110,7 +110,9 @@ void jsdrvp_mb_dev_publish_to_device(
     if (sz > MAX_CMD_SIZE) {
         sz = MAX_CMD_SIZE;
     }
-    memcpy(ctx->dev_cmds[idx].data, value->value.bin, sz);
+    if (sz) {  // value.bin may be NULL
+        memcpy(ctx->dev_cmds[idx].data, value->value.bin, sz);
+    }
     ctx->dev_cmds[idx].size = sz;
     ctx->dev_cmd_wr++;
 }

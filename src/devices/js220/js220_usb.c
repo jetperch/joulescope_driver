@@ -790,7 +790,7 @@ static void stream_reset_host_side(struct dev_s * d, size_t port_id) {
 static void stream_suspend(struct dev_s * d) {
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
         size_t port_id = i + 16;
-        uint32_t mask = (0x00010000 << i);
+        uint32_t mask = (0x00010000U << i);
         bool enabled = (0 != (d->stream_in_port_enable & mask));
         if (enabled) {
             bulk_out_publish(d, PORT_MAP[i].ctrl_topic, &jsdrv_union_u32_r(0));
@@ -802,7 +802,7 @@ static void stream_suspend(struct dev_s * d) {
 static void stream_resume(struct dev_s * d) {
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
         size_t port_id = i + 16;
-        uint32_t mask = 1 << port_id;
+        uint32_t mask = 1U << port_id;
         stream_reset_host_side(d, port_id);
         bool enabled = (0 != (d->stream_in_port_enable & mask));
         if ((port_id == PORT_ID_POWER) && is_ivp_enabled(d) && !is_on_instrument_downsample_active(d)) {
@@ -818,7 +818,7 @@ static bool stream_in_port_enable(struct dev_s * d, const char * topic, bool ena
     bool was_enabled;
     for (size_t i = 0; i < JSDRV_ARRAY_SIZE(PORT_MAP); ++i) {
         if (PORT_MAP[i].ctrl_topic && (0 == strcmp(PORT_MAP[i].ctrl_topic, topic))) {
-            uint32_t mask = (0x00010000 << i);
+            uint32_t mask = (0x00010000U << i);
             was_enabled = (0 != (d->stream_in_port_enable & mask));
             if (enable == was_enabled) {
                 JSDRV_LOGD1("stream_in_port_enable duplicate port %s %s",

@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <poll.h>
 #include <time.h>
 #include <unistd.h>
@@ -251,24 +252,33 @@ int32_t jsdrv_thread_create(jsdrv_thread_t * thread,
     return 0;
 }
 
+enum join_helper_state_e {
+    JOIN_HELPER_WAITING,
+    JOIN_HELPER_DONE,
+    JOIN_HELPER_ABANDONED,
+};
+
 struct join_helper_s {
     pthread_t target;
-    volatile int done;
+    atomic_int state;  // enum join_helper_state_e
 };
 
 static void * join_helper_fn(void * arg) {
     struct join_helper_s * h = (struct join_helper_s *) arg;
     pthread_join(h->target, NULL);
-    h->done = 1;
+    if (JOIN_HELPER_ABANDONED == atomic_exchange(&h->state, JOIN_HELPER_DONE)) {
+        jsdrv_free(h);  // the joiner timed out and gave up ownership
+    }
     return NULL;
 }
 
 int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
     // Heap-allocate so the detached helper can safely write
-    // to it even if we return early on timeout.
+    // to it even if we return early on timeout.  Whichever side
+    // reaches the state exchange last frees it.
     struct join_helper_s * helper = jsdrv_alloc_clr(sizeof(*helper));
     helper->target = *thread;
-    helper->done = 0;
+    atomic_init(&helper->state, JOIN_HELPER_WAITING);
 
     pthread_t helper_thread;
     if (pthread_create(&helper_thread, NULL, join_helper_fn, helper)) {
@@ -281,7 +291,7 @@ int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
 
     uint32_t elapsed = 0;
     uint32_t step = 1;
-    while (!helper->done && elapsed < timeout_ms) {
+    while ((JOIN_HELPER_DONE != atomic_load(&helper->state)) && (elapsed < timeout_ms)) {
         struct timespec ts;
         ts.tv_sec = 0;
         ts.tv_nsec = step * 1000000L;
@@ -292,9 +302,7 @@ int32_t jsdrv_thread_join(jsdrv_thread_t * thread, uint32_t timeout_ms) {
         }
     }
 
-    if (!helper->done) {
-        // helper is leaked intentionally: the detached thread
-        // still holds a reference and will write done=1 later.
+    if (JOIN_HELPER_DONE != atomic_exchange(&helper->state, JOIN_HELPER_ABANDONED)) {
         JSDRV_LOGE("jsdrv_thread_join timed out");
         return JSDRV_ERROR_TIMED_OUT;
     }
@@ -426,7 +434,11 @@ void * jsdrv_alloc(size_t size_bytes) {
 // --- Platform ---
 
 int32_t jsdrv_platform_initialize(void) {
-    heap_mutex = jsdrv_os_mutex_alloc("heap");
+    // Allocate once: the heap outlives each context, and replacing the
+    // mutex while another thread holds it would break that thread's unlock.
+    if (NULL == heap_mutex) {
+        heap_mutex = jsdrv_os_mutex_alloc("heap");
+    }
     struct rlimit limit = {
         .rlim_cur = 0,
         .rlim_max = 0,

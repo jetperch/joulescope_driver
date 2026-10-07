@@ -296,6 +296,7 @@ static void test_get(void **state) {
         assert_int_equal((int) entry[idx + 8].counter_rate, (int) e.counter_rate);
     }
     jsdrv_tmap_free(s);
+    free(entry);
 }
 
 static void test_free_null(void **state) {

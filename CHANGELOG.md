@@ -131,6 +131,14 @@ This file contains the list of changes made to the Joulescope driver.
   * Added "{model}-{serial_number}" device specifications, such as
     "js320-31NB", and "{backend}/{model}" specifications, such as
     "u/js320/" for every JS320 on USB, to DevicePath.match.
+* Fixed memory leaks and undefined behavior found by AddressSanitizer and
+  UndefinedBehaviorSanitizer, and added a CI job that runs the C unit tests
+  with both:
+  * A JS320 removed while streaming leaked its partial sample messages.
+  * Each initialize after the first leaked the heap mutex, and replaced it
+    while other threads could hold it.
+  * A thread join that timed out leaked 16 bytes.
+  * Fixed signed shift overflow in the JS220 stream suspend and resume.
 
 ## 2.4.3
 

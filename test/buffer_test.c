@@ -89,7 +89,9 @@ struct jsdrvp_msg_s * jsdrvp_msg_alloc_value(struct jsdrv_context_s * context, c
                 m->value.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
             } else {
                 m->value.value.bin = m->payload.bin;
-                memcpy(m->payload.bin, value->value.bin, m->value.size);
+                if (m->value.size) {  // value.bin may be NULL
+                    memcpy(m->payload.bin, value->value.bin, m->value.size);
+                }
             }
             break;
         default:
@@ -176,6 +178,7 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
         if (!jsdrv_cstr_ends_with(msg->topic, return_code_suffix)) {
             break;
         }
+        jsdrvp_msg_free(context, msg);
     }
     if (0 == strcmp(JSDRV_PUBSUB_SUBSCRIBE, msg->topic)) {
         jsdrv_cstr_copy(topic, msg->payload.sub.topic, sizeof(topic));
@@ -329,33 +332,33 @@ void finalize(struct jsdrv_context_s * context) {
         struct sub_s * sub = JSDRV_CONTAINER_OF(item, struct sub_s, item);
         free(sub);
     }
+    msg_queue_finalize(context->msg_sent, context);
     free(context);
 }
 
+// Like jsdrv_pubsub_publish, takes ownership of msg: subscribers clone.
 int32_t publish(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
     struct jsdrv_list_s * item;
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     char * t;
     jsdrv_cstr_copy(topic, msg->topic, sizeof(topic));
     t = &topic[strlen(topic)];
-    while (1) {
+    while (t > topic) {
         jsdrv_list_foreach(&context->subscribers, item) {
             struct sub_s *sub = JSDRV_CONTAINER_OF(item, struct sub_s, item);
             if (0 == strcmp(topic, sub->topic)) {
                 sub->cbk_fn(sub->cbk_user_data, msg);
             }
         }
-        while (1) {
-            --t;
-            if (t <= topic) {
-                return 0;
-            }
+        while (--t > topic) {
             if (*t == '/') {
                 *t = 0;
                 break;
             }
         }
     }
+    jsdrvp_msg_free(context, msg);
+    return 0;
 }
 
 static void test_initialize_finalize(void **state) {
