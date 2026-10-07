@@ -14,7 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Standalone unit test for device_match.  No jsdrv dependency.
+ * Standalone unit test for device_match, which mirrors
+ * pyjoulescope_driver/test/test_device_filter.py.  No jsdrv dependency.
  * Build (mingw):  gcc -std=c11 device_match.c device_match_test.c -o device_match_test
  */
 
@@ -40,31 +41,86 @@ static void test_match(void) {
     CHECK(device_match(p, ""));
     CHECK(device_match(p, "u/js320/8W2A"));
     CHECK(device_match(p, "U/JS320/8w2a"));
-    CHECK(device_match(p, "u/js320"));
-    CHECK(device_match(p, "u/js320/"));
-    CHECK(device_match(p, "u/"));
+    CHECK(device_match(p, "/u/js320/8W2A/"));
     CHECK(device_match(p, "js320/8W2A"));
     CHECK(device_match(p, "js320"));
     CHECK(device_match(p, "8W2A"));
     CHECK(device_match(p, "8w2a"));
 
     CHECK(!device_match(NULL, NULL));
+    CHECK(!device_match(p, "u"));
+    CHECK(!device_match(p, "u/js320"));
+    CHECK(!device_match(p, "u/js320/"));
     CHECK(!device_match(p, "u/js320/8"));
-    CHECK(!device_match(p, "u/js320/8W2A/"));
     CHECK(!device_match(p, "8"));
     CHECK(!device_match(p, "W2A"));
     CHECK(!device_match(p, "js32"));
     CHECK(!device_match(p, "js220"));
     CHECK(!device_match(p, "js320/8"));
-    CHECK(!device_match(p, "u"));
     CHECK(!device_match(p, "u/js220/"));
+}
+
+static void test_match_model_dash_serial_number(void) {
+    printf("test_match_model_dash_serial_number:\n");
+    const char * p = "u/js320/Y9S4";
+    CHECK(device_match(p, "js320-Y9S4"));
+    CHECK(device_match(p, "jS320-Y9s4"));
+    CHECK(device_match(p, "JS320-y9s4"));
+    CHECK(!device_match(p, "js320-Y9"));
+    CHECK(!device_match(p, "js320-9S4"));
+    CHECK(!device_match(p, "js220-Y9S4"));
+    CHECK(!device_match(p, "js320-"));
+    CHECK(!device_match(p, "-Y9S4"));
+    CHECK(!device_match(p, "u/js320-Y9S4"));
+    CHECK(!device_match(p, "js320_Y9S4"));
+}
+
+static void test_match_comma_separated(void) {
+    printf("test_match_comma_separated:\n");
+    const char * p = "u/js320/8W2A";
+    CHECK(device_match(p, "js220,8W2A"));
+    CHECK(device_match(p, " js220 , 8W2A "));
+    CHECK(device_match(p, "8W2A,"));
+    CHECK(device_match(p, ",8W2A,,"));
+    CHECK(device_match(p, " , "));
+    CHECK(device_match(p, ","));
+    CHECK(!device_match(p, "js220,8"));
+    CHECK(!device_match(p, "js220,"));
+    CHECK(!device_match(p, " / js320 / "));  // trim whitespace, then "/"
 }
 
 static void test_match_malformed(void) {
     printf("test_match_malformed:\n");
-    CHECK(device_match("u/js320", "u/js320"));
+    CHECK(!device_match("u/js320", "u/js320"));
     CHECK(!device_match("u/js320", "js320"));
     CHECK(!device_match("u/js320/1/2", "1"));
+    CHECK(device_match("u/js320", NULL));
+}
+
+static void test_brand(void) {
+    printf("test_brand:\n");
+    CHECK(0 == strcmp("Joulescope", device_brand_validate("Joulescope")));
+    CHECK(0 == strcmp("Joulescope", device_brand_validate("joulescope")));
+    CHECK(0 == strcmp("Joulescope", device_brand_validate("js")));
+    CHECK(0 == strcmp("Joulescope", device_brand_validate("JS")));
+    CHECK(NULL == device_brand_validate("acme"));
+    CHECK(NULL == device_brand_validate(""));
+    CHECK(NULL == device_brand_validate(NULL));
+
+    CHECK(0 == strcmp("Joulescope", device_brand("u/js110/1")));
+    CHECK(0 == strcmp("Joulescope", device_brand("u/JS220/1")));
+    CHECK(0 == strcmp("Joulescope", device_brand("u/js320/1")));
+    CHECK(NULL == device_brand("u/mb/1"));
+    CHECK(NULL == device_brand("u/js999/1"));
+    CHECK(NULL == device_brand("u/js320"));
+    CHECK(NULL == device_brand(NULL));
+
+    CHECK(device_is_brand("u/js320/1", NULL));
+    CHECK(device_is_brand("u/mb/1", NULL));
+    CHECK(device_is_brand("u/js320/1", "joulescope"));
+    CHECK(device_is_brand("u/js320/1", "js"));
+    CHECK(!device_is_brand("u/mb/1", "js"));
+    CHECK(!device_is_brand("u/js320/1", "acme"));
 }
 
 static void test_is_joulescope(void) {
@@ -73,6 +129,7 @@ static void test_is_joulescope(void) {
     CHECK(device_is_joulescope("u/js220/000415"));
     CHECK(device_is_joulescope("u/js320/8W2A"));
     CHECK(device_is_joulescope("u/JS320/8W2A"));
+    CHECK(!device_is_joulescope("u/js999/1"));
     CHECK(!device_is_joulescope("u/mb/1"));
     CHECK(!device_is_joulescope("u/js320"));
     CHECK(!device_is_joulescope(NULL));
@@ -95,31 +152,50 @@ static void test_match_list(void) {
     printf("test_match_list:\n");
     const char * d = "u/js220/000415,u/js320/8W2A,u/js320/31NB,u/mb/1";
     char m[64];
-    CHECK(4 == device_match_list(d, NULL, m, sizeof(m)));
+    CHECK(4 == device_match_list(d, NULL, NULL, m, sizeof(m)));
     CHECK(0 == strcmp(m, "u/js220/000415"));
-    CHECK(2 == device_match_list(d, "js320", m, sizeof(m)));
+    CHECK(2 == device_match_list(d, "js320", NULL, m, sizeof(m)));
     CHECK(0 == strcmp(m, "u/js320/8W2A"));
-    CHECK(1 == device_match_list(d, "31NB", m, sizeof(m)));
+    CHECK(1 == device_match_list(d, "31NB", NULL, m, sizeof(m)));
     CHECK(0 == strcmp(m, "u/js320/31NB"));
-    CHECK(1 == device_match_list(d, "u/mb/1", m, sizeof(m)));
+    CHECK(1 == device_match_list(d, "u/mb/1", NULL, m, sizeof(m)));
     CHECK(0 == strcmp(m, "u/mb/1"));
-    CHECK(0 == device_match_list(d, "js110", m, sizeof(m)));
+    CHECK(1 == device_match_list(d, "mb", NULL, m, sizeof(m)));
+    CHECK(2 == device_match_list(d, "js220,31NB", NULL, NULL, 0));
+    CHECK(2 == device_match_list(d, "js320-8w2a, 1", NULL, NULL, 0));
+    CHECK(0 == device_match_list(d, "js110", NULL, m, sizeof(m)));
     CHECK(0 == strcmp(m, ""));
-    CHECK(2 == device_match_list(d, "u/js320/", NULL, 0));
-    CHECK(0 == device_match_list("", NULL, m, sizeof(m)));
-    CHECK(0 == device_match_list(NULL, NULL, m, sizeof(m)));
-    CHECK(1 == device_match_list("u/js320/8W2A", "8W2A", m, sizeof(m)));
-    CHECK(1 == device_match_list("u/js320/8W2A,", "8W2A", m, sizeof(m)));
-    CHECK(1 == device_match_list("u/js320/8W2A", "8W2A", m, 6));
+    CHECK(0 == device_match_list("", NULL, NULL, m, sizeof(m)));
+    CHECK(0 == device_match_list(NULL, NULL, NULL, m, sizeof(m)));
+    CHECK(1 == device_match_list("u/js320/8W2A", "8W2A", NULL, m, sizeof(m)));
+    CHECK(1 == device_match_list("u/js320/8W2A,", "8W2A", NULL, m, sizeof(m)));
+    CHECK(1 == device_match_list("u/js320/8W2A", "8W2A", NULL, m, 6));
     CHECK(0 == strcmp(m, "u/js3"));
+}
+
+static void test_match_list_brand(void) {
+    printf("test_match_list_brand:\n");
+    const char * d = "u/js220/000415,u/js320/8W2A,u/js320/31NB,u/mb/1";
+    char m[64];
+    CHECK(3 == device_match_list(d, NULL, "joulescope", m, sizeof(m)));
+    CHECK(3 == device_match_list(d, "", "js", NULL, 0));
+    CHECK(1 == device_match_list(d, "1", NULL, m, sizeof(m)));
+    CHECK(0 == strcmp(m, "u/mb/1"));
+    CHECK(0 == device_match_list(d, "1", "joulescope", m, sizeof(m)));
+    CHECK(0 == device_match_list(d, "mb", "js", NULL, 0));
+    CHECK(0 == device_match_list(d, NULL, "acme", NULL, 0));
 }
 
 int main(void) {
     test_match();
+    test_match_model_dash_serial_number();
+    test_match_comma_separated();
     test_match_malformed();
+    test_brand();
     test_is_joulescope();
     test_is_model();
     test_match_list();
+    test_match_list_brand();
     if (failures) {
         printf("FAILED: %d\n", failures);
         return 1;

@@ -67,6 +67,12 @@ This file contains the list of changes made to the Joulescope driver.
     which info previously displayed with a positional device argument.
   * BREAKING: threads replaces "-d" for "--duration" with "--device".
   * program --device-path and record --serial_number remain as aliases.
+* Updated the C example device matching (example/common/device_match.c)
+  to match pyjoulescope_driver.device_filter: comma-separated
+  specifications, "{model}-{serial_number}", and brands with aliases.
+  BREAKING: The backend/model ("u/js320") and trailing "/" prefix
+  ("u/js320/") filters are no longer supported.  minibitty fuzz_fwup now
+  defaults to "js320".
 * Added the device selection, DeviceContext and SubscribeContext API
   documentation, and documented that applications must finalize each
   Driver, with a context manager or by calling finalize().

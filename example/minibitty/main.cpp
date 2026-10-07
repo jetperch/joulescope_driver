@@ -115,7 +115,7 @@ int32_t app_match_ex(struct app_s * self, const char * filter, uint32_t flags) {
         return 1;
     }
 
-    uint32_t count = device_match_list(self->devices, filter, device, sizeof(device));
+    uint32_t count = device_match_list(self->devices, filter, NULL, device, sizeof(device));
     if (0 == count) {
         printf("No matching device found\n");
         return 1;

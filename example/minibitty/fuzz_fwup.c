@@ -838,7 +838,7 @@ static int usage(void) {
     printf(
         "usage: minibitty fuzz_fwup [options] <release_zip> [device_filter]\n"
         "\n"
-        "device_filter defaults to u/js320/ and must match one device.\n"
+        "device_filter defaults to js320 and must match one device.\n"
         "\n"
         "Verify JS320 open+fwup recovery for broken data-block subsets.\n"
         "\n"
@@ -985,7 +985,7 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
         return usage();
     }
     if (!cfg.target_filter) {
-        cfg.target_filter = "u/js320/";
+        cfg.target_filter = "js320";
     }
 
     // Build the subset list.
@@ -1055,7 +1055,7 @@ int on_fuzz_fwup(struct app_s * self, int argc, char * argv[]) {
     // refuse a filter that matches more than one device.
     target_present_ = false;
     if (0 == app_scan(self)) {
-        uint32_t count = device_match_list(self->devices, cfg.target_filter, NULL, 0);
+        uint32_t count = device_match_list(self->devices, cfg.target_filter, NULL, NULL, 0);
         if (count > 1) {
             printf("Target filter \"%s\" matches %u devices: %s\n",
                    cfg.target_filter, count, self->devices);
