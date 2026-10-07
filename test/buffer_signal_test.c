@@ -25,6 +25,9 @@
 #include <math.h>
 #include "jsdrv_prv/buffer_signal.h"
 #include "jsdrv/cstr.h"
+#include "jsdrv/error_code.h"
+#include "jsdrv/log.h"
+#include "jsdrv_prv/log.h"
 #include "tinyprintf.h"
 
 const char SRC_TOPIC[] = "src/topic/!data";
@@ -75,6 +78,47 @@ static void test_initialize_finalize(void **state) {
     assert_int_equal(0, info.time_map.counter_rate);
 
     jsdrv_bufsig_free(&b);
+}
+
+static void log_count_cbk(void * user_data, struct jsdrv_log_header_s const * header,
+                          const char * filename, const char * message) {
+    (void) header; (void) filename; (void) message;
+    ++*((uint32_t *) user_data);
+}
+
+// A request that races a buffer reset finds no data.  That is expected, so
+// it must return UNAVAILABLE without logging a warning.
+static void test_request_without_data_does_not_warn(void **state) {
+    (void) state;
+    uint32_t warning_count = 0;
+    struct bufsig_s b;
+    struct jsdrv_buffer_request_s req;
+    struct jsdrv_buffer_response_s * rsp = malloc(sizeof(struct jsdrv_buffer_response_s) + 4096);
+    memset(&b, 0, sizeof(b));
+    memset(&req, 0, sizeof(req));
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.length = 10;
+
+    jsdrv_log_initialize();
+    jsdrv_log_register(log_count_cbk, &warning_count);
+    jsdrv_log_level_set(JSDRV_LOG_LEVEL_WARNING);
+
+    // freed: no header, as after jsdrv_bufsig_free
+    assert_int_equal(JSDRV_ERROR_UNAVAILABLE, process_request(&b, &req, rsp));
+
+    // header received, but not yet allocated
+    b.hdr.element_type = JSDRV_DATA_TYPE_FLOAT;
+    b.hdr.element_size_bits = 32;
+    b.hdr.sample_rate = 1000000;
+    b.hdr.decimate_factor = 1;
+    b.active = true;
+    assert_int_equal(JSDRV_ERROR_UNAVAILABLE, process_request(&b, &req, rsp));
+
+    jsdrv_log_finalize();  // flushes pending messages to log_count_cbk
+    jsdrv_log_unregister(log_count_cbk, &warning_count);
+    jsdrv_log_level_set(JSDRV_LOG_LEVEL_OFF);
+    assert_int_equal(0, warning_count);
+    free(rsp);
 }
 
 static void test_element_type_support(void **state) {
@@ -789,6 +833,7 @@ static void test_summary_integration_accuracy(void **state) {
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_initialize_finalize),
+            cmocka_unit_test(test_request_without_data_does_not_warn),
             cmocka_unit_test(test_element_type_support),
             cmocka_unit_test(test_alloc_unsupported_element_type),
             cmocka_unit_test(test_samples_u1_unaligned_writes),

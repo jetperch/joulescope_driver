@@ -852,8 +852,10 @@ int32_t jsdrv_bufsig_process_request(
     rsp->rsv3_u32 = 0;
     rsp->rsp_id = req->rsp_id;
 
+    // No data yet, such as after a buffer reset, is expected: a request
+    // sent before the requester sees the cleared info races the reset.
     if (!jsdrv_bufsig_info(self, &rsp->info)) {
-        JSDRV_LOGW("jsdrv_bufsig_process_request info unavailable");
+        JSDRV_LOGI("jsdrv_bufsig_process_request info unavailable");
         return JSDRV_ERROR_UNAVAILABLE;
     }
 
@@ -862,7 +864,7 @@ int32_t jsdrv_bufsig_process_request(
         return JSDRV_ERROR_UNAVAILABLE;
     }
     if (NULL == self->level0_data) {
-        JSDRV_LOGW("jsdrv_bufsig_process_request unallocated");
+        JSDRV_LOGI("jsdrv_bufsig_process_request unallocated");
         return JSDRV_ERROR_UNAVAILABLE;
     }
 

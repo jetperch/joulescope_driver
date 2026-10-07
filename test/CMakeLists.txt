@@ -38,7 +38,8 @@ endfunction (ADD_CMOCKA_DEVICE_TEST)
 
 ADD_CMOCKA_TEST(buffer_signal_test)
 
-add_executable(buffer_test buffer_test.c ../src/buffer.c ../src/buffer_params.c)
+# buffer_test includes buffer.c directly to test its static functions.
+add_executable(buffer_test buffer_test.c ../src/buffer_params.c)
 add_dependencies(buffer_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(buffer_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(buffer_test ${CMAKE_CURRENT_BINARY_DIR}/buffer_test)

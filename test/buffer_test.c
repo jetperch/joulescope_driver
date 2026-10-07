@@ -32,6 +32,9 @@
 #include "tinyprintf.h"
 //#include "test.inc"
 
+// Include the source to test its static functions without the buffer thread.
+#include "../src/buffer.c"
+
 // copied from jsdrv.c, line 55
 static const size_t STREAM_MSG_SZ = sizeof(struct jsdrvp_msg_s) - sizeof(union jsdrvp_payload_u) + sizeof(struct jsdrv_stream_signal_s);
 static const uint32_t TIMEOUT_MS = 100000;  // todo 100
@@ -140,7 +143,7 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
     free(msg);
 }
 
-static void subscribe(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
+static void ctx_subscribe(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
     struct sub_s * s = calloc(1, sizeof(struct sub_s));
     jsdrv_cstr_copy(s->topic, msg->payload.sub.topic, sizeof(s->topic));
     s->cbk_fn = msg->payload.sub.subscriber.internal_fn;
@@ -150,7 +153,7 @@ static void subscribe(struct jsdrv_context_s * context, struct jsdrvp_msg_s * ms
     jsdrv_list_add_tail(&context->subscribers, &s->item);
 }
 
-static void unsubscribe(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
+static void ctx_unsubscribe(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
     struct jsdrv_list_s * item;
     struct sub_s * s;
     jsdrv_list_foreach(&context->subscribers, item) {
@@ -183,11 +186,11 @@ static void msg_send_process_next(struct jsdrv_context_s * context, uint32_t tim
     if (0 == strcmp(JSDRV_PUBSUB_SUBSCRIBE, msg->topic)) {
         jsdrv_cstr_copy(topic, msg->payload.sub.topic, sizeof(topic));
         check_expected_ptr(topic);
-        subscribe(context, msg);
+        ctx_subscribe(context, msg);
     } else if (0 == strcmp(JSDRV_PUBSUB_UNSUBSCRIBE, msg->topic)) {
         jsdrv_cstr_copy(topic, msg->payload.sub.topic, sizeof(topic));
         check_expected_ptr(topic);
-        unsubscribe(context, msg);
+        ctx_unsubscribe(context, msg);
     } else if (jsdrv_cstr_ends_with(msg->topic, "$")) {
         const char * meta_topic = msg->topic;
         check_expected_ptr(meta_topic);
@@ -387,6 +390,43 @@ static void test_add_remove(void **state) {
     msg_send_process_next(context, TIMEOUT_MS);
 
     finalize(context);
+}
+
+// A reset, such as adding a signal, discards the data that pending requests
+// target, so it must drop them instead of processing them afterward.
+static void test_buffer_free_drops_pending_requests(void **state) {
+    (void) state;
+    struct jsdrv_context_s * context = calloc(1, sizeof(struct jsdrv_context_s));
+    context->msg_sent = msg_queue_init();
+    struct buffer_s * b = calloc(1, sizeof(struct buffer_s));
+    b->context = context;
+    b->state = ST_ACTIVE;
+    jsdrv_list_initialize(&b->req_pending);
+    jsdrv_list_initialize(&b->req_free);
+    for (uint32_t i = 0; i < JSDRV_BUFSIG_COUNT_MAX; i++) {
+        b->signals[i].idx = i;
+        b->signals[i].parent = b;
+    }
+
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    jsdrv_cstr_copy(req.rsp_topic, "t/!rsp", sizeof(req.rsp_topic));
+    req.rsp_id = 1;
+    req_post(b, 1, &req);
+    req.rsp_id = 2;
+    req_post(b, 2, &req);
+    assert_int_equal(2, jsdrv_list_length(&b->req_pending));
+
+    buffer_free(b);
+    assert_int_equal(ST_AWAIT, b->state);
+    assert_true(jsdrv_list_is_empty(&b->req_pending));
+    assert_int_equal(2, jsdrv_list_length(&b->req_free));
+    assert_false(req_handle_one(b));
+
+    req_list_free(&b->req_free);
+    free(b);
+    msg_queue_finalize(context->msg_sent, context);
+    free(context);
 }
 
 static struct jsdrvp_msg_s * generate_msg_data_i(struct jsdrv_context_s * context, uint64_t sample_id, uint32_t length) {
@@ -657,6 +697,7 @@ int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_initialize_finalize),
             cmocka_unit_test(test_add_remove),
+            cmocka_unit_test(test_buffer_free_drops_pending_requests),
             cmocka_unit_test(test_unsupported_element_type_removes_signal),
             cmocka_unit_test(test_hold_release_clears),
             cmocka_unit_test(test_one_signal),

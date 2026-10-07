@@ -147,6 +147,12 @@ This file contains the list of changes made to the Joulescope driver.
     the end of the buffer.
   * Buffer allocation with no active signals cast an infinite duration to
     int.
+* Fixed "jsdrv_bufsig_process_request info unavailable" warnings in the
+  Joulescope UI when an instrument connects while another streams.  Adding
+  a signal resets the memory buffer, so requests already sent for the
+  other signals found no data.  The reset now drops pending requests, a
+  request for a signal without data logs at INFO, and "signal add" and
+  "signal remove" log the signal index instead of 0.
 
 ## 2.4.3
 
