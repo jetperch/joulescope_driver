@@ -62,7 +62,7 @@ You can then run the pyjoulescope_driver python entry points:
     python -m pyjoulescope_driver --help
     python -m pyjoulescope_driver scan
     python -m pyjoulescope_driver info
-    python -m pyjoulescope_driver info * --verbose
+    python -m pyjoulescope_driver values --device js320
 
 Note that you may need to change "python" to "python3" or the full path.  
 You can also use a python

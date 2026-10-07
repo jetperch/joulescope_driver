@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver, __version__
+from .device_arg import add_brand_argument, add_device_argument, device_select
 from pyjoulescope_driver.metadata_extract import host_metadata
 import html
 import json
@@ -43,8 +44,8 @@ def parser_config(p):
                    choices=_FORMATS,
                    help='The output format.  When omitted, infer from the --out '
                         + 'file extension, defaulting to json.')
-    p.add_argument('--device',
-                   help='The target device path.  Optional when only one device is connected.')
+    add_device_argument(p, 'Optional when only one device is connected.')
+    add_brand_argument(p)
     p.add_argument('--out',
                    help='The output file path.  When omitted, write to stdout.')
     p.add_argument('--open', '-o',
@@ -81,27 +82,6 @@ def format_resolve(fmt, out_path):
         if ext in _EXTENSIONS:
             return _EXTENSIONS[ext]
     return 'json'
-
-
-def device_select(device_paths, device):
-    """Select the target device.
-
-    :param device_paths: The list of connected device paths.
-    :param device: The requested device path or None.
-    :return: The selected device path.
-    :raise ValueError: If the selection is empty or ambiguous.
-    """
-    if not device_paths:
-        raise ValueError('No connected Joulescopes found')
-    if device is None:
-        if len(device_paths) == 1:
-            return device_paths[0]
-        raise ValueError('Multiple devices found, specify one with --device:\n  '
-                         + '\n  '.join(device_paths))
-    if device not in device_paths:
-        raise ValueError(f'Device {device} not found.  Connected devices:\n  '
-                         + '\n  '.join(device_paths))
-    return device
 
 
 def metadata_load(driver, device_path):
@@ -336,10 +316,8 @@ def on_cmd(args):
     else:
         with Driver() as d:
             d.log_level = args.jsdrv_log_level
-            try:
-                device_path = device_select(d.device_paths(), args.device)
-            except ValueError as ex:
-                print(ex)
+            device_path = device_select(d, args.device, args.brand)
+            if device_path is None:
                 return 1
             d.open(device_path, mode=args.open)
             try:

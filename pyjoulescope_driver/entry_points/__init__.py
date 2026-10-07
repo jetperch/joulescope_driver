@@ -14,10 +14,10 @@
 # limitations under the License.
 
 from . import api_timeout, gpi, info, measure, mem_test, metadata, program, \
-    record, scan, set_parameter, statistics, threads
+    record, scan, set_parameter, statistics, threads, values
 
 __all__ = [api_timeout, gpi, info, measure, mem_test, metadata, program,
-           record, scan, set_parameter, statistics, threads]
+           record, scan, set_parameter, statistics, threads, values]
 """This list of available command modules.  Each module must contain a 
 parser_config(subparser) function.  The function must return the callable(args)
 that will be executed for the command."""

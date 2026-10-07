@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver, Record, time64
-from pyjoulescope_driver.device_filter import device_filter
+from .device_arg import add_device_argument
 import time
 
 
@@ -34,10 +34,7 @@ def parser_config(p):
                    choices=['defaults', 'restore'],
                    default='defaults',
                    help='The device open mode.  Defaults to "defaults".')
-    p.add_argument('--serial_number',
-                   help='The serial number of the Joulescope for this capture.  '
-                        + 'Also accepts a device path or model.  '
-                        + 'Defaults to all connected Joulescopes.')
+    add_device_argument(p, 'Defaults to all connected Joulescopes.', aliases=['--serial_number'])
     p.add_argument('--set',
                    default=[],
                    action='append',
@@ -62,7 +59,7 @@ def parser_config(p):
 def on_cmd(args):
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        device_paths = device_filter(d.device_paths(), args.serial_number)
+        device_paths = d.find_devices(args.device, brand='joulescope')
         if len(device_paths) == 0:
             print('Device not found')
             return 1
@@ -77,7 +74,7 @@ def on_cmd(args):
                 try:  # configure the device
                     fs = args.frequency
                     if fs is None:
-                        fs = 2_000_000 if 'js110' in device_path else 1_000_000
+                        fs = 2_000_000 if device_path.model == 'js110' else 1_000_000
                     else:
                         fs = int(fs)
                     d.publish(f'{device_path}/h/fs', fs)
@@ -86,10 +83,10 @@ def on_cmd(args):
                     return 1
 
                 if args.open == 'defaults':
-                    if 'js110' in device_path:
+                    if device_path.model == 'js110':
                         d.publish(f'{device_path}/s/i/range/select', 'auto')
                         d.publish(f'{device_path}/s/v/range/select', '15 V')
-                    elif 'js220' in device_path or 'js320' in device_path:
+                    elif device_path.model in ('js220', 'js320'):
                         d.publish(f'{device_path}/s/i/range/mode', 'auto')
                         d.publish(f'{device_path}/s/v/range/mode', 'auto')
                     # other devices record with their existing range configuration
@@ -99,7 +96,7 @@ def on_cmd(args):
                     d.publish(f'{device_path}/{topic}', value)
 
                 # The JS220 and JS320 firmware default for s/i/range/mode is 0 = off.
-                is_js220_or_js320 = 'js220' in device_path or 'js320' in device_path
+                is_js220_or_js320 = device_path.model in ('js220', 'js320')
                 if is_js220_or_js320 and d.query(f'{device_path}/s/i/range/mode') == 0:
                     print(f'WARNING: {device_path} current range is off, so current will be 0.  '
                           + 'Use "--open defaults" or "--set s/i/range/mode=auto".')

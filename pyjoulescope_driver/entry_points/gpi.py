@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
-from pyjoulescope_driver.device_filter import device_filter
+from .device_arg import add_device_argument
 
 
 def parser_config(p):
@@ -22,6 +22,7 @@ def parser_config(p):
     p.add_argument('--verbose', '-v',
                    action='store_true',
                    help='Display verbose information.')
+    add_device_argument(p, 'Defaults to all connected Joulescopes.')
     return on_cmd
 
 
@@ -36,7 +37,7 @@ def _query_gpi_value(d, device):
 def on_cmd(args):
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        for device in device_filter(d.device_paths()):
+        for device in d.find_devices(args.device, brand='joulescope'):
             try:
                 d.open(device, 'restore')
             except Exception:

@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver, __version__
+from .device_arg import add_brand_argument, add_device_argument
 from .metadata import metadata_load
 import numpy as np
 import os
@@ -23,18 +24,12 @@ import sys
 
 
 def parser_config(p):
-    """Joulescope info."""
-    p.add_argument('--verbose', '-v',
-                   action='store_true',
-                   help='Display verbose information.')
-    p.add_argument('--open', '-o',
-                   choices=['defaults', 'restore'],
-                   default='restore',
-                   help='The device open mode.  Defaults to "restore".')
-    p.add_argument('device_path',
-                   nargs='*',
-                   help='The target device for this command. ' +
-                        'Provide "*" to show details for all connected devices.')
+    """Display system, package and device information.
+
+    Use the "values" and "metadata" commands for device details.
+    """
+    add_device_argument(p, 'Defaults to all connected devices.')
+    add_brand_argument(p)
     return on_cmd
 
 
@@ -101,11 +96,11 @@ _JOULESCOPE_INFORMATION = """
     ----------------------"""
 
 
-def _list_devices(driver):
+def _list_devices(driver, specs=None, brand=None):
     txt = []
-    device_paths = driver.device_paths()
+    device_paths = driver.find_devices(specs, brand)
     if len(device_paths) == 0:
-        txt.append('No connected Joulescopes found')
+        txt.append('No connected devices found')
     else:
         for device_path in device_paths:
             try:
@@ -114,7 +109,7 @@ def _list_devices(driver):
                 txt.append(f'    {device_path}: could not open')
                 continue
             try:
-                if ('/js220/' in device_path) or ('/js320/' in device_path):
+                if device_path.model in ('js220', 'js320'):
                     meta = metadata_load(driver, device_path)
                     v = {}
                     for name, subtopic in [('hw', 'c/hw/version'), ('fw', 'c/fw/version'),
@@ -132,50 +127,10 @@ def _list_devices(driver):
     return '\n'.join(txt)
 
 
-class Info:
-
-    def __init__(self, device_paths):
-        self._device_paths = device_paths
-        self._meta = {}
-        self._values = {}
-
-    def _on_pub(self, topic, value):
-        self._values[topic] = value
-
-    def run(self, args):
-        if not self._device_paths:
-            print(_sys_info())
-            print(_JOULESCOPE_INFORMATION)
-            with Driver() as d:
-                print(_list_devices(d))
-                return 0
-
-        with Driver() as d:
-            d.log_level = args.jsdrv_log_level
-            devices = d.device_paths()
-            if '*' in self._device_paths:
-                self._device_paths = devices
-            for device_path in self._device_paths:
-                if device_path not in devices:
-                    print(f'{device_path} requested but not found')
-                    continue
-                self._values.clear()
-                d.open(device_path, mode=args.open)
-                self._meta = metadata_load(d, device_path)
-                fn = self._on_pub  # use same bound method for unsubscribe
-                d.subscribe(device_path, 'pub_retain', fn)
-                d.unsubscribe(device_path, fn)
-                if args.verbose:
-                    print(f'{device_path} metadata:')
-                    for subtopic, value in self._meta.items():
-                        print(f'  {subtopic} {value}')
-                print(f'{device_path} values:')
-                for key, value in self._values.items():
-                    subtopic = key[len(device_path) + 1:]
-                    value = format_value(self._meta.get(subtopic, None), value)
-                    print(f'  {subtopic} = {value}')
-        return 0
-
-
 def on_cmd(args):
-    return Info(args.device_path).run(args)
+    print(_sys_info())
+    print(_JOULESCOPE_INFORMATION)
+    with Driver() as d:
+        d.log_level = args.jsdrv_log_level
+        print(_list_devices(d, args.device, args.brand))
+    return 0

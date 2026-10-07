@@ -14,16 +14,19 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
+from .device_arg import add_brand_argument, add_device_argument
 
 
 def parser_config(p):
     """Scan for available devices."""
+    add_device_argument(p, 'Defaults to all devices.')
+    add_brand_argument(p)
     return on_cmd
 
 
 def on_cmd(args):
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        for device in d.device_paths():
+        for device in d.find_devices(args.device, args.brand):
             print(device)
     return 0

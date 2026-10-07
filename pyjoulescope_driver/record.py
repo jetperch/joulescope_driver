@@ -21,6 +21,7 @@ Record streaming sample data to a JLS v2 file.
 import copy
 import numpy as np
 from pyjoulescope_driver import time64
+from .device_path import DevicePath
 import logging
 
 
@@ -151,7 +152,8 @@ class Record:
         self._wr = None
         self._data_map = {}
         self._driver = driver
-        self._device_paths = [device_path] if isinstance(device_path, str) else device_path
+        device_paths = [device_path] if isinstance(device_path, str) else device_path
+        self._device_paths = [DevicePath(p) for p in device_paths]
         self._on_data_fn = self._on_data  # bind and save for unsubscribe
         if signals is None:
             signals = ['current', 'voltage']
@@ -200,8 +202,8 @@ class Record:
             for chunk_meta, data in user_data:
                 self._wr.user_data(chunk_meta, data)
         for idx, device_path in enumerate(self._device_paths):
-            _, model, serial_number = device_path.split('/')
-            model = model.upper()
+            model = device_path.model.upper()
+            serial_number = device_path.serial_number
             self._wr.source_def(
                 source_id=idx + 1,
                 name=f'{model}-{serial_number}',

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
-from pyjoulescope_driver.device_filter import device_filter
+from .device_arg import add_brand_argument, add_device_argument, device_select
 from pyjoulescope_driver.program import release_program
 from pyjoulescope_driver.program_js320 import program_js320
 from pyjoulescope_driver.release import release_get
@@ -26,9 +26,8 @@ def parser_config(p):
     p.add_argument('--maturity', '-m',
                    default='stable',
                    help='JS220 only: maturity target (alpha, beta, stable).')
-    p.add_argument('--device-path',
-                   help='The target device for this command: '
-                        + 'a device path, model or serial number.')
+    add_device_argument(p, 'Optional when only one device is connected.', aliases=['--device-path'])
+    add_brand_argument(p)
     p.add_argument('--force-download',
                    action='store_true',
                    help='JS220 only: force release download.')
@@ -73,22 +72,6 @@ def _on_progress(fract, message):
     sys.stdout.flush()
 
 
-def _select_device_path(d, args):
-    paths = d.device_paths()
-    device_paths = device_filter(paths, args.device_path)
-    if len(device_paths) == 0:
-        if args.device_path is not None:
-            print(f'Device {args.device_path} not found in {device_filter(paths)}')
-        else:
-            print('No device found')
-        return None
-    if len(device_paths) > 1:
-        print('Multiple devices found.  Use "--device-path" to specify the desired device from:')
-        print(f'{device_paths}')
-        return None
-    return device_paths[0]
-
-
 def _on_cmd_js220(d, device_path, args):
     d.open(device_path)
     image = release_get(args.maturity, force_download=args.force_download)
@@ -118,13 +101,12 @@ def _on_cmd_js320(d, device_path, args):
 def on_cmd(args):
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        device_path = _select_device_path(d, args)
+        device_path = device_select(d, args.device, args.brand)
         if device_path is None:
             return 1
-        path_lower = device_path.lower()
-        if '/js320/' in path_lower:
+        if device_path.model == 'js320':
             return _on_cmd_js320(d, device_path, args)
-        if '/js220/' in path_lower:
+        if device_path.model == 'js220':
             return _on_cmd_js220(d, device_path, args)
         print(f'Unsupported device: {device_path}')
         return 1

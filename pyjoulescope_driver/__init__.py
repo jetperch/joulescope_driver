@@ -15,17 +15,19 @@
 
 from .version import *
 from . import time64
+from .device_path import DevicePath
+from . import device_filter
 from .record import Record
 from .stdmsg import StdMsg
 from .mem_client import MemClient
-from .binding import Driver, ElementType, Field, ErrorCode, LogLevel, SubscribeFlags, TimeMap, calibration_hash
+from .binding import Driver, DeviceContext, SubscribeContext, ElementType, Field, ErrorCode, LogLevel, SubscribeFlags, TimeMap, calibration_hash
 
 
 __all__ = [
-    'Driver', 'MemClient', 'Record', 'StdMsg', 'TimeMap',
+    'DeviceContext', 'DevicePath', 'Driver', 'MemClient', 'SubscribeContext', 'Record', 'StdMsg', 'TimeMap',
     'ElementType', 'Field', 'ErrorCode', 'LogLevel', 'SubscribeFlags',
     'calibration_hash',
-    'time64',
+    'device_filter', 'time64',
     '__version__', '__title__', '__description__', '__url__',
     '__author__', '__author_email__', '__license__',
     '__copyright__']

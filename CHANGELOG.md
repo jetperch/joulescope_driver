@@ -21,6 +21,73 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.0
+
+2026 Oct 7 [in progress]
+
+* Added DevicePath, a str subclass with backend, model, serial_number and
+  brand properties and a match(spec) method.  Driver.device_paths()
+  now returns DevicePath instances, which remain fully str compatible.
+* Added optional specs and brand arguments to Driver.device_paths(),
+  such as d.device_paths('js320', brand='joulescope').  Brands are
+  case-insensitive and support aliases, such as "js" for "Joulescope".
+  The new first argument is specs, so pass timeout by keyword.
+* Added Driver.find_one_device(specs, brand), which returns the single
+  matching DevicePath or raises DeviceFilterError, and Driver.find_devices,
+  an alias for Driver.device_paths.
+* Added Driver.device_watch(on_add, on_remove, specs, brand), which calls
+  on_add for each connected device, then on_add and on_remove for each
+  matching device addition and removal, with a DevicePath argument.
+* Driver.open now returns a DeviceContext, which accepts topics relative to
+  the device.  Its close, including on context exit, unsubscribes all
+  subscriptions made through it and then closes the device:
+  "with d.open(device_path) as device: device.publish('s/i/range/mode', 'auto')".
+* Driver.subscribe now returns a SubscribeContext, which unsubscribes on
+  unsubscribe() or on exit: "with d.subscribe(topic, 'pub', fn): ...".
+* Driver.finalize, including exiting "with Driver() as d:", now closes each
+  device that the instance opened and that is still connected.
+  Afterwards, close, unsubscribe and unsubscribe_all do nothing, and the
+  other methods raise RuntimeError.  They previously crashed.
+* Driver topic and device_prefix arguments now accept str subclasses,
+  such as DevicePath, and raise TypeError with the argument name for
+  other types.  open and close raise ValueError for an empty device_prefix.
+* The entry points now select devices with "--device" / "-d", which takes
+  device specifications, such as "js320" or "8W2A".
+  * The generic entry points, info, mem_test, metadata, program, scan, set,
+    threads and values, match all devices and add an optional "--brand", such as
+    "--brand js".  program and metadata now report multiple devices when a
+    non-Joulescope device, such as a MiniBitty, is also connected.
+  * The Joulescope entry points, gpi, measure, record and statistics, only
+    match Joulescope devices.
+  * BREAKING: set and statistics replace their positional device argument
+    with --device.
+  * BREAKING: info now only displays system, package and device summary
+    information, and --device and --brand filter the devices.  Use the new
+    "values" entry point to display the current values for one device,
+    which info previously displayed with a positional device argument.
+  * BREAKING: threads replaces "-d" for "--duration" with "--device".
+  * program --device-path and record --serial_number remain as aliases.
+* Added the device selection, DeviceContext and SubscribeContext API
+  documentation, and documented that applications must finalize each
+  Driver, with a context manager or by calling finalize().
+* Improved pyjoulescope_driver.device_filter module
+  * BREAKING: Replaced the 2.4.3 functions.  2.4.3 is yanked.
+    Use the module as a namespace with
+    "from pyjoulescope_driver import device_filter".
+    * device_filter -> find
+    * device_match -> DevicePath.match
+    * device_model -> DevicePath.model
+    * is_joulescope -> DevicePath.brand == 'Joulescope'
+  * find and find_one now match all devices by default, including
+    non-Joulescope devices.  Use brand='joulescope' to match only
+    Joulescope instruments.
+  * Added find_one, which returns the single matching DevicePath or raises
+    DeviceFilterError, a ValueError, on zero or multiple matches.
+  * Added comma-separated device specification strings to find,
+    such as "31NB,js220".
+  * Added "{model}-{serial_number}" device specifications, such as
+    "js320-31NB", to DevicePath.match.
+
 ## 2.4.3
 
 2026 Oct 6

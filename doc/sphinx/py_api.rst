@@ -23,6 +23,7 @@ Python API
     :maxdepth: 3
 
     driver
+    device_selection
     record
     program
     time64
@@ -33,4 +34,14 @@ Command-line tools
 The package installs command-line entry points.  For the full list::
 
     python -m pyjoulescope_driver --help
+
+The commands that operate on devices select them with ``--device`` (``-d``),
+which accepts the same device specifications as
+:meth:`Driver.find_devices`, such as ``-d js320`` or ``-d 8W2A``.
+The commands that support any device also accept ``--brand``, such as
+``--brand joulescope``.  For example::
+
+    python -m pyjoulescope_driver info
+    python -m pyjoulescope_driver values -d js320
+    python -m pyjoulescope_driver metadata --brand joulescope
 

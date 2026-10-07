@@ -14,13 +14,14 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver, time64
-from pyjoulescope_driver.device_filter import device_filter, device_model
+from .device_arg import add_device_argument, device_select
 import sys
 import time
 
 
 def parser_config(p):
     """Measure energy and charge over the specified duration."""
+    add_device_argument(p, 'Optional when only one Joulescope is connected.')
     p.add_argument('--duration',
                    default=1.0,
                    type=time64.duration_to_seconds,
@@ -111,12 +112,10 @@ def measure(driver, device, duration=None, on_progress=None):
 
 def on_cmd(args):
     with Driver() as d:
-        devices = device_filter(d.device_paths())
-        if len(devices) != 1:
-            print(f'Found {len(devices)} Joulescopes, but this command requires exactly 1')
+        device = device_select(d, args.device, brand='joulescope')
+        if device is None:
             return 1
-        device = devices[0]
-        model = device_model(device)
+        model = device.model
         d.open(device)
         d.publish(device + '/s/i/range/mode', 'auto')
         if model == 'js110':

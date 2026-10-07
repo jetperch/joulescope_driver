@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
+from .device_arg import add_brand_argument, add_device_argument, device_select
 import binascii
 
 
@@ -21,13 +22,13 @@ import binascii
 Joulescope JS220 examples
 
 Blinking led (override normal operation)
-python -m pyjoulescope_driver set u/js220/000000 c/led/en=1 c/led/red=0x18 c/led/green=0x0E c/led/blue=3 s/led/en=1 s/led/red=0xC0 s/led/green=0x30 s/led/blue=0x0C
+python -m pyjoulescope_driver set -d u/js220/000000 c/led/en=1 c/led/red=0x18 c/led/green=0x0E c/led/blue=3 s/led/en=1 s/led/red=0xC0 s/led/green=0x30 s/led/blue=0x0C
 
 Restore normal led operation:
-python -m pyjoulescope_driver set u/js220/000000 c/led/en=0 s/led/en=0
+python -m pyjoulescope_driver set -d u/js220/000000 c/led/en=0 s/led/en=0
 
 Restore all defaults:
-python -m pyjoulescope_driver set u/js220/000000 --open defaults
+python -m pyjoulescope_driver set -d u/js220/000000 --open defaults
 
 """
 
@@ -61,8 +62,8 @@ def parser_config(p):
                    choices=['defaults', 'restore'],
                    default='restore',
                    help='The device open mode.  Defaults to "restore".')
-    p.add_argument('device_path',
-                   help='The target device for this command.')
+    add_device_argument(p, 'Optional when only one device is connected.')
+    add_brand_argument(p)
     p.add_argument('args',
                    type=_args_validate,
                    nargs='*',
@@ -73,10 +74,13 @@ def parser_config(p):
 def on_cmd(args):
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        d.open(args.device_path, mode=args.open)
-        for topic, value in args.args:
-            if not topic.startswith(args.device_path):
-                topic = f'{args.device_path}/{topic}'
-            print(f'{topic} {value}')
-            d.publish(topic, value)
+        device_path = device_select(d, args.device, args.brand)
+        if device_path is None:
+            return 1
+        with d.open(device_path, mode=args.open) as device:
+            for topic, value in args.args:
+                if topic.startswith(f'{device_path}/'):
+                    topic = topic[len(device_path) + 1:]
+                print(f'{device.topic(topic)} {value}')
+                device.publish(topic, value)
     return 0

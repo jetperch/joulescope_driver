@@ -15,8 +15,8 @@
 
 """Hardware-in-the-loop memory regression test."""
 
-from pyjoulescope_driver import Driver
-from pyjoulescope_driver.device_filter import device_match
+from pyjoulescope_driver import Driver, device_filter
+from .device_arg import add_brand_argument, add_device_argument
 from pyjoulescope_driver.mem_client import (
     MemClient, FLASH_BLOCK_64K,
 )
@@ -42,10 +42,8 @@ def parser_config(p):
     p.add_argument('size', type=_parse_int,
                    help='Test region size in bytes '
                         '(e.g. 0x10000).')
-    p.add_argument('--device', '-d', default=None,
-                   help='Device filter: a device path, model or serial '
-                        'number.  Required when more than one device '
-                        'is present.')
+    add_device_argument(p, 'Required when more than one device is present.')
+    add_brand_argument(p)
     return on_cmd
 
 
@@ -94,22 +92,14 @@ def on_cmd(args):
 
     with Driver() as driver:
         driver.log_level = args.jsdrv_log_level
-        devices = driver.device_paths()
-        if not devices:
-            print('ERROR: no devices found')
-            return 1
-
-        if args.device is not None:
-            devices = [d for d in devices if device_match(d, args.device)]
-        if len(devices) != 1:
-            if not devices:
-                print(f'ERROR: device {args.device} not found')
-            else:
+        try:
+            device = driver.find_one_device(args.device, args.brand)
+        except device_filter.DeviceFilterError as e:
+            print(f'ERROR: {e}')
+            if len(e.matches) > 1:
                 print('ERROR: this test erases flash, so select one device '
                       'with --device')
-            print(f'  available: {driver.device_paths()}')
             return 1
-        device = devices[0]
 
         driver.open(device, mode='restore')
         time.sleep(0.5)

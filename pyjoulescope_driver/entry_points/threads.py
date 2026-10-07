@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from pyjoulescope_driver import Driver
+from .device_arg import add_brand_argument, add_device_argument
 import threading
 import time
 
@@ -27,7 +28,7 @@ def parser_config(p):
     For example:
         python -m pyjoulescope_driver --log_level INFO --jsdrv_log_level info threads --threads 10 --duration 10 --timeout 0.1
     """
-    p.add_argument('--duration', '-d',
+    p.add_argument('--duration',
                    type=float,
                    default=1.0,
                    help='The duration in seconds to run the threading demonstration.')
@@ -39,13 +40,15 @@ def parser_config(p):
                    type=float,
                    default=0.01,
                    help='The thread processing timeout delay in seconds.')
+    add_device_argument(p, 'Defaults to the connected JS220.')
+    add_brand_argument(p)
     return on_cmd
 
 
-def _device_get(d):
+def _device_get(d, args):
     # this demonstration uses the h/timeout debug topic, which only the
     # JS220 implements
-    devices_paths = [p for p in d.device_paths() if '/js220/' in p]
+    devices_paths = [p for p in d.find_devices(args.device, args.brand) if p.model == 'js220']
     if len(devices_paths) == 1:
         return devices_paths[0]
     if len(devices_paths) == 0:
@@ -77,7 +80,7 @@ def on_cmd(args):
     global _quit
     with Driver() as d:
         d.log_level = args.jsdrv_log_level
-        device_path = _device_get(d)
+        device_path = _device_get(d, args)
         if device_path is None:
             return 1
         d.open(device_path)

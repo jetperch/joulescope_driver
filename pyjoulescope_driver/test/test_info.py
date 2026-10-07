@@ -13,10 +13,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Test the info entry point value formatting."""
+"""Test the info entry point."""
 
+import argparse
+import contextlib
+import io
 import unittest
+from unittest import mock
+from pyjoulescope_driver import device_filter
+from pyjoulescope_driver.entry_points import info
 from pyjoulescope_driver.entry_points.info import format_value, version_to_str
+
+
+PATHS = ['u/js320/8W2A', 'u/mb/93NP']
+
+
+class _Opened(Exception):
+    pass
+
+
+class FakeDriver:
+    paths = PATHS
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def find_devices(self, specs=None, brand=None, timeout=None):
+        return device_filter.find(self.paths, specs, brand)
+
+    def open(self, device_path, mode=None, timeout=None):
+        raise _Opened(device_path)
 
 
 class TestInfo(unittest.TestCase):
@@ -33,3 +62,44 @@ class TestInfo(unittest.TestCase):
         # The JS320 c/hw/version is a u8 without the version format.
         self.assertEqual(1, format_value({'dtype': 'u8'}, 1))
         self.assertEqual(1, format_value(None, 1))
+
+
+class TestInfoDevices(unittest.TestCase):
+
+    def run_info(self, device=None, brand=None):
+        args = argparse.Namespace(device=device, brand=brand, jsdrv_log_level='off')
+        out = io.StringIO()
+        with mock.patch.object(info, 'Driver', FakeDriver), contextlib.redirect_stdout(out):
+            rc = info.on_cmd(args)
+        return rc, out.getvalue()
+
+    def test_list_all(self):
+        rc, out = self.run_info()
+        self.assertEqual(0, rc)
+        self.assertIn('u/js320/8W2A', out)
+        self.assertIn('u/mb/93NP', out)
+
+    def test_list_brand(self):
+        rc, out = self.run_info(brand='Joulescope')
+        self.assertEqual(0, rc)
+        self.assertIn('u/js320/8W2A', out)
+        self.assertNotIn('u/mb/93NP', out)
+
+    def test_list_brand_none_found(self):
+        with mock.patch.object(FakeDriver, 'paths', ['u/mb/93NP']):
+            rc, out = self.run_info(brand='Joulescope')
+        self.assertEqual(0, rc)
+        self.assertIn('No connected devices found', out)
+        self.assertNotIn('u/mb/93NP', out)
+
+    def test_list_device(self):
+        rc, out = self.run_info(device='mb')
+        self.assertEqual(0, rc)
+        self.assertIn('u/mb/93NP', out)
+        self.assertNotIn('u/js320/8W2A', out)
+
+    def test_list_device_brand_not_found(self):
+        rc, out = self.run_info(device='mb', brand='Joulescope')
+        self.assertEqual(0, rc)
+        self.assertIn('No connected devices found', out)
+        self.assertNotIn('u/mb/93NP', out)

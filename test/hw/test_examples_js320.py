@@ -110,7 +110,7 @@ def _jsdrv_exe():
 def test_statistics(dev):
     print('test: python -m pyjoulescope_driver statistics')
     stdout = _run([sys.executable, '-m', 'pyjoulescope_driver', 'statistics',
-                   '--duration', '2.5', dev])
+                   '--duration', '2.5', '--device', dev])
     rows = [line.split(',') for line in stdout.splitlines()
             if line.startswith(dev + ',')]
     _check(len(rows) >= 2, f'{len(rows)} statistics rows')
@@ -125,7 +125,7 @@ def test_record(dev, tmpdir):
     from pyjls import Reader, SignalType
     path = os.path.join(tmpdir, 'record.jls')
     _run([sys.executable, '-m', 'pyjoulescope_driver', 'record',
-          '--duration', '1', '--serial_number', dev, path])
+          '--duration', '1', '--device', dev, path])
     data = {}
     with Reader(path) as r:
         for s in r.signals.values():

@@ -58,6 +58,7 @@ def get_parser():
     subparsers = parser.add_subparsers(
         dest='subparser_name',
         help='The command to execute')
+    parser.command_parsers = {}
 
     for entry_point in entry_points.__all__:
         default_name = entry_point.__name__.split('.')[-1]
@@ -68,6 +69,7 @@ def get_parser():
         if not callable(cmd_fn):
             raise ValueError(f'Invalid command function for {name}')
         p.set_defaults(func=cmd_fn)
+        parser.command_parsers[name] = p
 
     subparsers.add_parser('help', help='Display the command help. Use [command] --help to display help for a specific command.')
 
@@ -82,7 +84,11 @@ def run(args=None):
     :raise: On any exception.
     """
     parser = get_parser()
-    args = parser.parse_args(args=args)
+    args, unknown = parser.parse_known_args(args=args)
+    if unknown:
+        # Report with the command's usage, not the top-level usage.
+        p = parser.command_parsers.get(args.subparser_name, parser)
+        p.error(f'unrecognized arguments: {" ".join(unknown)}')
     if args.log_level is not None:
         log_level = args.log_level
     else:

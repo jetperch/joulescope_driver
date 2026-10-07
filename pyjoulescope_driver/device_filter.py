@@ -13,74 +13,112 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Select Joulescope instruments from the driver's device paths.
+"""Select devices from the driver's device paths.
 
-Device paths have the form "{backend}/{model}/{serial_number}", such as
-"u/js320/31NB".  The driver also reports other devices, such as a
-MiniBitty at "u/mb/{serial_number}", which the Joulescope tools ignore.
+The driver reports all devices, including Joulescope instruments and
+other devices, such as a MiniBitty at "u/mb/{serial_number}".  Use the
+brand argument to select only Joulescope instruments.  See
+:class:`DevicePath` for the device path and specification formats.
+
+Use this module as a namespace::
+
+    from pyjoulescope_driver import device_filter
+    device_path = device_filter.find_one(paths, '31NB', brand='joulescope')
+
+Driver.device_paths() and Driver.find_one_device() provide the same
+selection directly.
 """
 
-JOULESCOPE_MODELS = ('js110', 'js220', 'js320')
+from .device_path import DevicePath, brand_validate
 
 
-def _parts(device_path):
-    parts = device_path.lower().split('/')
-    if len(parts) != 3:
+class DeviceFilterError(ValueError):
+    """The device specifications did not match exactly one device.
+
+    :ivar specs: The list of device specifications, or None for all.
+    :ivar brand: The brand, such as "Joulescope", or None for all.
+    :ivar matches: The list of matching device paths.
+    :ivar available: The list of all device paths for the brand.
+    """
+
+    def __init__(self, specs, brand, matches, available):
+        self.specs = specs
+        self.brand = brand
+        self.matches = matches
+        self.available = available
+        noun = brand if brand else 'device'
+        name = f'Device "{", ".join(specs)}"' if specs else None
+        if not matches:
+            msg = f'{name} not found in {available}' if name else f'No {noun} found'
+        elif name:
+            msg = f'{name} matched multiple {noun}s: {matches}'
+        else:
+            msg = f'Multiple {noun}s found: {matches}'
+        super().__init__(msg)
+
+
+def _specs_normalize(specs):
+    if specs is None:
         return None
-    return parts
+    if isinstance(specs, str):
+        specs = [spec.strip() for spec in specs.split(',')]
+        specs = [spec for spec in specs if spec]
+    elif not isinstance(specs, (list, tuple)):
+        raise TypeError(f'specs must be str or a list of str, not {type(specs).__name__}')
+    elif not all(isinstance(spec, str) for spec in specs):
+        raise TypeError('specs must be str or a list of str')
+    return list(specs) or None
 
 
-def device_model(device_path):
-    """Get the model for a device path.
+def _brand_normalize(brand):
+    return None if brand is None else brand_validate(brand)
 
-    :param device_path: The device path, such as "u/js320/31NB".
-    :return: The lowercase model, such as "js320", or None.
+
+def find(device_paths, specs=None, brand=None):
+    """Find the device paths for the matching devices.
+
+    :param device_paths: The list of device path strings, such as
+        from Driver.device_paths().
+    :param specs: The device specifications, which is one of:
+
+        * None to match all devices.
+        * a string containing one or more comma-separated device
+          specifications, such as "js320" or "31NB, u/js220/000415".
+          Whitespace around each specification is ignored, and an
+          empty string matches all devices.
+        * a list of device specification strings.
+
+        A device matches if it matches any specification.
+        See :meth:`DevicePath.match` for the device specification format.
+    :param brand: The case-insensitive brand, such as "Joulescope",
+        to only match devices of that brand.  None (default) matches
+        all brands.
+    :return: The list of matching :class:`DevicePath` instances, in order.
+    :raise TypeError: If specs or brand has an invalid type.
+    :raise ValueError: If brand is not supported.
     """
-    parts = _parts(device_path)
-    return None if parts is None else parts[1]
-
-
-def is_joulescope(device_path):
-    """Check if a device path is a Joulescope instrument."""
-    return device_model(device_path) in JOULESCOPE_MODELS
-
-
-def device_match(device_path, spec):
-    """Check if a device path matches a user-provided device specification.
-
-    :param device_path: The device path, such as "u/js320/31NB".
-    :param spec: The device specification, which is one of:
-        * the full device path, such as "u/js320/31NB".
-        * the model and serial number, such as "js320/31NB".
-        * the model, such as "js320".
-        * the serial number, such as "31NB".
-        Matching is case-insensitive, and serial numbers must match exactly.
-    :return: True on a match, False otherwise.
-    """
-    parts = _parts(device_path)
-    if parts is None or spec is None:
-        return False
-    spec = spec.lower().strip('/')
-    _, model, serial_number = parts
-    if spec in (device_path.lower(), f'{model}/{serial_number}', serial_number):
-        return True
-    return spec == model
-
-
-def device_filter(device_paths, specs=None):
-    """Filter device paths to the matching Joulescope instruments.
-
-    :param device_paths: The list of device paths from Driver.device_paths().
-    :param specs: The device specification string, a list of device
-        specification strings, or None to match all Joulescopes.
-        See :func:`device_match`.
-    :return: The list of matching Joulescope device paths, in order.
-    """
-    paths = [p for p in device_paths if is_joulescope(p)]
+    specs = _specs_normalize(specs)
+    brand = _brand_normalize(brand)
+    paths = [DevicePath(p) for p in device_paths]
+    if brand is not None:
+        paths = [p for p in paths if p.brand == brand]
     if specs is None:
         return paths
-    if isinstance(specs, str):
-        specs = [specs]
-    if not len(specs):
-        return paths
-    return [p for p in paths if any(device_match(p, spec) for spec in specs)]
+    return [p for p in paths if any(p.match(spec) for spec in specs)]
+
+
+def find_one(device_paths, specs=None, brand=None):
+    """Find the device path for exactly one matching device.
+
+    :param device_paths: The list of device path strings, such as
+        from Driver.device_paths().
+    :param specs: The device specifications.  See :func:`find`.
+    :param brand: The brand.  See :func:`find`.
+    :return: The matching :class:`DevicePath`.
+    :raise DeviceFilterError: If zero or multiple devices match.
+    """
+    matches = find(device_paths, specs, brand)
+    if len(matches) != 1:
+        raise DeviceFilterError(_specs_normalize(specs), _brand_normalize(brand),
+                                matches, find(device_paths, brand=brand))
+    return matches[0]

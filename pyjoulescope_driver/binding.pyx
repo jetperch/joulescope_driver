@@ -29,6 +29,8 @@ from libc.math cimport isfinite, NAN
 from libc.string cimport memset, strcpy
 
 from collections.abc import Iterable, Mapping
+from .device_path import DevicePath
+from . import device_filter
 from .stdmsg import StdMsg
 import json
 import logging
@@ -301,7 +303,8 @@ cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
 
 
 cdef object _pack_buffer_req(r):
-    cdef const uint8_t[:] rsp_topic_str = r['rsp_topic'].encode('utf-8')
+    rsp_topic = _topic_validate(r['rsp_topic'], 'rsp_topic')
+    cdef const uint8_t[:] rsp_topic_str = rsp_topic.encode('utf-8')
     cdef c_jsdrv.jsdrv_buffer_request_s s
     cdef uint8_t * u8_ptr
 
@@ -771,6 +774,21 @@ cdef int32_t _timeout_validate(value, default=None):
     return <int32_t> (float(value) * 1000)
 
 
+cdef object _topic_validate(topic, name='topic'):
+    # Accept str subclasses, such as DevicePath, which a Cython str
+    # annotation would reject.
+    if not isinstance(topic, str):
+        raise TypeError(f'{name} must be str, not {type(topic).__name__}')
+    return topic
+
+
+cdef object _device_prefix_validate(device_prefix):
+    device_prefix = _topic_validate(device_prefix, 'device_prefix').rstrip('/')
+    if not device_prefix:
+        raise ValueError('device_prefix must not be empty')
+    return device_prefix
+
+
 def _handle_rc(rc, src, cause=None):
     if rc:
         name = c_jsdrv.jsdrv_error_code_name(rc).decode('utf-8')
@@ -790,12 +808,34 @@ cdef class Driver:
 
     :param timeout: The optional timeout for open.
         None (default) uses the default timeout.
+
+    The application must finalize each Driver instance, either with a
+    context manager or by calling :meth:`finalize` directly.  Finalize
+    stops the driver threads and closes the devices that the instance
+    opened.  A Driver that is never finalized keeps its threads running
+    and its devices open, which is a program bug.  Typical usage::
+
+        from pyjoulescope_driver import Driver
+
+        with Driver() as d:
+            device_path = d.find_one_device('js320', brand='joulescope')
+            with d.open(device_path, mode='restore') as device:
+                device.publish('s/i/range/mode', 'auto')
+                with device.subscribe('s/stats/value', 'pub', on_statistics):
+                    time.sleep(1.0)
+
+    Use :meth:`device_paths`, :meth:`find_devices` and
+    :meth:`find_one_device` to select devices, and :meth:`device_watch`
+    to track device additions and removals.  :meth:`open` returns a
+    :class:`DeviceContext`, and :meth:`subscribe` returns a
+    :class:`SubscribeContext`.
     """
     cdef c_jsdrv.jsdrv_context_s * _context
     # The C library holds a borrowed pointer to each callback, so these
     # lists hold the reference that keeps each callback alive.
     cdef object _subscribers  # list of (topic, fn) registered with C
     cdef object _released     # fn objects that C may still call
+    cdef object _opened       # set of device paths opened by this instance
 
     def __init__(self, timeout=None):
         global _driver_count
@@ -807,10 +847,16 @@ cdef class Driver:
         _handle_rc(rc, 'jsdrv_initialize')
         self._subscribers = []
         self._released = []
+        self._opened = set()
         if _driver_count == 0:
             c_jsdrv.jsdrv_log_initialize()
             c_jsdrv.jsdrv_log_register(_on_log_recv, NULL)
         _driver_count += 1
+
+    cdef c_jsdrv.jsdrv_context_s * _context_get(self) except NULL:
+        if self._context == NULL:
+            raise RuntimeError('Driver is finalized')
+        return self._context
 
     def __enter__(self):
         return self
@@ -837,16 +883,24 @@ cdef class Driver:
         c_jsdrv.jsdrv_log_level_set(level)
 
     def finalize(self, timeout=None):
-        """Finalize the driver.
+        """Finalize the driver and release all resources.
+
+        Finalize first closes each device that this instance opened and
+        that is still connected, ignoring close errors.  It then stops the
+        driver, which stops all subscriptions.  Afterwards, close,
+        unsubscribe and unsubscribe_all do nothing, and the other methods
+        raise RuntimeError.  Exiting a ``with Driver() as d:`` block calls
+        finalize.
 
         :param timeout: The timeout in seconds.  None (default) uses
             the driver's finalize timeout, which allows time for every
             device and backend thread to exit.
         """
         global _driver_count
-        cdef c_jsdrv.jsdrv_context_s * context = self._context
-        if context == NULL:
+        if self._context == NULL:
             return  # already finalized
+        self._close_opened()
+        cdef c_jsdrv.jsdrv_context_s * context = self._context
         self._context = NULL
         timeout_ms = _timeout_validate(timeout, 0)  # 0 = C default
         with nogil:
@@ -859,7 +913,25 @@ cdef class Driver:
         self._subscribers.clear()
         self._released.clear()
 
-    def publish(self, topic: str, value, timeout=None):
+    def _close_opened(self):
+        """Close the devices opened by this instance, ignoring errors."""
+        if not self._opened:
+            return
+        try:
+            connected = set(self.device_paths())
+        except Exception:
+            _log.exception('finalize: could not list devices')
+            connected = set()
+        for device_path in sorted(self._opened):
+            if device_path not in connected:
+                continue  # removed, so close would only time out
+            try:
+                self.close(device_path)
+            except Exception:
+                _log.warning('finalize: could not close %s', device_path, exc_info=True)
+        self._opened.clear()
+
+    def publish(self, topic, value, timeout=None):
         """Publish a value to a topic.
 
         :param topic: The topic string.
@@ -870,8 +942,9 @@ cdef class Driver:
         """
         cdef c_jsdrv.jsdrv_union_s v
         cdef char * byte_str
-        cdef const uint8_t[:] topic_str = topic.encode('utf-8')
+        cdef const uint8_t[:] topic_str = _topic_validate(topic).encode('utf-8')
         cdef int32_t timeout_ms = _timeout_validate(timeout)
+        cdef c_jsdrv.jsdrv_context_s * context = self._context_get()
 
         memset(&v, 0, sizeof(v))
         if isinstance(value, str):
@@ -917,10 +990,10 @@ cdef class Driver:
         if '!' not in topic:
             v.flags = c_jsdrv.JSDRV_UNION_FLAG_RETAIN
         with nogil:
-            rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms)
+            rc = c_jsdrv.jsdrv_publish(context, <char *> &topic_str[0], &v, timeout_ms)
         _handle_rc(rc, 'jsdrv_publish', topic)
 
-    def query(self, topic: str, timeout=None):
+    def query(self, topic, timeout=None):
         """Query the value for a topic.
 
         :param topic: The topic name.
@@ -931,15 +1004,16 @@ cdef class Driver:
         """
         cdef c_jsdrv.jsdrv_union_s v
         cdef char byte_str[1024]
-        cdef const uint8_t[:] topic_str = topic.encode('utf-8')
+        cdef const uint8_t[:] topic_str = _topic_validate(topic).encode('utf-8')
         cdef int32_t timeout_ms = _timeout_validate(timeout)
+        cdef c_jsdrv.jsdrv_context_s * context = self._context_get()
 
         memset(&v, 0, sizeof(v))
         v.type = c_jsdrv.JSDRV_UNION_BIN
         v.size = 1024
         v.value.str = byte_str
         with nogil:
-            rc = c_jsdrv.jsdrv_query(self._context, <char *> &topic_str[0], &v, timeout_ms)
+            rc = c_jsdrv.jsdrv_query(context, <char *> &topic_str[0], &v, timeout_ms)
         _handle_rc(rc, 'jsdrv_query', topic)
         return _jsdrv_union_to_py(&v)
 
@@ -960,6 +1034,8 @@ cdef class Driver:
         :return: The value received on response_topic.
         :raises TimeoutError: If no response arrives in time.
         """
+        _topic_validate(publish_topic, 'publish_topic')
+        _topic_validate(response_topic, 'response_topic')
         if timeout is None:
             timeout = _TIMEOUT_MS_DEFAULT / 1000.0
         event = threading.Event()
@@ -986,19 +1062,121 @@ cdef class Driver:
         finally:
             self.unsubscribe(response_topic, on_response)
 
-    def device_paths(self, timeout=None):
+    def device_paths(self, specs=None, brand=None, timeout=None):
         """List the currently connected devices.
 
+        :param specs: The device specifications.  None (default) lists
+            all devices.  See :func:`device_filter.find`.
+        :param brand: The case-insensitive brand, such as "Joulescope".
+            None (default) lists all brands.
         :param timeout: The timeout in seconds.  None (default) uses
             the default timeout.
-        :return: The list of device path strings.
+        :return: The sorted list of matching :class:`DevicePath`
+            instances, which are str instances.
+        :raise TypeError: If specs or brand has an invalid type.
+        :raise ValueError: If brand is not supported.
         """
         s = self.query('@/list', timeout)
-        if not len(s):
-            return []
-        return sorted(s.split(','))
+        paths = sorted(DevicePath(p) for p in s.split(',')) if len(s) else []
+        return device_filter.find(paths, specs, brand)
 
-    def subscribe(self, topic: str, flags, fn, timeout=None):
+    def find_one_device(self, specs=None, brand=None, timeout=None):
+        """Find exactly one connected device.
+
+        :param specs: The device specifications.  None (default) matches
+            all devices.  See :func:`device_filter.find`.
+        :param brand: The case-insensitive brand, such as "Joulescope".
+            None (default) matches all brands.
+        :param timeout: The timeout in seconds.  None (default) uses
+            the default timeout.
+        :return: The matching :class:`DevicePath`.
+        :raise device_filter.DeviceFilterError: If zero or multiple
+            devices match.
+        """
+        return device_filter.find_one(self.device_paths(timeout=timeout), specs, brand)
+
+    def find_devices(self, specs=None, brand=None, timeout=None):
+        """Find the connected devices.
+
+        This method is an alias for :meth:`device_paths`, which reads
+        better next to :meth:`find_one_device`.
+        """
+        return self.device_paths(specs, brand, timeout)
+
+    def device_watch(self, on_add, on_remove, specs=None, brand=None, timeout=None):
+        """Watch for matching devices.
+
+        :param on_add: The callable(device_path) called with the
+            :class:`DevicePath` for each added device.  Before returning,
+            this method calls on_add for each connected device.
+        :param on_remove: The callable(device_path) called with the
+            :class:`DevicePath` for each removed device.
+        :param specs: The device specifications.  None (default) matches
+            all devices.  See :func:`device_filter.find`.
+        :param brand: The case-insensitive brand, such as "Joulescope".
+            None (default) matches all brands.
+        :param timeout: The timeout in seconds.  None (default) uses
+            the default timeout.
+        :return: The :class:`SubscribeContext`.  Call unsubscribe() or
+            exit its context to stop watching.
+
+        This method calls on_add for the connected devices from the
+        calling thread, so these on_add calls may use any Driver method.
+        Afterwards, the driver thread calls on_add and on_remove, once for
+        each device addition and removal, in order.  Callbacks from the
+        driver thread must not block on the driver, so use timeout=0 or
+        defer blocking work, such as :meth:`open`, to another thread.
+        """
+        device_filter.find([], specs, brand)  # validate specs and brand
+        lock = threading.Lock()
+        pending = []  # events received while listing the connected devices
+        listing = True
+        known = set()
+
+        def process(is_add, device_path):
+            device_path = DevicePath(device_path)
+            if is_add:
+                if device_path in known or not device_filter.find([device_path], specs, brand):
+                    return
+                known.add(device_path)
+                on_add(device_path)
+            elif device_path in known:
+                known.discard(device_path)
+                on_remove(device_path)
+
+        def on_event(is_add, value):
+            with lock:
+                if listing:
+                    pending.append((is_add, value))
+                    return
+            process(is_add, value)
+
+        def on_add_event(topic, value):
+            on_event(True, value)
+
+        def on_remove_event(topic, value):
+            on_event(False, value)
+
+        # Subscribe before listing, so no device is missed.  Hold events
+        # until listing completes, then process them in order.
+        watch = self.subscribe('@/!add', 'pub', on_add_event, timeout)
+        try:
+            watch.extend(self.subscribe('@/!remove', 'pub', on_remove_event, timeout))
+            for device_path in self.device_paths(timeout=timeout):
+                process(True, device_path)
+            while True:
+                with lock:
+                    if not pending:
+                        listing = False
+                        break
+                    event = pending.pop(0)
+                process(*event)
+        except BaseException:
+            watch.unsubscribe()
+            raise
+        return watch
+
+    def subscribe(self, topic, flags, fn, timeout=None):
         """Subscribe to receive topic updates.
 
         :param self: The driver instance.
@@ -1026,12 +1204,19 @@ cdef class Driver:
         :param timeout: The timeout in float seconds to wait for this operation
             to complete.  None waits the default amount.
             0 does not wait and subscription will occur asynchronously.
+        :return: The :class:`SubscribeContext`, which unsubscribes on
+            unsubscribe() or when used as a context manager::
+
+                with d.subscribe(topic, 'pub', fn):
+                    ...
+
         :raise RuntimeError: on subscribe failure.
         """
-        cdef const uint8_t[:] topic_str = topic.encode('utf-8')
+        cdef const uint8_t[:] topic_str = _topic_validate(topic).encode('utf-8')
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef int32_t c_flags = 0
         cdef void * fn_ptr = <void *> fn
+        cdef c_jsdrv.jsdrv_context_s * context = self._context_get()
 
         if isinstance(flags, str):
             c_flags = _SUBSCRIBE_FLAG_LOOKUP[flags.lower()]
@@ -1042,8 +1227,9 @@ cdef class Driver:
             c_flags = <int32_t> int(flags)
         self._subscribers.append((topic, fn))
         with nogil:
-            rc = c_jsdrv.jsdrv_subscribe(self._context, <char *> &topic_str[0], c_flags, _on_cmd_publish_cbk, fn_ptr, timeout_ms)
+            rc = c_jsdrv.jsdrv_subscribe(context, <char *> &topic_str[0], c_flags, _on_cmd_publish_cbk, fn_ptr, timeout_ms)
         _handle_rc(rc, 'jsdrv_subscribe', topic)
+        return SubscribeContext(self, [(topic, fn)])
 
     def unsubscribe(self, topic, fn, timeout=None):
         """Unsubscribe from a topic.
@@ -1054,8 +1240,10 @@ cdef class Driver:
             the default timeout.
         :raise: On error.
         """
-        cdef const uint8_t[:] topic_str = topic.encode('utf-8')
+        cdef const uint8_t[:] topic_str = _topic_validate(topic).encode('utf-8')
         cdef int32_t timeout_ms = _timeout_validate(timeout)
+        if self._context == NULL:
+            return  # finalize stopped all subscriptions
         targets = self._registered(fn, topic)
         cdef void * fn_ptr = <void *> targets[0]
 
@@ -1077,6 +1265,8 @@ cdef class Driver:
         cdef int32_t rc_target
         cdef void * fn_ptr
 
+        if self._context == NULL:
+            return  # finalize stopped all subscriptions
         targets = self._registered(fn)
         for target in targets:
             fn_ptr = <void *> target
@@ -1131,6 +1321,7 @@ cdef class Driver:
 
         :param device_prefix: The prefix name for the device.
         :param mode: The open mode which is one of:
+
             * 'defaults': Push state to the device: the host's retained
               value for each writable topic when present, else the
               metadata default.
@@ -1138,20 +1329,28 @@ cdef class Driver:
               into the host cache.
             * 'raw': Open the device in raw mode for development or firmware update.
             * None: equivalent to 'defaults'.
+
         :param timeout: The timeout in seconds.  None uses the default timeout.
+        :return: The :class:`DeviceContext` for the open device, which
+            closes the device on close() or when used as a context manager::
+
+                with d.open(device_path) as device:
+                    device.publish('s/i/range/mode', 'auto')
+
+            Finalize closes all devices that remain open.
         """
 
         cdef const uint8_t[:] topic_str
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef c_jsdrv.jsdrv_union_s v
+        cdef c_jsdrv.jsdrv_context_s * context = self._context_get()
         memset(&v, 0, sizeof(v))
 
         if isinstance(mode, str):
             mode = mode.lower()
         mode = _DEVICE_OPEN_MODES[mode]
 
-        while device_prefix[-1] == '/':
-            device_prefix = device_prefix[:-1]
+        device_prefix = _device_prefix_validate(device_prefix)
         topic = device_prefix + "/@/!open"
         topic_str = topic.encode('utf-8')
 
@@ -1159,8 +1358,10 @@ cdef class Driver:
         v.value.i32 = mode
 
         with nogil:
-            rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms);
+            rc = c_jsdrv.jsdrv_publish(context, <char *> &topic_str[0], &v, timeout_ms);
         _handle_rc(rc, 'jsdrv_open', device_prefix)
+        self._opened.add(device_prefix)
+        return DeviceContext(self, device_prefix)
 
     def close(self, device_prefix, timeout=None):
         """Close an attached device.
@@ -1172,8 +1373,10 @@ cdef class Driver:
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef c_jsdrv.jsdrv_union_s v
 
-        while device_prefix[-1] == '/':
-            device_prefix = device_prefix[:-1]
+        device_prefix = _device_prefix_validate(device_prefix)
+        if self._context == NULL:
+            return  # finalize closed all devices
+        self._opened.discard(device_prefix)
         topic = device_prefix + "/@/!close"
         topic_str = topic.encode('utf-8')
         # Zero flags and app: jsdrvp_msg_free interprets app.
@@ -1183,6 +1386,131 @@ cdef class Driver:
         with nogil:
             rc = c_jsdrv.jsdrv_publish(self._context, <char *> &topic_str[0], &v, timeout_ms);
         _handle_rc(rc, 'jsdrv_close', device_prefix)
+
+
+class SubscribeContext:
+    """The subscriptions returned by :meth:`Driver.subscribe`.
+
+    Call :meth:`unsubscribe` or exit the context to unsubscribe.  After
+    :meth:`Driver.finalize`, unsubscribe does nothing.
+    """
+
+    def __init__(self, driver, subscriptions):
+        self._driver = driver
+        self._subscriptions = list(subscriptions)  # list of (topic, fn)
+
+    def extend(self, other):
+        """Move the subscriptions from another SubscribeContext into this one."""
+        self._subscriptions.extend(other._subscriptions)
+        other._subscriptions.clear()
+
+    def _discard(self, topic, fn):
+        """Forget one subscription that was unsubscribed elsewhere.
+
+        :return: True if found, False otherwise.
+        """
+        for idx, (t, f) in enumerate(self._subscriptions):
+            if t == topic and (f is fn or f == fn):
+                del self._subscriptions[idx]
+                return True
+        return False
+
+    def unsubscribe(self, timeout=None):
+        """Unsubscribe.  Calling unsubscribe again does nothing."""
+        subscriptions, self._subscriptions = self._subscriptions, []
+        for topic, fn in subscriptions:
+            self._driver.unsubscribe(topic, fn, timeout)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.unsubscribe()
+
+
+class DeviceContext:
+    """An open device returned by :meth:`Driver.open`.
+
+    The topic arguments are relative to the device path, such as
+    "s/i/range/mode".  Call :meth:`close` or exit the context to
+    unsubscribe all subscriptions made through this instance and then
+    close the device.
+    """
+
+    def __init__(self, driver, device_path):
+        self._driver = driver
+        self.device_path = DevicePath(device_path)
+        self._subscriptions = []  # SubscribeContext instances from subscribe
+        self._closed = False
+
+    def __repr__(self):
+        return f'DeviceContext({self.device_path!r})'
+
+    def topic(self, topic):
+        """Get the absolute topic.
+
+        :param topic: The topic relative to the device path.
+        :return: The absolute topic, "{device_path}/{topic}".
+        """
+        return f'{self.device_path}/{_topic_validate(topic)}'
+
+    def publish(self, topic, value, timeout=None):
+        """Publish a value.  See :meth:`Driver.publish`."""
+        return self._driver.publish(self.topic(topic), value, timeout)
+
+    def query(self, topic, timeout=None):
+        """Query a value.  See :meth:`Driver.query`."""
+        return self._driver.query(self.topic(topic), timeout)
+
+    def publish_and_wait(self, publish_topic, publish_value, response_topic,
+                         timeout=None, match=None):
+        """Publish and wait for a response.  See :meth:`Driver.publish_and_wait`."""
+        publish_topic = self.topic(_topic_validate(publish_topic, 'publish_topic'))
+        response_topic = self.topic(_topic_validate(response_topic, 'response_topic'))
+        return self._driver.publish_and_wait(publish_topic, publish_value, response_topic,
+                                             timeout=timeout, match=match)
+
+    def subscribe(self, topic, flags, fn, timeout=None):
+        """Subscribe to a topic.  See :meth:`Driver.subscribe`.
+
+        :meth:`close` unsubscribes the subscription, if still active.
+
+        :return: The :class:`SubscribeContext`.
+        """
+        subscription = self._driver.subscribe(self.topic(topic), flags, fn, timeout)
+        self._subscriptions = [x for x in self._subscriptions if x._subscriptions]
+        self._subscriptions.append(subscription)
+        return subscription
+
+    def unsubscribe(self, topic, fn, timeout=None):
+        """Unsubscribe from a topic.  See :meth:`Driver.unsubscribe`."""
+        topic = self.topic(topic)
+        for subscription in self._subscriptions:
+            if subscription._discard(topic, fn):
+                break
+        return self._driver.unsubscribe(topic, fn, timeout)
+
+    def close(self, timeout=None):
+        """Unsubscribe all subscriptions made through this instance, and
+        then close the device.  Calling close again does nothing.
+
+        See :meth:`Driver.close`.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        subscriptions, self._subscriptions = self._subscriptions, []
+        try:
+            for subscription in subscriptions:
+                subscription.unsubscribe(timeout)
+        finally:
+            self._driver.close(self.device_path, timeout)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
 
 cdef void _on_cmd_publish_cbk(void * user_data, const char * topic,

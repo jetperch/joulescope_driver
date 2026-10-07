@@ -86,29 +86,6 @@ class TestFormatResolve(unittest.TestCase):
         self.assertEqual('json', metadata.format_resolve(None, None))
 
 
-class TestDeviceSelect(unittest.TestCase):
-
-    def test_no_devices(self):
-        with self.assertRaises(ValueError):
-            metadata.device_select([], None)
-
-    def test_one_device_implicit(self):
-        self.assertEqual('a', metadata.device_select(['a'], None))
-
-    def test_multiple_devices_ambiguous(self):
-        with self.assertRaises(ValueError) as ctx:
-            metadata.device_select(['a', 'b'], None)
-        self.assertIn('a', str(ctx.exception))
-        self.assertIn('b', str(ctx.exception))
-
-    def test_explicit_device(self):
-        self.assertEqual('b', metadata.device_select(['a', 'b'], 'b'))
-
-    def test_explicit_device_not_found(self):
-        with self.assertRaises(ValueError):
-            metadata.device_select(['a', 'b'], 'c')
-
-
 class TestMetadataLoad(unittest.TestCase):
 
     def test_load(self):
