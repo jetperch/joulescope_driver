@@ -25,8 +25,10 @@ from pyjoulescope_driver.__main__ import run
 
 # The usage wraps at the terminal width, after a program name whose length
 # depends on how the tests run, such as a long cibuildwheel venv path.
-# Force a narrow terminal so every platform wraps.
-_COLUMNS = {'COLUMNS': '30'}
+# Force a narrow terminal so every platform wraps.  Python 3.14+ argparse
+# colors its output when sys.stdout is a terminal, even when stderr is
+# redirected, so disable color to keep ANSI codes out of the usage text.
+_ENV = {'COLUMNS': '30', 'PYTHON_COLORS': '0', 'NO_COLOR': '1'}
 
 
 def _usage_regex(command):
@@ -37,7 +39,7 @@ class TestMain(unittest.TestCase):
 
     def run_error(self, args):
         err = io.StringIO()
-        with mock.patch.dict(os.environ, _COLUMNS), contextlib.redirect_stderr(err), \
+        with mock.patch.dict(os.environ, _ENV), contextlib.redirect_stderr(err), \
                 self.assertRaises(SystemExit) as cm:
             run(args)
         self.assertEqual(2, cm.exception.code)
