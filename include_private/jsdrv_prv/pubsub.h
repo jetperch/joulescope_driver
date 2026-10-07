@@ -54,6 +54,7 @@ JSDRV_CPP_GUARD_START
 /// The topic prefix for local topics (no distributed pubsub).
 #define JSDRV_PUBSUB_COMMAND_PREFIX   '_'
 #define JSDRV_PUBSUB_SUBSCRIBE        "_/!sub"
+#define JSDRV_PUBSUB_SUBSCRIBE_DONE   "_/!subd"   // then JSDRVP_MSG_SUBSCRIBE_DONE
 #define JSDRV_PUBSUB_UNSUBSCRIBE      "_/!unsub"
 #define JSDRV_PUBSUB_UNSUBSCRIBE_ALL  "_/!unsub+"
 #define JSDRV_PUBSUB_QUERY            "_/!query"

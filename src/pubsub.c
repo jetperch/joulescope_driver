@@ -483,7 +483,7 @@ static int32_t query(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg) {
     return msg->value.value.i32;
 }
 
-static int32_t subscribe(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg) {
+static int32_t subscribe(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg, bool done_rsp) {
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_BIN);
     JSDRV_ASSERT(msg->value.value.bin == msg->payload.bin);
     struct topic_s * t = topic_find(self, msg->payload.sub.topic, true);
@@ -502,7 +502,7 @@ static int32_t subscribe(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg
         devices_on_sub(self, msg);
         subscribe_traverse(t, msg->payload.sub.topic, sub);
     }
-    if (msg->payload.sub.done_rsp) {
+    if (done_rsp) {
         struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(self->context, JSDRVP_MSG_SUBSCRIBE_DONE,
                                                          &jsdrv_union_i32(0));
         jsdrv_cstr_copy(m->payload.str, msg->payload.sub.topic, sizeof(m->payload.str));
@@ -686,7 +686,9 @@ static void process_msg(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg)
         if (0 == strcmp(JSDRV_PUBSUB_QUERY, msg->topic)) {
             rc = query(self, msg);
         } else if (0 == strcmp(JSDRV_PUBSUB_SUBSCRIBE, msg->topic)) {
-            rc = subscribe(self, msg);
+            rc = subscribe(self, msg, false);
+        } else if (0 == strcmp(JSDRV_PUBSUB_SUBSCRIBE_DONE, msg->topic)) {
+            rc = subscribe(self, msg, true);
         } else if (0 == strcmp(JSDRV_PUBSUB_UNSUBSCRIBE, msg->topic)) {
             rc = unsubscribe(self, msg);
         } else if (0 == strcmp(JSDRV_PUBSUB_UNSUBSCRIBE_ALL, msg->topic)) {

@@ -64,16 +64,15 @@ enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
 /**
  * @brief The subscribe completion message topic.
  *
- * A subscribe with jsdrvp_payload_subscribe_s.done_rsp delivers this
- * message to the subscriber after its retained values.  The value is the
- * subscribed topic string.  See jsdrvp_device_subscribe_done().
+ * A JSDRV_PUBSUB_SUBSCRIBE_DONE subscribe delivers this message to the
+ * subscriber after its retained values.  The value is the subscribed
+ * topic string.  See jsdrvp_device_subscribe_done().
  */
 #define JSDRVP_MSG_SUBSCRIBE_DONE "@/!subdn"
 
 struct jsdrvp_payload_subscribe_s {  // also for unsubscribe
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     struct jsdrv_pubsub_subscriber_s subscriber;
-    uint8_t done_rsp;  // subscribe: deliver JSDRVP_MSG_SUBSCRIBE_DONE last
 };
 
 struct jsdrvp_payload_query_s {

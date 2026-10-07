@@ -200,9 +200,7 @@ static void publish(struct jsdrv_pubsub_s * p, const char * topic, struct jsdrv_
 }
 
 static void subscribe_internal_done(struct jsdrv_pubsub_s * p, const char * name, uint8_t flags) {
-    struct jsdrvp_msg_s * m = subscribe_msg(p, name, flags, JSDRV_PUBSUB_SUBSCRIBE);
-    m->payload.sub.done_rsp = 1;
-    jsdrv_pubsub_publish(p, m);
+    jsdrv_pubsub_publish(p, subscribe_msg(p, name, flags, JSDRV_PUBSUB_SUBSCRIBE_DONE));
 }
 
 static void test_subscribe_then_publish(void ** state) {
@@ -317,6 +315,20 @@ static void test_subscribe_done_not_published(void ** state) {
     subscribe_internal_done(p, "u/js220/1/s", JSDRV_SFLAG_PUB | JSDRV_SFLAG_RETAIN);
     expect_publish_internal(JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js220/1/s"));
     jsdrv_pubsub_process(p);
+    TEARDOWN();
+}
+
+static void test_subscribe_dirty_payload_no_done(void ** state) {
+    SETUP();
+    // Pooled messages are reused without clearing the payload.
+    struct jsdrvp_msg_s * m = subscribe_msg(p, "u/js220/1/s", JSDRV_SFLAG_PUB | JSDRV_SFLAG_RETAIN,
+                                            JSDRV_PUBSUB_SUBSCRIBE);
+    struct jsdrvp_payload_subscribe_s sub = m->payload.sub;
+    memset(&m->payload, 0xff, sizeof(m->payload));
+    jsdrv_cstr_copy(m->payload.sub.topic, sub.topic, sizeof(m->payload.sub.topic));
+    m->payload.sub.subscriber = sub.subscriber;
+    jsdrv_pubsub_publish(p, m);
+    jsdrv_pubsub_process(p);  // no JSDRVP_MSG_SUBSCRIBE_DONE expected
     TEARDOWN();
 }
 
@@ -535,6 +547,7 @@ int main(void) {
             cmocka_unit_test(test_subscribe_done_after_retained),
             cmocka_unit_test(test_subscribe_done_without_retained),
             cmocka_unit_test(test_subscribe_done_not_published),
+            cmocka_unit_test(test_subscribe_dirty_payload_no_done),
             cmocka_unit_test(test_return_code),
             cmocka_unit_test(test_meta),
             cmocka_unit_test(test_query),
