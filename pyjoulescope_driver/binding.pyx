@@ -38,6 +38,7 @@ import numpy as np
 include "module.pxi"
 import threading
 import time
+import warnings
 cimport numpy as np
 from . cimport c_jsdrv
 
@@ -1075,7 +1076,14 @@ cdef class Driver:
             instances, which are str instances.
         :raise TypeError: If specs or brand has an invalid type.
         :raise ValueError: If brand is not supported.
+
+        Before 2.5.0, the first positional argument was timeout.  A numeric
+        specs is still treated as timeout, with a DeprecationWarning.
         """
+        if isinstance(specs, (int, float)) and not isinstance(specs, bool):
+            warnings.warn('device_paths(timeout) is deprecated, use device_paths(timeout=...)',
+                          DeprecationWarning, stacklevel=2)
+            specs, timeout = None, specs
         s = self.query('@/list', timeout)
         paths = sorted(DevicePath(p) for p in s.split(',')) if len(s) else []
         return device_filter.find(paths, specs, brand)

@@ -72,8 +72,19 @@ class TestDriverDevicePaths(unittest.TestCase):
 
     def test_specs_type_error(self):
         with self.assertRaises(TypeError) as cm:
-            self.d.device_paths(2.0)
-        self.assertEqual('specs must be str or a list of str, not float', str(cm.exception))
+            self.d.device_paths(b'js320')
+        self.assertEqual('specs must be str or a list of str, not bytes', str(cm.exception))
+
+    def test_timeout_positional_deprecated(self):
+        # Before 2.5.0, the first positional argument was timeout.
+        with self.assertWarns(DeprecationWarning):
+            paths = self.d.device_paths(2.0)
+        with self.assertWarns(DeprecationWarning):
+            self.d.device_paths(1)
+        self.assertEqual(['u/js220/000415', 'u/js320/8W2A', 'u/mb/93NP'], paths)
+        self.assertEqual([2.0, 1.0], self.d.timeouts)
+        with self.assertRaises(TypeError):
+            self.d.device_paths(True)
 
     def test_timeout(self):
         self.d.device_paths(timeout=2.5)

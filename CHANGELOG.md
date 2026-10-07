@@ -23,7 +23,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.0
 
-2026 Oct 7 [in progress]
+2026 Oct 7
 
 * Added DevicePath, a str subclass with backend, model, serial_number and
   brand properties and a match(spec) method.  Driver.device_paths()
@@ -31,7 +31,9 @@ This file contains the list of changes made to the Joulescope driver.
 * Added optional specs and brand arguments to Driver.device_paths(),
   such as d.device_paths('js320', brand='joulescope').  Brands are
   case-insensitive and support aliases, such as "js" for "Joulescope".
-  The new first argument is specs, so pass timeout by keyword.
+  The new first argument is specs, so pass timeout by keyword.  A numeric
+  first positional argument is still treated as timeout, with a
+  DeprecationWarning.
 * Added Driver.find_one_device(specs, brand), which returns the single
   matching DevicePath or raises DeviceFilterError, and Driver.find_devices,
   an alias for Driver.device_paths.
