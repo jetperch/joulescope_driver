@@ -189,6 +189,8 @@ static int test_metadata(struct app_s * self) {
 // physical device via the device's cmd_q.  We verify by
 // querying the pubsub retained value after reopen -- the
 // retained value should still be present in the host pubsub.
+// The topic must exist on the device: the host pubsub does not
+// retain a value that the device rejects.
 
 static int test_state_restore(struct app_s * self) {
     printf("\n--- Test: State restore (RESUME) ---\n");
@@ -196,22 +198,25 @@ static int test_state_restore(struct app_s * self) {
     char detail[256];
     int32_t rc;
 
-    // Publish a retained value to a device topic
+    // Publish a retained value to a harmless JS320 device topic
     jsdrv_topic_set(&topic, self->device.topic);
-    jsdrv_topic_append(&topic, "c/test/persist");
-    struct jsdrv_union_s val = jsdrv_union_u32(12345);
-    val.flags |= JSDRV_UNION_FLAG_RETAIN;
-    rc = jsdrv_publish(self->context, topic.topic, &val, 0);
-    TEST_ASSERT("publish retained value", rc == 0, "publish failed");
-    jsdrv_thread_sleep_ms(100);
+    jsdrv_topic_append(&topic, "c/led/red");
+    struct jsdrv_union_s orig = jsdrv_union_u8(0);
+    jsdrv_query(self->context, topic.topic, &orig, 1000);
+    const uint8_t expect = (orig.value.u8 == 0x5A) ? 0xA5 : 0x5A;
+    struct jsdrv_union_s val = jsdrv_union_u8_r(expect);
+    rc = jsdrv_publish(self->context, topic.topic, &val, 1000);
+    snprintf(detail, sizeof(detail), "publish rc=%d (%s)",
+        (int) rc, jsdrv_error_code_name(rc));
+    TEST_ASSERT("publish retained value", rc == 0, detail);
 
     // Verify retained value is queryable
-    struct jsdrv_union_s qval = jsdrv_union_i32(0);
+    struct jsdrv_union_s qval = jsdrv_union_u8(0);
     rc = jsdrv_query(self->context, topic.topic, &qval, 1000);
-    snprintf(detail, sizeof(detail), "query rc=%d, value=%" PRId32,
-        (int) rc, qval.value.i32);
+    snprintf(detail, sizeof(detail), "query rc=%d, value=%u",
+        (int) rc, (unsigned) qval.value.u8);
     TEST_ASSERT("retained value queryable before close",
-        rc == 0 && qval.value.i32 == 12345, detail);
+        rc == 0 && qval.value.u8 == expect, detail);
 
     // Close device
     printf("  closing device...\n");
@@ -226,12 +231,12 @@ static int test_state_restore(struct app_s * self) {
     jsdrv_thread_sleep_ms(1000);
 
     // Verify retained value persists across close
-    qval = jsdrv_union_i32(0);
+    qval = jsdrv_union_u8(0);
     rc = jsdrv_query(self->context, topic.topic, &qval, 1000);
-    snprintf(detail, sizeof(detail), "query rc=%d, value=%" PRId32,
-        (int) rc, qval.value.i32);
+    snprintf(detail, sizeof(detail), "query rc=%d, value=%u",
+        (int) rc, (unsigned) qval.value.u8);
     TEST_ASSERT("retained value persists after close",
-        rc == 0 && qval.value.i32 == 12345, detail);
+        rc == 0 && qval.value.u8 == expect, detail);
 
     // Reopen with RESUME mode — retained values replayed to device
     printf("  reopening with RESUME...\n");
@@ -248,13 +253,15 @@ static int test_state_restore(struct app_s * self) {
     // Verify retained value still queryable after resume
     // (state restore replays it TO the device via cmd_q,
     // the host pubsub retains it throughout)
-    qval = jsdrv_union_i32(0);
+    qval = jsdrv_union_u8(0);
     rc = jsdrv_query(self->context, topic.topic, &qval, 1000);
-    snprintf(detail, sizeof(detail), "query rc=%d, value=%" PRId32,
-        (int) rc, qval.value.i32);
+    snprintf(detail, sizeof(detail), "query rc=%d, value=%u",
+        (int) rc, (unsigned) qval.value.u8);
     TEST_ASSERT("retained value available after RESUME",
-        rc == 0 && qval.value.i32 == 12345, detail);
+        rc == 0 && qval.value.u8 == expect, detail);
 
+    orig.flags |= JSDRV_UNION_FLAG_RETAIN;
+    jsdrv_publish(self->context, topic.topic, &orig, 1000);
     return 0;
 }
 
