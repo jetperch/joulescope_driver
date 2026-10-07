@@ -712,13 +712,14 @@ static int32_t wait_for_sensor_command(struct js110_dev_s * d) {
         }
         rv = d_status_rsp(d, m);
         pkt = (struct js110_host_packet_s *) m->payload.bin;
+        int32_t settings_result = pkt->payload.status.settings_result;
+        jsdrvp_msg_free(d->context, m);
         if (JSDRV_ERROR_PARAMETER_INVALID == rv) {
             // ignore -- not a status packet
         } else if (0 != rv) {
             JSDRV_LOGI("wait_for_sensor_command => %d", (int) rv);
             return rv;
         } else {
-            int32_t settings_result = pkt->payload.status.settings_result;
             if ((settings_result == -1) || (settings_result == 19)) {
                 // waiting, retry
             } else {

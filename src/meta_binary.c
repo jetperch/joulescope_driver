@@ -25,6 +25,7 @@
 #include "jsdrv/error_code.h"
 #include "jsdrv_prv/check32.h"
 #include "jsdrv_prv/log.h"
+#include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -223,6 +224,22 @@ static int format_option_value(char * dst, int dst_len, uint8_t dtype, const uin
     return format_default(dst, dst_len, dtype, value_bytes);
 }
 
+// Append printf-style to json, returning the new position.  Like snprintf,
+// the position keeps counting past json_sz on truncation, but the write
+// pointer never leaves the buffer.
+static int json_append(char * json, int json_sz, int pos, const char * fmt, ...) {
+    va_list args;
+    int rv;
+    va_start(args, fmt);
+    if (pos < json_sz) {
+        rv = vsnprintf(json + pos, (size_t) (json_sz - pos), fmt, args);
+    } else {
+        rv = vsnprintf(NULL, 0, fmt, args);
+    }
+    va_end(args);
+    return (rv < 0) ? pos : (pos + rv);
+}
+
 int32_t meta_binary_parse(
         const uint8_t * blob, uint32_t blob_size,
         meta_binary_on_topic_fn on_topic,
@@ -303,21 +320,21 @@ int32_t meta_binary_parse(
                 && ((entry->dtype & MB_VALUE_TYPE_MASK) == MB_VALUE_U8)) {
             dtype_str = "bool";
         }
-        pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "{\"dtype\": \"%s\"",
+        pos = json_append(json, json_sz, pos, "{\"dtype\": \"%s\"",
                         dtype_str);
 
         const char * brief = str_get(blob, blob_size, hdr, entry->brief_str_offset);
         if (brief) {
             char escaped[512];
             json_escape_str(escaped, sizeof(escaped), brief);
-            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"brief\": \"%s\"", escaped);
+            pos = json_append(json, json_sz, pos, ", \"brief\": \"%s\"", escaped);
         }
 
         const char * detail = str_get(blob, blob_size, hdr, entry->detail_str_offset);
         if (detail) {
             char escaped[512];
             json_escape_str(escaped, sizeof(escaped), detail);
-            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"detail\": \"%s\"", escaped);
+            pos = json_append(json, json_sz, pos, ", \"detail\": \"%s\"", escaped);
         }
 
         // Default value: the 8-byte value follows the entry header, so the
@@ -327,7 +344,7 @@ int32_t meta_binary_parse(
             const uint8_t * def_bytes = (const uint8_t *)(entry + 1);
             char def_str[64];
             format_default(def_str, sizeof(def_str), entry->dtype, def_bytes);
-            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"default\": %s", def_str);
+            pos = json_append(json, json_sz, pos, ", \"default\": %s", def_str);
         }
 
         // Options
@@ -350,17 +367,17 @@ int32_t meta_binary_parse(
                 JSDRV_LOGW("meta_binary: %s options truncated %u -> %u",
                            topic, (unsigned) opts->count, (unsigned) opt_count);
             }
-            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"options\": [");
+            pos = json_append(json, json_sz, pos, ", \"options\": [");
             for (uint32_t j = 0; j < opt_count; ++j) {
                 if (j > 0) {
-                    pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", ");
+                    pos = json_append(json, json_sz, pos, ", ");
                 }
                 // value (8 bytes) + alts_per_option * 2 bytes
                 char val_str[64];
                 format_option_value(val_str, sizeof(val_str), entry->dtype, opt_data);
                 opt_data += 8;
 
-                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "[%s", val_str);
+                pos = json_append(json, json_sz, pos, "[%s", val_str);
                 for (uint8_t a = 0; a < opts->alts_per_option; ++a) {
                     uint16_t alt_idx;
                     memcpy(&alt_idx, opt_data, 2);
@@ -369,12 +386,12 @@ int32_t meta_binary_parse(
                     if (alt) {
                         char escaped[128];
                         json_escape_str(escaped, sizeof(escaped), alt);
-                        pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"%s\"", escaped);
+                        pos = json_append(json, json_sz, pos, ", \"%s\"", escaped);
                     }
                 }
-                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "]");
+                pos = json_append(json, json_sz, pos, "]");
             }
-            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "]");
+            pos = json_append(json, json_sz, pos, "]");
         }
 
         // Range
@@ -390,40 +407,40 @@ int32_t meta_binary_parse(
             uint64_t step_u64;
             memcpy(&step_u64, &range->v_step, 8);
             if (step_u64 > 1) {
-                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0),
-                                ", \"range\": [%s, %s, %s]", min_str, max_str, step_str);
+                pos = json_append(json, json_sz, pos,
+                                  ", \"range\": [%s, %s, %s]", min_str, max_str, step_str);
             } else {
-                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0),
-                                ", \"range\": [%s, %s]", min_str, max_str);
+                pos = json_append(json, json_sz, pos,
+                                  ", \"range\": [%s, %s]", min_str, max_str);
             }
         }
 
         // Format hint
         const char * format = str_get(blob, blob_size, hdr, entry->format_str_offset);
         if (format) {
-            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"format\": \"%s\"", format);
+            pos = json_append(json, json_sz, pos, ", \"format\": \"%s\"", format);
         }
 
         // Flags
         uint8_t flags = entry->flags & (MB_PUBSUB_META_FLAG_RO | MB_PUBSUB_META_FLAG_HIDE | MB_PUBSUB_META_FLAG_DEV);
         if (flags) {
-            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), ", \"flags\": [");
+            pos = json_append(json, json_sz, pos, ", \"flags\": [");
             int first = 1;
             if (flags & MB_PUBSUB_META_FLAG_RO) {
-                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "\"ro\"");
+                pos = json_append(json, json_sz, pos, "\"ro\"");
                 first = 0;
             }
             if (flags & MB_PUBSUB_META_FLAG_HIDE) {
-                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "%s\"hide\"", first ? "" : ", ");
+                pos = json_append(json, json_sz, pos, "%s\"hide\"", first ? "" : ", ");
                 first = 0;
             }
             if (flags & MB_PUBSUB_META_FLAG_DEV) {
-                pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "%s\"dev\"", first ? "" : ", ");
+                pos = json_append(json, json_sz, pos, "%s\"dev\"", first ? "" : ", ");
             }
-            pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "]");
+            pos = json_append(json, json_sz, pos, "]");
         }
 
-        pos += snprintf(json + pos, (json_sz - pos > 0 ? (size_t)(json_sz - pos) : 0), "}");
+        pos = json_append(json, json_sz, pos, "}");
 
         if (pos >= json_sz) {
             // Truncated JSON is invalid JSON: the object, array, and string

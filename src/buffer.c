@@ -243,6 +243,9 @@ static void buffer_alloc(struct buffer_s * self) {
             sz_per_s += sample_rate * ((b->hdr.element_size_bits / 8.0) + coef_u);
         }
     }
+    if (sz_per_s <= 0.0) {
+        return;  // no active signals, and duration would be infinite
+    }
     // determine sample count for each signal, allocate, and publish duration
     double duration = self->size / sz_per_s;
     JSDRV_LOGI("%d B/s -> %d seconds", (int) sz_per_s, (int) duration);

@@ -141,6 +141,12 @@ This file contains the list of changes made to the Joulescope driver.
     while other threads could hold it.
   * A thread join that timed out leaked 16 bytes.
   * Fixed signed shift overflow in the JS220 stream suspend and resume.
+  * A JS110 leaked one message for each status poll while applying stream
+    or extio settings, about 10 per capture.
+  * Metadata that overflowed its JSON buffer formed a write pointer past
+    the end of the buffer.
+  * Buffer allocation with no active signals cast an infinite duration to
+    int.
 
 ## 2.4.3
 

@@ -136,6 +136,13 @@ add_dependencies(js220_usb_test jsdrv_support_objlib tinyprintf cmocka)
 target_link_libraries(js220_usb_test jsdrv_support_objlib tinyprintf cmocka)
 add_test(js220_usb_test ${CMAKE_CURRENT_BINARY_DIR}/js220_usb_test)
 
+# js110_usb_test includes the device source directly (js220_usb_test
+# pattern) and stubs the frontend services.
+add_executable(js110_usb_test devices/js110/js110_usb_test.c)
+add_dependencies(js110_usb_test jsdrv_support_objlib tinyprintf cmocka)
+target_link_libraries(js110_usb_test jsdrv_support_objlib tinyprintf cmocka)
+add_test(js110_usb_test ${CMAKE_CURRENT_BINARY_DIR}/js110_usb_test)
+
 add_executable(frontend_test frontend_test.c
         ../src/buffer.c
         ../src/buffer_params.c
