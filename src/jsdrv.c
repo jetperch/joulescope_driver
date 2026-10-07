@@ -472,8 +472,8 @@ static uint8_t device_subscriber(void * user_data, struct jsdrvp_msg_s * msg) {
     return 0;
 }
 
-void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_topic,
-                             const char * topic, uint8_t flags) {
+static void device_subscribe(struct jsdrv_context_s * context, const char * dev_topic,
+                             const char * topic, uint8_t flags, uint8_t done_rsp) {
     struct frontend_dev_s * dev = device_lookup(context, dev_topic);
     if (NULL == dev) {
         JSDRV_LOGE("jsdrvp_ul_device_subscribe but device not found: %s", dev_topic);
@@ -490,7 +490,18 @@ void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_
     m->payload.sub.subscriber.user_data = dev;
     m->payload.sub.subscriber.is_internal = 1;
     m->payload.sub.subscriber.flags = flags;
+    m->payload.sub.done_rsp = done_rsp;
     jsdrvp_backend_send(context, m);
+}
+
+void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_topic,
+                             const char * topic, uint8_t flags) {
+    device_subscribe(context, dev_topic, topic, flags, 0);
+}
+
+void jsdrvp_device_subscribe_done(struct jsdrv_context_s * context, const char * dev_topic,
+                                  const char * topic, uint8_t flags) {
+    device_subscribe(context, dev_topic, topic, flags, 1);
 }
 
 void jsdrvp_device_unsubscribe(struct jsdrv_context_s * context, const char * dev_topic,

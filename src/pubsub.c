@@ -502,6 +502,15 @@ static int32_t subscribe(struct jsdrv_pubsub_s * self, struct jsdrvp_msg_s * msg
         devices_on_sub(self, msg);
         subscribe_traverse(t, msg->payload.sub.topic, sub);
     }
+    if (msg->payload.sub.done_rsp) {
+        struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(self->context, JSDRVP_MSG_SUBSCRIBE_DONE,
+                                                         &jsdrv_union_i32(0));
+        jsdrv_cstr_copy(m->payload.str, msg->payload.sub.topic, sizeof(m->payload.str));
+        m->value = jsdrv_union_str(m->payload.str);
+        m->value.size = (uint32_t) (strlen(m->payload.str) + 1);
+        subscriber_call(&sub->sub, m);
+        jsdrvp_msg_free(self->context, m);
+    }
     return 0;
 }
 

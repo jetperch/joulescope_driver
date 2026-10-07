@@ -61,9 +61,19 @@ enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
  */
 #define JSDRVP_GATHER_TOPIC_PREFIX "mbg/"
 
+/**
+ * @brief The subscribe completion message topic.
+ *
+ * A subscribe with jsdrvp_payload_subscribe_s.done_rsp delivers this
+ * message to the subscriber after its retained values.  The value is the
+ * subscribed topic string.  See jsdrvp_device_subscribe_done().
+ */
+#define JSDRVP_MSG_SUBSCRIBE_DONE "@/!subdn"
+
 struct jsdrvp_payload_subscribe_s {  // also for unsubscribe
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     struct jsdrv_pubsub_subscriber_s subscriber;
+    uint8_t done_rsp;  // subscribe: deliver JSDRVP_MSG_SUBSCRIBE_DONE last
 };
 
 struct jsdrvp_payload_query_s {
@@ -237,6 +247,21 @@ void jsdrvp_send_finalize_msg(struct jsdrv_context_s * context, struct msg_queue
  */
 void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_topic,
                              const char * topic, uint8_t flags);
+
+/**
+ * @brief Subscribe a device, then deliver JSDRVP_MSG_SUBSCRIBE_DONE.
+ *
+ * @param context The Joulescope driver context.
+ * @param dev_topic The device prefix topic.
+ * @param topic The topic for the subscription.
+ * @param flags The jsdrv_subscribe_flag_e subscription flags bitmap.
+ *
+ * With JSDRV_SFLAG_RETAIN, the device receives every matching retained
+ * value, then the completion message, in its command queue.  Only this
+ * device receives the completion.
+ */
+void jsdrvp_device_subscribe_done(struct jsdrv_context_s * context, const char * dev_topic,
+                                  const char * topic, uint8_t flags);
 
 /**
  * @brief Unsubscribe a device from an additional topics.

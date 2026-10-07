@@ -199,6 +199,12 @@ static void publish(struct jsdrv_pubsub_s * p, const char * topic, struct jsdrv_
     jsdrv_pubsub_publish(p, m);
 }
 
+static void subscribe_internal_done(struct jsdrv_pubsub_s * p, const char * name, uint8_t flags) {
+    struct jsdrvp_msg_s * m = subscribe_msg(p, name, flags, JSDRV_PUBSUB_SUBSCRIBE);
+    m->payload.sub.done_rsp = 1;
+    jsdrv_pubsub_publish(p, m);
+}
+
 static void test_subscribe_then_publish(void ** state) {
     SETUP();
     subscribe_internal(p, "u/js110/123456/hello", JSDRV_SFLAG_PUB);
@@ -280,6 +286,37 @@ static void test_external_subscribe_publish_unsubscribe(void ** state) {
     publish_str(p, "u/js110/123456/hello", "there");
     jsdrv_pubsub_process(p);
 
+    TEARDOWN();
+}
+
+static void test_subscribe_done_after_retained(void ** state) {
+    SETUP();
+    publish(p, "u/js220/1/s/a", &jsdrv_union_u32_r(1));
+    publish(p, "u/js220/1/s/b", &jsdrv_union_u32_r(2));
+    publish(p, "u/js220/1/c/a", &jsdrv_union_u32_r(3));
+    subscribe_internal_done(p, "u/js220/1/s", JSDRV_SFLAG_PUB | JSDRV_SFLAG_RETAIN);
+    expect_publish_internal("u/js220/1/s/a", &jsdrv_union_u32_r(1));
+    expect_publish_internal("u/js220/1/s/b", &jsdrv_union_u32_r(2));
+    expect_publish_internal(JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js220/1/s"));
+    jsdrv_pubsub_process(p);
+    TEARDOWN();
+}
+
+static void test_subscribe_done_without_retained(void ** state) {
+    SETUP();
+    subscribe_internal_done(p, "u/js220/1/s", JSDRV_SFLAG_PUB | JSDRV_SFLAG_RETAIN);
+    expect_publish_internal(JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js220/1/s"));
+    jsdrv_pubsub_process(p);
+    TEARDOWN();
+}
+
+static void test_subscribe_done_not_published(void ** state) {
+    SETUP();
+    subscribe_external(p, "", JSDRV_SFLAG_PUB);  // would see any publish
+    jsdrv_pubsub_process(p);
+    subscribe_internal_done(p, "u/js220/1/s", JSDRV_SFLAG_PUB | JSDRV_SFLAG_RETAIN);
+    expect_publish_internal(JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js220/1/s"));
+    jsdrv_pubsub_process(p);
     TEARDOWN();
 }
 
@@ -495,6 +532,9 @@ int main(void) {
             cmocka_unit_test(test_external_subscribe_publish_unsubscribe),
             cmocka_unit_test(test_external_subscribe_publish_unsubscribe_all),
             cmocka_unit_test(test_external_retain),
+            cmocka_unit_test(test_subscribe_done_after_retained),
+            cmocka_unit_test(test_subscribe_done_without_retained),
+            cmocka_unit_test(test_subscribe_done_not_published),
             cmocka_unit_test(test_return_code),
             cmocka_unit_test(test_meta),
             cmocka_unit_test(test_query),
