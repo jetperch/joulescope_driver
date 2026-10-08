@@ -180,6 +180,13 @@ settings.  See
 * Fixed h/fs, h/fp, h/i_scale and h/v_scale having no host value after a
   JS320 open until the application set them, and h/fs and h/fp after a
   JS220 open.  A JS320 restore open now reports the instrument's rate.
+* Fixed a JS320 stream stop and immediate restart sometimes starting with
+  the previous stream's last frames, followed by a gap.  Requires JS320
+  firmware with s/i/!ack, s/v/!ack and s/p/!ack; older firmware behaves
+  as before.
+* Fixed JS320 streams dropping up to 2 s of samples, with a "!ack
+  timeout" warning, after an h/fs change that kept the same instrument
+  decimation, such as 5 Hz to 10 Hz.
 * Fixed a use-after-free in Driver.finalize() and device close after a
   JS110 streamed, the likely cause of intermittent access violations on
   Windows.  A device thread busy with stream data never checked for the

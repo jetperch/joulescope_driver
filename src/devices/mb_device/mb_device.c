@@ -878,6 +878,9 @@ static void meta_fetch_on_topic(void * user_data, const char * topic, const char
     if (0 == self->open_mode) {
         open_set_record(self, resolved, json_meta);
     }
+    if (self->drv && self->drv->on_topic_meta) {
+        self->drv->on_topic_meta(self->drv, self, resolved, json_meta);
+    }
 }
 
 static void state_fetch_start_meta(struct jsdrvp_mb_dev_s * self) {

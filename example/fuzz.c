@@ -647,7 +647,7 @@ static int32_t t_buffer_req(struct app_s * self) {
             .rsv2_u8 = 0,
             .rsv3_u32 = 0,
             .time = {.samples = info->time_range_samples},
-            .rsp_topic = {'r', '/', 't', 0},
+            .rsp_topic = "m/mem/001/!rsp",  // the m/ route, as the UI uses
             .rsp_id = 0,
     };
     ROE(publish(self, "m/001/s/001/!req", &jsdrv_union_bin((uint8_t *) &req, sizeof(req)), JSDRV_TIMEOUT_MS_DEFAULT));

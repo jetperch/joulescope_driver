@@ -589,6 +589,33 @@ static void test_host_replay_completion(void ** state) {
     device_free(d);
 }
 
+static char topic_meta_seen_[64];
+
+static void on_topic_meta_stub(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
+                               const char * topic, const char * json_meta) {
+    (void) drv;
+    (void) dev;
+    (void) json_meta;
+    jsdrv_cstr_copy(topic_meta_seen_, topic, sizeof(topic_meta_seen_));
+}
+
+static void test_topic_meta_hook(void ** state) {
+    (void) state;
+    struct jsdrvp_mb_dev_s * d = device_alloc();
+    struct jsdrvp_mb_drv_s drv;
+    memset(&drv, 0, sizeof(drv));
+    drv.on_topic_meta = on_topic_meta_stub;
+    d->drv = &drv;
+    d->open_mode = 1;  // RESUME: no SET record
+    d->state_fetch.blobs[0].topic[0] = 's';
+    d->state_fetch.blob_count = 1;
+    topic_meta_seen_[0] = 0;
+    meta_fetch_on_topic(d, "./i/!ack", "{\"dtype\": \"u64\"}");
+    assert_string_equal("s/i/!ack", topic_meta_seen_);
+    d->drv = NULL;
+    device_free(d);
+}
+
 static void test_gather_ends_on_subscribe_done(void ** state) {
     (void) state;
     struct jsdrvp_mb_dev_s * d = device_alloc();
@@ -654,6 +681,7 @@ int main(void) {
             cmocka_unit_test(test_state_set_chunking),
             cmocka_unit_test(test_gather_ends_on_subscribe_done),
             cmocka_unit_test(test_host_replay_completion),
+            cmocka_unit_test(test_topic_meta_hook),
             cmocka_unit_test(test_close_request_in_closed_acks),
             cmocka_unit_test(test_ll_terminated_stops_drain),
             cmocka_unit_test(test_stream_in_non_bin_dropped),

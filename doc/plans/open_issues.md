@@ -210,5 +210,5 @@ mini-plan first.
 Not merged here, since each one has its own scope: `pubsub_api.md`, `example_dedup.md`,
 `mem_transaction_dedup.md` (not started), `emulated_device.md`,
 `node_maintenance.md`, `libusb_backend_test_harness.md`,
-`distributed_pubsub.md`, `js320_stream_discontinuity.md`,
+`distributed_pubsub.md`, `log_format_checks.md`, `ul_thread_loop_dedup.md`,
 `usb_suspend_resume_windows_macos.md`, `linux_host_sleep_repro.md`.

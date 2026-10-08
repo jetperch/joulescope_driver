@@ -282,8 +282,7 @@
   "c/sys/tick/!ev": {
     "dtype": "u64",
     "brief": "The statistics system tick",
-    "detail": "Modules should generate statistics using this tick. The value is the time of the system tick. This tick is automatically suppressed when pwr != 0.",
-    "default": 0
+    "detail": "Modules should generate statistics using this tick. The value is the time of the system tick. This tick is automatically suppressed when pwr != 0."
   },
   "c/sys/pwr": {
     "dtype": "u8",
@@ -485,30 +484,10 @@
     "brief": "Comm link disconnected.",
     "detail": "Published by any comm task on this pubsub instance when its upstream link leaves CONNECTED (disconnect request, link loss, or peer restart).  Value is the publishing comm task id (u8)."
   },
-  "s/ts/!req": {
-    "dtype": "bin",
-    "brief": "Timesync request",
-    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_TIMESYNC_SYNC. The host receives this, populates utc_recv and utc_send, and responds to !rsp."
-  },
-  "s/ts/!map": {
-    "dtype": "bin",
-    "brief": "Timesync map announcement",
-    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_TIMESYNC_MAP containing the computed counter-to-UTC mapping."
-  },
-  "s/ts/!rsp": {
-    "dtype": "bin",
-    "brief": "Timesync response",
-    "detail": "The host responds to !req with a MB_VALUE_STDMSG containing MB_STDMSG_TIMESYNC_SYNC with utc_recv and utc_send populated."
-  },
-  "s/ts/!resync": {
-    "dtype": "u8",
-    "brief": "Force a timesync resynchronization burst."
-  },
   "s/sys/tick/!ev": {
     "dtype": "u64",
     "brief": "The statistics system tick",
-    "detail": "Modules should generate statistics using this tick. The value is the time of the system tick. This tick is automatically suppressed when pwr != 0.",
-    "default": 0
+    "detail": "Modules should generate statistics using this tick. The value is the time of the system tick. This tick is automatically suppressed when pwr != 0."
   },
   "s/sys/tick/en": {
     "dtype": "bool",
@@ -584,6 +563,25 @@
     "dtype": "bin",
     "brief": "Resource utilization report",
     "detail": "Published as a MB_STDMSG_UTILIZATION stdmsg (mb_sys_util_v1_s) once per tick when the utilization option is enabled.  Reports CPU, stack, and heap utilization as measured/total u32 pairs so the receiver performs the division."
+  },
+  "s/ts/!req": {
+    "dtype": "bin",
+    "brief": "Timesync request",
+    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_TIMESYNC_SYNC. The host receives this, populates utc_recv and utc_send, and responds to !rsp."
+  },
+  "s/ts/!map": {
+    "dtype": "bin",
+    "brief": "Timesync map announcement",
+    "detail": "Publish a MB_VALUE_STDMSG with type MB_STDMSG_TIMESYNC_MAP containing the computed counter-to-UTC mapping."
+  },
+  "s/ts/!rsp": {
+    "dtype": "bin",
+    "brief": "Timesync response",
+    "detail": "The host responds to !req with a MB_VALUE_STDMSG containing MB_STDMSG_TIMESYNC_SYNC with utc_recv and utc_send populated."
+  },
+  "s/ts/!resync": {
+    "dtype": "u8",
+    "brief": "Force a timesync resynchronization burst."
   },
   "s/fpga/version": {
     "dtype": "u32",
@@ -910,6 +908,10 @@
       ]
     ]
   },
+  "s/i/!ack": {
+    "dtype": "u64",
+    "brief": "Acknowledge i/ctrl applied.  Value is the 16 MHz sample_id just after the update; frames that end at or before it predate the change."
+  },
   "s/v/ctrl": {
     "dtype": "bool",
     "brief": "Enable voltage streaming.",
@@ -953,10 +955,18 @@
       ]
     ]
   },
+  "s/v/!ack": {
+    "dtype": "u64",
+    "brief": "Acknowledge v/ctrl applied.  Value is the 16 MHz sample_id just after the update; frames that end at or before it predate the change."
+  },
   "s/p/ctrl": {
     "dtype": "bool",
     "brief": "Enable power streaming.",
     "default": 0
+  },
+  "s/p/!ack": {
+    "dtype": "u64",
+    "brief": "Acknowledge p/ctrl applied.  Value is the 16 MHz sample_id just after the update; frames that end at or before it predate the change."
   },
   "s/stats/scnt": {
     "dtype": "u32",
@@ -1031,18 +1041,15 @@
   },
   "s/gpi/+/dwnN/!ack": {
     "dtype": "u64",
-    "brief": "Acknowledge gpi/+/dwnN/{mode,N} applied.  Value is the 16 MHz sample_id at which the new GPI decimation takes effect.",
-    "default": 0
+    "brief": "Acknowledge gpi/+/dwnN/{mode,N} applied.  Value is the 16 MHz sample_id at which the new GPI decimation takes effect."
   },
   "s/gpi/+/!req": {
     "dtype": "bool",
-    "brief": "Request the general-purpose input value.",
-    "default": 0
+    "brief": "Request the general-purpose input value."
   },
   "s/gpi/+/!value": {
     "dtype": "u32",
-    "brief": "The requested general-purpose input values.",
-    "default": 0
+    "brief": "The requested general-purpose input values."
   },
   "s/gpi/src": {
     "dtype": "u8",
@@ -1084,23 +1091,19 @@
   },
   "s/gpo/+/!value": {
     "dtype": "u32",
-    "brief": "Force the GPO register bits (8-bit, used when the corresponding gpo/N/src is 0).",
-    "default": 0
+    "brief": "Force the GPO register bits (8-bit, used when the corresponding gpo/N/src is 0)."
   },
   "s/gpo/+/!set": {
     "dtype": "u32",
-    "brief": "Set the indicated GPO register bits (only bits [7] trigger_out and [1:0] gpo).",
-    "default": 0
+    "brief": "Set the indicated GPO register bits (only bits [7] trigger_out and [1:0] gpo)."
   },
   "s/gpo/+/!clr": {
     "dtype": "u32",
-    "brief": "Clear the indicated GPO register bits (only bits [7] trigger_out and [1:0] gpo).",
-    "default": 0
+    "brief": "Clear the indicated GPO register bits (only bits [7] trigger_out and [1:0] gpo)."
   },
   "s/gpo/+/!req": {
     "dtype": "u8",
     "brief": "GPO read-back request; 0=gpo_val register, 1=post-mux output (gpo_status). Result on gpo/+/!raw.",
-    "default": 0,
     "options": [
       [
         0,
@@ -1114,8 +1117,7 @@
   },
   "s/gpo/+/!raw": {
     "dtype": "u32",
-    "brief": "Most recent gpo read-back result.",
-    "default": 0
+    "brief": "Most recent gpo read-back result."
   },
   "s/aout/value": {
     "dtype": "u32",
@@ -1160,8 +1162,7 @@
   },
   "s/aout/!raw": {
     "dtype": "u32",
-    "brief": "Most recent analog_out FPGA register raw u32 reading.",
-    "default": 0
+    "brief": "Most recent analog_out FPGA register raw u32 reading."
   },
   "s/dwnN/N": {
     "dtype": "u32",
@@ -1195,8 +1196,7 @@
   },
   "s/dwnN/!ack": {
     "dtype": "u64",
-    "brief": "Acknowledge dwnN/{N,mode} applied.  Value is the 16 MHz sample_id at which the new decimation takes effect.",
-    "default": 0
+    "brief": "Acknowledge dwnN/{N,mode} applied.  Value is the 16 MHz sample_id at which the new decimation takes effect."
   },
   "s/fuse/0/F": {
     "dtype": "u32",

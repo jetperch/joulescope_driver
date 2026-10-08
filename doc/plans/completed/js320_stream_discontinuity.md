@@ -16,7 +16,7 @@
 -->
 # JS320 stream sample_id discontinuities
 
-**Status**: in progress (findings 1-3 fixed; finding 4 open)
+**Status**: completed 2026-10-08
 **Created**: 2026-10-08
 
 ## Context
@@ -121,6 +121,43 @@ before the replay, and an asynchronous replay applied the device's
    priority app task (12) writes `channel_select`.  js320_drv forwards
    the stream ctrl topics unconfirmed today.
 
+   **Fix (2026-10-08).**  The fpga_mcu publishes `./{i,v,p}/!ack` with
+   `mb_time_counter_u64()` after each `channel_select` update, enable or
+   disable.  js320_drv keeps one drop window per channel (`ctrl_ack`).
+   It arms the window on an enable that follows a known stop
+   (`last_sent_ctrl` 0), and drops frames that end at or before the ack.
+   Older firmware lacks these topics, so the host arms only when the
+   open metadata declared `s/{i,v,p}/!ack` (new `on_topic_meta` driver
+   hook from mb_device), or an ack arrived during the open.  Learning
+   from the first ack alone was too late: a start, stop and restart
+   within 1 ms of an open arrived before any ack.  Otherwise the host
+   behaves as before, with no wait and no timeout.  Lost acks time out
+   after `JS320_DWNN_ACK_TIMEOUT` with a warning.
+
+   The soak also found a stop gap: at 5 kHz the stop discarded the
+   partial message (up to 2 frames), then delivered the in-flight tail.
+   The host now drops i/v/p frames for a disabled port, since the device
+   streams only enabled channels.
+
+   The device acks every change, stops too, so the host counts every
+   forwarded change in the known state.  Counting only enables let an
+   earlier start's ack close a later window during quick 0 ms cycles.
+   Changes from the unknown state after open stay uncounted, since the
+   device ignores a repeated value.
+
+   Only frames for enabled ports refresh the dwnN drain timer.  A tail
+   after a close had armed the dwnN window for the next open's replayed
+   values.  On a restore open the device already held those values, so
+   no ack came and the first stream lost up to 2 s.
+
+   Validation found that the dwnN window also waited on acks that never
+   come.  The device ignores a repeated retained value, so a change of
+   only the host factor (`h/fs` 5 to 10 Hz, both dwnN 1000) produced no
+   `dwnN/!ack`.  The host then dropped frames until the 2 s timeout,
+   while streaming (before 2026-10-08 too) or within 500 ms of a stop.
+   The dwnN and gpi dwnN windows now arm only when the device value
+   changes.
+
 Hardware after the fixes: `test/hw/test_open_state.py` passes on both
 models.  Fuzz for 5 minutes: JS220 clean (43 opens, 144 streams); JS320
 fails only on finding 4.
@@ -151,3 +188,18 @@ The JS110 fuzz also found that an open republished the `h/fs` default
 the stream.  `on_sampling_frequency` now stores the rate.  Release fuzz
 on the JS110 then ran 240 s clean (36 opens, 113 streams).  Under ASan,
 the publish in progress when SIGINT arrives can time out (rc 11).
+
+## Outcome
+
+30-minute fuzz soaks with `--log-level warning`, release builds:
+
+* JS320 8W2A, with the comm_wr and `!ack` firmware: 185 opens, 842
+  streams, no failures.  The only warnings are the expected
+  `h/fs` 500000 rejections.
+* JS220+ 002122: 215 opens, 889 streams, no failures.
+* JS110 001612: 201 opens, 871 streams, no failures.
+
+`doc/js320.json` was regenerated from 8W2A: it adds the three `!ack`
+topics and drops the defaults from 12 `!` topics.  The fuzz buffer
+requests now use the `m/mem/001/!rsp` response topic, which removed the
+`r/t` device_lookup warnings.

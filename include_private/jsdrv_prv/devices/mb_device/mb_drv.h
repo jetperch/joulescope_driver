@@ -188,6 +188,22 @@ struct jsdrvp_mb_drv_s {
                              struct jsdrvp_mb_dev_s * dev);
 
     /**
+     * @brief Called for each device topic's metadata during an open.
+     *
+     * Lets the driver detect firmware features from the topics that the
+     * device declares, before the open completes.
+     *
+     * @param drv This driver instance.
+     * @param dev The mb_device handle.
+     * @param topic The topic below the device prefix, such as "s/i/!ack".
+     * @param json_meta The JSON metadata string.
+     */
+    void (*on_topic_meta)(struct jsdrvp_mb_drv_s * drv,
+                          struct jsdrvp_mb_dev_s * dev,
+                          const char * topic,
+                          const char * json_meta);
+
+    /**
      * @brief Called to destroy the upper driver instance.
      *
      * @param drv This driver instance.  Free all resources including drv itself.

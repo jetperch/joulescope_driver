@@ -22,7 +22,7 @@
 ## Context
 
 Found by the JS110 fuzz run under AddressSanitizer
-(`js320_stream_discontinuity.md`): `device_add_announce` in the libusb
+(`completed/js320_stream_discontinuity.md`): `device_add_announce` in the libusb
 backend logged `"%s %s"` with one argument, which crashed in `vsnprintf`
 at INFO level.  It is fixed.  `jsdrv_log_publish()` has no printf format
 attribute, so the compiler cannot catch these.  Adding

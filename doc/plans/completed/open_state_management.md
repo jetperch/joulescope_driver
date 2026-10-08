@@ -426,5 +426,5 @@ open it reads the host `h/fs`.  At each stream stop it fails when:
 JS220+ 002122 passes: 60 opens and over 200 streams across three
 4-minute runs.  JS320 8W2A fails within minutes in both open modes, on
 stream discontinuities that are unrelated to the open mode.  They are
-filed in `../js320_stream_discontinuity.md`, along with `h/fs` having no
+filed in `js320_stream_discontinuity.md`, along with `h/fs` having no
 host value after open on both models.

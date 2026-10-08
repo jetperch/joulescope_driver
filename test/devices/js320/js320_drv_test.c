@@ -394,6 +394,14 @@ static void enable_signal_stream(struct js320_drv_s * self) {
     self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(1));
 }
 
+// Mark i, v and p enabled without forwarding ctrl to the device: frames
+// for a disabled i/v/p port are dropped as the tail of a stopped stream.
+static void enable_ivp_ports(struct js320_drv_s * self) {
+    for (uint8_t ch = 5U; ch <= 7U; ++ch) {
+        self->ports[ch].enabled = true;
+    }
+}
+
 // Enable a gpi-family channel so that subsequent gpi dwnN changes arm the
 // drop-until-ack window.
 static void enable_gpi_stream(struct js320_drv_s * self) {
@@ -612,6 +620,7 @@ static void test_finalize_frees_data_after_close(void ** state) {
     float samples[10] = {0};
     self->drv.on_open(&self->drv, NULL, &identity);
     self->drv.on_close(&self->drv, NULL);
+    self->ports[5].enabled = true;  // a frame for a disabled port is dropped
     push_current_frame(self, 0ULL, samples, 10);
     assert_non_null(self->ports[5].msg_in);
     self->drv.finalize(&self->drv);
@@ -624,6 +633,7 @@ static void test_frame_combining_rate_budget(void ** state) {
     // smaller publish_rate so the test fits in a few calls.
     self->drv.handle_cmd(&self->drv, NULL, "h/fp", &jsdrv_union_u32_r(20000));
     g_cap.return_code_count = 0;
+    enable_ivp_ports(self);
     // 1 MHz / 20000 = 50 samples per flush.
 
     float samples[10];
@@ -656,6 +666,7 @@ static void test_group_alignment_ivp(void ** state) {
     struct js320_drv_s * self = *state;
     self->drv.handle_cmd(&self->drv, NULL, "h/fp", &jsdrv_union_u32_r(20000));
     g_cap.return_code_count = 0;
+    enable_ivp_ports(self);
 
     float samples[25];
     for (uint32_t k = 0; k < 25; ++k) { samples[k] = (float) k; }
@@ -1283,6 +1294,7 @@ static void test_gpi_dwnN_does_not_affect_signal(void ** state) {
     assert_false(self->signal_ack.dropping);
 
     // An i/v/p frame arrives during the GPI drop window: must be accepted.
+    self->ports[5].enabled = true;
     float samples[4] = {0};
     push_current_frame(self, 42ULL, samples, 4);
     assert_non_null(self->ports[5].msg_in);
@@ -1359,6 +1371,20 @@ static void test_dwnN_signal_drop_after_stop(void ** state) {
     assert_non_null(self->ports[5].msg_in);
 }
 
+// A tail frame after a close must not arm the dwnN window: the next
+// open replays values the device may already hold, which it never acks.
+static void test_dwnN_tail_after_close_no_window(void ** state) {
+    struct js320_drv_s * self = *state;
+    float samples[4] = {0};
+    enable_signal_stream(self);
+    push_current_frame(self, 100ULL, samples, 4);
+    self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(0));
+    self->drv.on_close(&self->drv, NULL);
+    push_current_frame(self, 164ULL, samples, 4);  // in-flight tail
+    self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(4));
+    assert_false(self->signal_ack.dropping);
+}
+
 // Same as above for the GPI family.
 static void test_dwnN_gpi_drop_after_stop(void ** state) {
     struct js320_drv_s * self = *state;
@@ -1381,6 +1407,136 @@ static void test_dwnN_acked_idle_timeout_clears(void ** state) {
     self->drv.on_timeout(&self->drv, NULL);
     assert_false(self->signal_ack.dropping);
     assert_int_equal(0, self->signal_ack.acks_outstanding);
+}
+
+// The device ignores a repeated dwnN value and sends no !ack, so a
+// change of only the host factor must not wait for one.
+static void test_dwnN_unchanged_device_value_no_window(void ** state) {
+    struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
+    self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(5));
+    push_dwnN_ack(self, 100ULL);
+    float samples[4] = {0};
+    push_current_frame(self, 200ULL, samples, 4);
+    assert_false(self->signal_ack.dropping);
+    self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(10));  // same N
+    assert_int_equal(0, self->signal_ack.acks_outstanding);
+    assert_false(self->signal_ack.dropping);
+    enable_gpi_stream(self);
+    self->drv.handle_cmd(&self->drv, NULL, "s/gpi/+/dwnN/N", &jsdrv_union_u32_r(self->gpi_dwn_n));
+    assert_false(self->gpi_ack.dropping);
+}
+
+static void push_ctrl_ack(struct js320_drv_s * self, const char * topic, uint64_t sample_id) {
+    struct jsdrv_union_s v = jsdrv_union_u64(sample_id);
+    assert_true(self->drv.handle_publish(&self->drv, NULL, topic, &v));
+}
+
+static void set_i_ctrl(struct js320_drv_s * self, uint32_t value) {
+    self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(value));
+}
+
+// Frames that arrive after a stop are the old stream's tail: dropped.
+static void test_disabled_port_drops_tail(void ** state) {
+    struct js320_drv_s * self = *state;
+    float samples[4] = {0};
+    set_i_ctrl(self, 1);
+    set_i_ctrl(self, 0);
+    push_current_frame(self, 100ULL, samples, 4);
+    assert_null(self->ports[5].msg_in);
+}
+
+// Older firmware never publishes s/i/!ack: a restart must not wait for it.
+static void test_ctrl_ack_unsupported_no_window(void ** state) {
+    struct js320_drv_s * self = *state;
+    float samples[4] = {0};
+    set_i_ctrl(self, 1);
+    set_i_ctrl(self, 0);
+    set_i_ctrl(self, 1);
+    assert_false(self->ctrl_ack[0].dropping);
+    push_current_frame(self, 100ULL, samples, 4);
+    assert_non_null(self->ports[5].msg_in);
+}
+
+// With the ack seen, a restart drops frames that end at or before it.
+static void test_ctrl_ack_restart_drops_tail(void ** state) {
+    struct js320_drv_s * self = *state;
+    float samples[4] = {0};
+    uint64_t step = js320_device_decimate(self, 5);
+    set_i_ctrl(self, 1);  // first enable after open: state unknown, no window
+    assert_false(self->ctrl_ack[0].dropping);
+    push_ctrl_ack(self, "s/i/!ack", 500ULL);
+    assert_true(self->ctrl_ack_supported);
+    set_i_ctrl(self, 0);
+    push_ctrl_ack(self, "s/i/!ack", 600ULL);  // stop ack: no window to close
+    set_i_ctrl(self, 1);
+    assert_int_equal(1, self->ctrl_ack[0].acks_outstanding);
+    assert_true(self->ctrl_ack[0].dropping);
+    assert_false(self->ctrl_ack[1].dropping);  // v untouched
+
+    push_current_frame(self, 100ULL, samples, 4);  // before the ack: dropped
+    assert_null(self->ports[5].msg_in);
+    push_ctrl_ack(self, "s/i/!ack", 1000ULL);
+    push_current_frame(self, 1000ULL - 4 * step, samples, 4);  // ends at the ack
+    assert_null(self->ports[5].msg_in);
+    push_current_frame(self, 1000ULL - 3 * step, samples, 4);  // ends after it
+    assert_false(self->ctrl_ack[0].dropping);
+    assert_non_null(self->ports[5].msg_in);
+}
+
+// The open metadata declares s/i/!ack, so a restart within the first
+// stream arms the window before any ack arrived.
+static void test_ctrl_ack_supported_from_meta(void ** state) {
+    struct js320_drv_s * self = *state;
+    self->drv.on_topic_meta(&self->drv, NULL, "s/i/!ack", "{}");
+    assert_true(self->ctrl_ack_supported);
+    set_i_ctrl(self, 1);
+    set_i_ctrl(self, 0);
+    set_i_ctrl(self, 1);
+    assert_true(self->ctrl_ack[0].dropping);
+}
+
+// Quick cycles: the window must not close on an early ack.  The first
+// enable after open is uncounted, so the window closes on the ack for the
+// last stop; nothing is committed between that stop and the enable.
+static void test_ctrl_ack_quick_cycles(void ** state) {
+    struct js320_drv_s * self = *state;
+    float samples[4] = {0};
+    uint64_t step = js320_device_decimate(self, 5);
+    self->drv.on_topic_meta(&self->drv, NULL, "s/i/!ack", "{}");
+    set_i_ctrl(self, 1);  // unknown state: not counted
+    set_i_ctrl(self, 0);  // ack 200
+    set_i_ctrl(self, 1);  // ack 300
+    set_i_ctrl(self, 0);  // ack 400
+    set_i_ctrl(self, 1);  // ack 500
+    assert_int_equal(4, self->ctrl_ack[0].acks_outstanding);
+    push_ctrl_ack(self, "s/i/!ack", 100ULL);
+    push_ctrl_ack(self, "s/i/!ack", 200ULL);
+    push_ctrl_ack(self, "s/i/!ack", 300ULL);
+    push_current_frame(self, 300ULL, samples, 4);  // second cycle: dropped
+    assert_null(self->ports[5].msg_in);
+    push_ctrl_ack(self, "s/i/!ack", 400ULL);
+    push_current_frame(self, 400ULL - 4 * step, samples, 4);  // ends at the stop
+    assert_null(self->ports[5].msg_in);
+    push_ctrl_ack(self, "s/i/!ack", 500ULL);  // nothing outstanding: ignored
+    push_current_frame(self, 500ULL, samples, 4);
+    assert_non_null(self->ports[5].msg_in);
+}
+
+// A lost ack must not block the stream past the timeout.
+static void test_ctrl_ack_timeout_resumes(void ** state) {
+    struct js320_drv_s * self = *state;
+    float samples[4] = {0};
+    set_i_ctrl(self, 1);
+    push_ctrl_ack(self, "s/i/!ack", 500ULL);
+    set_i_ctrl(self, 0);
+    set_i_ctrl(self, 1);
+    assert_true(self->ctrl_ack[0].dropping);
+    self->ctrl_ack[0].drop_timeout_utc = jsdrv_time_utc() - 1;
+    self->drv.on_timeout(&self->drv, NULL);
+    assert_false(self->ctrl_ack[0].dropping);
+    push_current_frame(self, 100ULL, samples, 4);
+    assert_non_null(self->ports[5].msg_in);
 }
 
 // A stale signal !ack (no signal_ack window open) must NOT leak into or
@@ -1448,7 +1604,15 @@ int main(void) {
         cmocka_unit_test_setup_teardown(test_dwnN_signal_skips_ack_when_idle, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_gpi_skips_ack_when_idle,    test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_signal_drop_after_stop,     test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_dwnN_tail_after_close_no_window, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_open_publishes_host_values,      test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_dwnN_unchanged_device_value_no_window, test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_disabled_port_drops_tail,        test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_ctrl_ack_unsupported_no_window,  test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_ctrl_ack_restart_drops_tail,     test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_ctrl_ack_timeout_resumes,        test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_ctrl_ack_supported_from_meta,    test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_ctrl_ack_quick_cycles,           test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_gpi_drop_after_stop,        test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_acked_idle_timeout_clears,  test_setup, test_teardown),
     };

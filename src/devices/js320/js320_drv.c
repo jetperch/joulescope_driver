@@ -75,6 +75,9 @@
 // within this time of the family's last frame needs the drop window.
 #define JS320_DWNN_DRAIN_TIME (JSDRV_TIME_SECOND / 2)
 
+// Stream enable acks for i, v, p (ch 5-7), see js320_drv_s ctrl_ack.
+static const char * CTRL_ACK_TOPICS[3] = {"s/i/!ack", "s/v/!ack", "s/p/!ack"};
+
 enum js320_group_e {
     JS320_GROUP_NONE = 0,
     JS320_GROUP_IVP  = 1,   // channels 5, 6, 7  (current, voltage, power)
@@ -196,6 +199,15 @@ struct js320_drv_s {
     // scopes i/v/p (ch 5-7), `gpi` scopes GPI + trigger (ch 8-12).
     struct js320_ack_state_s signal_ack;
     struct js320_ack_state_s gpi_ack;
+
+    // Stream enable drop-until-ack, one per i/v/p (ch 5-7).  Frames
+    // committed before a stop can arrive after a quick restart.  The
+    // firmware publishes s/{i,v,p}/!ack with the sample_id just after the
+    // update, and the host drops frames that end at or before it.  Older
+    // firmware lacks these topics, so the window arms only when the open
+    // metadata declared them, or an ack arrived during this open.
+    struct js320_ack_state_s ctrl_ack[3];
+    bool ctrl_ack_supported;
 
     // Sensor-ready interlock.  open_children defers OPEN# and arms this;
     // when c/comm/sensor/state reports the sensor link up (== 1), the
@@ -627,6 +639,9 @@ static void js320_sbufs_clear(struct js320_drv_s * self) {
     self->p_buf.sample_id_decimate = (uint8_t) JS320_DECIMATE;
 }
 
+static void js320_ack_begin(struct js320_ack_state_s * s, struct jsdrvp_mb_dev_s * dev,
+                            bool streaming);
+
 // Pure decision: given (fs, ports[5/6/7].enabled), compute the desired
 // device-side enables for s/i, s/v, s/p and whether the host should
 // multiply i*v locally.  Diff against the last-sent cache and forward
@@ -661,6 +676,17 @@ static void js320_reconcile_power(struct js320_drv_s * self,
         uint8_t ch = IVP_CHANS[k];
         uint8_t want_u8 = wants[k] ? 1U : 0U;
         if (self->last_sent_ctrl[ch] != want_u8) {
+            // The device acks every change in order, so count stops too:
+            // the window then closes on the ack for the latest change.
+            // Skip the unknown state after open, which the device may
+            // ignore as unchanged and so never ack.
+            if (self->ctrl_ack_supported && (JS320_CTRL_UNKNOWN != self->last_sent_ctrl[ch])) {
+                if (want_u8) {
+                    js320_ack_begin(&self->ctrl_ack[k], dev, true);
+                } else {
+                    self->ctrl_ack[k].acks_outstanding += 1U;
+                }
+            }
             self->last_sent_ctrl[ch] = want_u8;
             jsdrvp_mb_dev_publish_to_device(dev, PORT_DEFS[ch].ctrl_topic,
                 &jsdrv_union_u32_r((uint32_t) want_u8));
@@ -841,6 +867,8 @@ static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s 
     self->gpi_dwn_n = JS320_DEFAULT_GPI_DWN_N;
     memset(&self->signal_ack, 0, sizeof(self->signal_ack));
     memset(&self->gpi_ack,    0, sizeof(self->gpi_ack));
+    memset(self->ctrl_ack,    0, sizeof(self->ctrl_ack));
+    self->ctrl_ack_supported = false;
     for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
         self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
     }
@@ -965,8 +993,21 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
     // contract).  signal_ack scopes i/v/p (ch 5-7); gpi_ack scopes
     // GPI + trigger (ch 8-12).
     if ((channel >= 5U) && (channel <= 7U)) {
+        // The device streams only enabled channels, so these are the
+        // in-flight tail after a stop.  The stop already discarded the
+        // partial message, so delivering the tail would leave a gap.
+        if (!self->ports[channel].enabled) {
+            return;
+        }
+        // Only enabled ports count: a tail after a close must not arm
+        // the dwnN window for the next open's replayed values.
         self->signal_ack.frame_utc = jsdrv_time_utc();
         if (js320_ack_should_drop(&self->signal_ack, sample_id)) {
+            return;
+        }
+        // The ctrl ack target is sid + 1, so compare the frame end.
+        uint64_t end_id = sample_id + (uint64_t) sample_count * js320_device_decimate(self, channel);
+        if (js320_ack_should_drop(&self->ctrl_ack[channel - 5U], end_id)) {
             return;
         }
         float scale = 1.0;
@@ -982,7 +1023,9 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
             *samples_f32++ *= scale;
         }
     } else if ((channel >= 8U) && (channel <= 12U)) {
-        self->gpi_ack.frame_utc = jsdrv_time_utc();
+        if (self->ports[channel].enabled) {  // see signal_ack.frame_utc
+            self->gpi_ack.frame_utc = jsdrv_time_utc();
+        }
         if (js320_ack_should_drop(&self->gpi_ack, sample_id)) {
             return;
         }
@@ -1134,8 +1177,11 @@ static inline bool js320_gpi_family_streaming(const struct js320_drv_s * self) {
 // streaming disable/enable and publishes s/dwnN/!ack (for both N and
 // mode changes) carrying the sample_id of the first new-rate sample;
 // that ack releases the drop window (handled in js320_handle_publish).
+// device_changed is false when only the host factor changed: the device
+// ignores a repeated value, so it sends no !ack to wait for.
 static void js320_signal_dwn_changed(struct js320_drv_s * self,
-                                     struct jsdrvp_mb_dev_s * dev) {
+                                     struct jsdrvp_mb_dev_s * dev,
+                                     bool device_changed) {
     self->fs = JS320_SIGNAL_RATE_AFTER_DECIMATE / js320_signal_device_factor(self)
             / js320_signal_host_factor_active(self);
     for (uint8_t ch = 5U; ch <= 7U; ++ch) {
@@ -1143,7 +1189,9 @@ static void js320_signal_dwn_changed(struct js320_drv_s * self,
     }
     js320_signal_filters_update(self);
     js320_sbufs_clear(self);
-    js320_ack_begin(&self->signal_ack, dev, js320_signal_family_streaming(self));
+    if (device_changed) {
+        js320_ack_begin(&self->signal_ack, dev, js320_signal_family_streaming(self));
+    }
 }
 
 // Apply a new s/dwnN/N value: record it, run the shared dwn side
@@ -1151,8 +1199,9 @@ static void js320_signal_dwn_changed(struct js320_drv_s * self,
 static void js320_apply_signal_dwn_n(struct js320_drv_s * self,
                                      struct jsdrvp_mb_dev_s * dev,
                                      uint32_t n) {
+    bool changed = (n != self->signal_dwn_n);
     self->signal_dwn_n = n;
-    js320_signal_dwn_changed(self, dev);
+    js320_signal_dwn_changed(self, dev, changed);
     jsdrvp_mb_dev_publish_to_device(dev, "s/dwnN/N", &jsdrv_union_u32_r(n));
     js320_reconcile_power(self, dev);
 }
@@ -1163,8 +1212,9 @@ static void js320_apply_signal_dwn_n(struct js320_drv_s * self,
 static void js320_apply_signal_dwn_mode(struct js320_drv_s * self,
                                         struct jsdrvp_mb_dev_s * dev,
                                         uint32_t mode) {
+    bool changed = (mode != self->signal_dwn_mode);
     self->signal_dwn_mode = mode;
-    js320_signal_dwn_changed(self, dev);
+    js320_signal_dwn_changed(self, dev, changed);
     jsdrvp_mb_dev_publish_to_device(dev, "s/dwnN/mode", &jsdrv_union_u32_r(mode));
     js320_reconcile_power(self, dev);
 }
@@ -1176,11 +1226,14 @@ static void js320_apply_signal_dwn_mode(struct js320_drv_s * self,
 static void js320_apply_gpi_dwn_mode(struct js320_drv_s * self,
                                      struct jsdrvp_mb_dev_s * dev,
                                      uint32_t mode) {
+    bool changed = (mode != self->gpi_dwn_mode);
     self->gpi_dwn_mode = mode;
     for (uint8_t ch = 8U; ch <= 12U; ++ch) {
         js320_port_reset(self, dev, ch);
     }
-    js320_ack_begin(&self->gpi_ack, dev, js320_gpi_family_streaming(self));
+    if (changed) {  // the device ignores a repeated value: no !ack
+        js320_ack_begin(&self->gpi_ack, dev, js320_gpi_family_streaming(self));
+    }
     jsdrvp_mb_dev_publish_to_device(dev, "s/gpi/+/dwnN/mode",
         &jsdrv_union_u32_r(mode));
 }
@@ -1190,11 +1243,14 @@ static void js320_apply_gpi_dwn_mode(struct js320_drv_s * self,
 static void js320_apply_gpi_dwn_n(struct js320_drv_s * self,
                                   struct jsdrvp_mb_dev_s * dev,
                                   uint32_t n) {
+    bool changed = (n != self->gpi_dwn_n);
     self->gpi_dwn_n = n;
     for (uint8_t ch = 8U; ch <= 12U; ++ch) {
         js320_port_reset(self, dev, ch);
     }
-    js320_ack_begin(&self->gpi_ack, dev, js320_gpi_family_streaming(self));
+    if (changed) {  // the device ignores a repeated value: no !ack
+        js320_ack_begin(&self->gpi_ack, dev, js320_gpi_family_streaming(self));
+    }
     jsdrvp_mb_dev_publish_to_device(dev, "s/gpi/+/dwnN/N",
         &jsdrv_union_u32_r(n));
 }
@@ -1427,6 +1483,18 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
         }
         return true;
     }
+    for (uint32_t k = 0U; k < 3U; ++k) {
+        if (0 == strcmp(subtopic, CTRL_ACK_TOPICS[k])) {
+            struct jsdrv_union_s v = *value;
+            if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U64)) {
+                self->ctrl_ack_supported = true;
+                js320_ack_received(&self->ctrl_ack[k], v.value.u64 + 1U, subtopic);
+            } else {
+                JSDRV_LOGW("%s bad value type=%u", subtopic, (unsigned) value->type);
+            }
+            return true;
+        }
+    }
     if (0 == strcmp(subtopic, "s/gpi/+/dwnN/!ack")) {
         struct jsdrv_union_s v = *value;
         if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U64)) {
@@ -1443,6 +1511,18 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
         return true;
     }
     return js320_cal_handle_publish(self->cal, subtopic, value);
+}
+
+static void js320_on_topic_meta(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
+                                const char * topic, const char * json_meta) {
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    (void) dev;
+    (void) json_meta;
+    for (uint32_t k = 0U; k < 3U; ++k) {
+        if (0 == strcmp(topic, CTRL_ACK_TOPICS[k])) {
+            self->ctrl_ack_supported = true;
+        }
+    }
 }
 
 // The 'h' replay finished, so the driver state is final.  Publish the
@@ -1495,6 +1575,9 @@ static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
     }
     js320_ack_timeout_check(&self->signal_ack, dev, "s/dwnN");
     js320_ack_timeout_check(&self->gpi_ack,    dev, "s/gpi/+/dwnN");
+    js320_ack_timeout_check(&self->ctrl_ack[0], dev, "s/i/ctrl");
+    js320_ack_timeout_check(&self->ctrl_ack[1], dev, "s/v/ctrl");
+    js320_ack_timeout_check(&self->ctrl_ack[2], dev, "s/p/ctrl");
     js320_fwup_on_timeout(self->fwup);
     js320_jtag_on_timeout(self->jtag);
     js320_cal_on_timeout(self->cal);
@@ -1547,6 +1630,7 @@ static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     self->drv.handle_cmd = js320_handle_cmd;
     self->drv.handle_publish = js320_handle_publish;
     self->drv.on_host_replayed = js320_on_host_replayed;
+    self->drv.on_topic_meta = js320_on_topic_meta;
     self->drv.on_timeout = js320_on_timeout;
     self->drv.open_children = js320_open_children;
     self->drv.on_instance_synced = js320_on_instance_synced;
