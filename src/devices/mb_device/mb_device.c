@@ -297,6 +297,7 @@ struct jsdrvp_mb_dev_s {
     // slots are cleared in on_ll_open() at session start.
     struct jsdrv_time_map_s time_maps[MB_DEV_TIME_MAP_COUNT];
     struct state_fetch_s state_fetch;
+    char host_replay_topic[JSDRV_TOPIC_LENGTH_MAX];  // pending host_replay, or ""
 };
 
 char mb_pubsub_prefix_get(void) {
@@ -597,9 +598,17 @@ void jsdrvp_mb_dev_host_replay(struct jsdrvp_mb_dev_s * dev, char prefix) {
     // handle_cmd, not a device pubsub instance -- so this restores the
     // driver's internal state from the host cache on open.  Safe for
     // host-side topics: they are applied by handle_cmd, not pushed to
-    // the device.
+    // the device.  The subscribe completion calls drv->on_host_replayed.
+    struct jsdrv_topic_s t;
     char p[2] = {prefix, '\0'};
-    jsdrvp_mb_dev_topic_replay(dev, p);
+    jsdrv_topic_set(&t, dev->ll.prefix);
+    jsdrv_topic_append(&t, p);
+    JSDRV_LOGI("host_replay %s", t.topic);
+    jsdrv_cstr_copy(dev->host_replay_topic, t.topic, sizeof(dev->host_replay_topic));
+    jsdrvp_device_subscribe_done(dev->context, dev->ll.prefix, t.topic,
+                                 JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
+    jsdrvp_device_unsubscribe(dev->context, dev->ll.prefix, t.topic,
+                              JSDRV_SFLAG_RETAIN | JSDRV_SFLAG_PUB);
 }
 
 static void state_fetch_send_get_init(struct jsdrvp_mb_dev_s * self) {
@@ -1716,7 +1725,14 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
             d->finalize_pending = true;
             state_machine_process(d, EV_API_CLOSE_REQUEST);
         } else if (0 == strcmp(JSDRVP_MSG_SUBSCRIBE_DONE, msg->topic)) {
-            // late completion: the gather already timed out
+            if (d->host_replay_topic[0] && (msg->value.type == JSDRV_UNION_STR)
+                    && (0 == strcmp(msg->value.value.str, d->host_replay_topic))) {
+                d->host_replay_topic[0] = 0;
+                if (d->drv && d->drv->on_host_replayed) {
+                    d->drv->on_host_replayed(d->drv, d);
+                }
+            }
+            // else a late gather completion: the gather already timed out
         } else {
             JSDRV_LOGE("handle_cmd unsupported %s", msg->topic);
         }

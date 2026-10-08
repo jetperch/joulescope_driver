@@ -60,7 +60,9 @@ struct return_code_s {
 struct frontend_send_s {
     char topic[64];
     uint8_t type;
+    uint8_t flags;
     const char * str;
+    uint32_t u32;
 };
 
 struct test_capture_s {
@@ -141,7 +143,9 @@ void jsdrvp_mb_dev_send_to_frontend(struct jsdrvp_mb_dev_s * dev,
         struct frontend_send_s * f = &g_cap.frontend_sends[g_cap.frontend_send_count++];
         jsdrv_cstr_copy(f->topic, subtopic, sizeof(f->topic));
         f->type = value->type;
+        f->flags = value->flags;
         f->str = value->value.str;
+        f->u32 = value->value.u32;
     }
 }
 
@@ -384,8 +388,8 @@ static uint8_t build_frame(uint32_t * out, uint64_t sample_id, const uint32_t * 
 }
 
 // Enable a signal-family channel (5=i, 6=v, 7=p) so that subsequent dwnN
-// changes arm the drop-until-ack window.  Without this, dwnN changes are
-// a no-op on the ack state (see js320_apply_signal_dwn_n).
+// changes arm the drop-until-ack window.  Without this or a recent frame,
+// dwnN changes are a no-op on the ack state (see js320_ack_begin).
 static void enable_signal_stream(struct js320_drv_s * self) {
     self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(1));
 }
@@ -410,6 +414,25 @@ static void test_on_open_publishes_param_meta(void ** state) {
         assert_int_equal(JSDRV_UNION_JSON, g_cap.frontend_sends[i].type);
         assert_ptr_equal(js320_params[i].meta, g_cap.frontend_sends[i].str);
     }
+}
+
+
+// The 'h' replay completion publishes the effective h/* values, so the
+// host reports them even when it never set them.
+static void test_open_publishes_host_values(void ** state) {
+    struct js320_drv_s * self = *state;
+    self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(2000));
+    g_cap.frontend_send_count = 0;
+    self->drv.on_host_replayed(&self->drv, NULL);
+    static const char * expect[] = {"h/fs", "h/fp", "h/i_scale", "h/v_scale"};
+    assert_int_equal(JSDRV_ARRAY_SIZE(expect), g_cap.frontend_send_count);
+    for (uint32_t i = 0; i < JSDRV_ARRAY_SIZE(expect); ++i) {
+        assert_string_equal(expect[i], g_cap.frontend_sends[i].topic);
+        assert_true(g_cap.frontend_sends[i].flags & JSDRV_UNION_FLAG_RETAIN);
+    }
+    assert_int_equal(2000, g_cap.frontend_sends[0].u32);
+    assert_int_equal(20, g_cap.frontend_sends[1].u32);
+    assert_int_equal(JSDRV_UNION_F32, g_cap.frontend_sends[2].type);
 }
 
 
@@ -1281,8 +1304,8 @@ static void test_gpi_dwnN_ack_timeout_resumes(void ** state) {
     assert_non_null(self->ports[8].msg_in);
 }
 
-// With no signal channel streaming, a dwnN change must forward to the
-// device but must NOT arm the drop-until-ack window.  This is the
+// With no signal channel streaming and no recent frame, a dwnN change must
+// forward to the device but must NOT arm the drop-until-ack window.  This is the
 // settings-replay-before-stream-enable path seen on UI hot-plug.
 static void test_dwnN_signal_skips_ack_when_idle(void ** state) {
     struct js320_drv_s * self = *state;
@@ -1313,6 +1336,51 @@ static void test_dwnN_gpi_skips_ack_when_idle(void ** state) {
     assert_int_equal(1, p->value_u32);
     assert_int_equal(0, self->gpi_ack.acks_outstanding);
     assert_false(self->gpi_ack.dropping);
+}
+
+// A dwnN change just after a stop must arm the drop window: frames sent
+// before the stop are still in flight and would get the new rate.
+static void test_dwnN_signal_drop_after_stop(void ** state) {
+    struct js320_drv_s * self = *state;
+    float samples[4] = {0};
+    enable_signal_stream(self);
+    push_current_frame(self, 100ULL, samples, 4);
+    self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(0));
+    self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(4));
+    assert_int_equal(1, self->signal_ack.acks_outstanding);
+    assert_true(self->signal_ack.dropping);
+
+    self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(1));
+    push_dwnN_ack(self, 1000ULL);
+    push_current_frame(self, 164ULL, samples, 4);  // in-flight old-rate tail
+    assert_null(self->ports[5].msg_in);
+    push_current_frame(self, 1000ULL, samples, 4);
+    assert_false(self->signal_ack.dropping);
+    assert_non_null(self->ports[5].msg_in);
+}
+
+// Same as above for the GPI family.
+static void test_dwnN_gpi_drop_after_stop(void ** state) {
+    struct js320_drv_s * self = *state;
+    enable_gpi_stream(self);
+    push_gpi_frame(self, 100ULL, 0);
+    self->ports[8].enabled = false;
+    self->drv.handle_cmd(&self->drv, NULL, "s/gpi/+/dwnN/N", &jsdrv_union_u32_r(32));
+    assert_int_equal(1, self->gpi_ack.acks_outstanding);
+    assert_true(self->gpi_ack.dropping);
+}
+
+// An ack that arrives with no frames after it must time out quietly.
+static void test_dwnN_acked_idle_timeout_clears(void ** state) {
+    struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
+    self->drv.handle_cmd(&self->drv, NULL, "s/dwnN/N", &jsdrv_union_u32_r(4));
+    push_dwnN_ack(self, 1000ULL);
+    assert_true(self->signal_ack.dropping);
+    self->signal_ack.drop_timeout_utc = jsdrv_time_utc() - 1;
+    self->drv.on_timeout(&self->drv, NULL);
+    assert_false(self->signal_ack.dropping);
+    assert_int_equal(0, self->signal_ack.acks_outstanding);
 }
 
 // A stale signal !ack (no signal_ack window open) must NOT leak into or
@@ -1379,6 +1447,10 @@ int main(void) {
         cmocka_unit_test_setup_teardown(test_dwnN_signal_ack_independent_of_gpi, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_signal_skips_ack_when_idle, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_gpi_skips_ack_when_idle,    test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_dwnN_signal_drop_after_stop,     test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_open_publishes_host_values,      test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_dwnN_gpi_drop_after_stop,        test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_dwnN_acked_idle_timeout_clears,  test_setup, test_teardown),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

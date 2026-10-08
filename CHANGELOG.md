@@ -174,6 +174,15 @@ settings.  See
 * Fixed Python Driver.subscribe('') and unsubscribe('') raising
   IndexError.  The empty (root) topic subscribes to all publishes, as in
   the C API.
+* Fixed JS320 streams mislabeling about 3 ms of samples at the old
+  sample rate when h/fs changes within 500 ms of a stream stop, such as a
+  stop, h/fs change and restart.  Requires no firmware update.
+* Fixed h/fs, h/fp, h/i_scale and h/v_scale having no host value after a
+  JS320 open until the application set them, and h/fs and h/fp after a
+  JS220 open.  A JS320 restore open now reports the instrument's rate.
+* Added "jsdrv stream_watch --cycles" to stop and restart streams and
+  report sample_id skips per cycle, and stream sample_id and rate checks
+  to the fuzz example.
 
 ## 2.4.3
 

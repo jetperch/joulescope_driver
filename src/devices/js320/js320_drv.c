@@ -70,6 +70,11 @@
 // a warning.
 #define JS320_DWNN_ACK_TIMEOUT (2 * JSDRV_TIME_SECOND)
 
+// Frames still arrive this long after a stop: the device pipeline drain
+// plus the slowest device frame period (123 ms at 1 kHz).  A dwnN change
+// within this time of the family's last frame needs the drop window.
+#define JS320_DWNN_DRAIN_TIME (JSDRV_TIME_SECOND / 2)
+
 enum js320_group_e {
     JS320_GROUP_NONE = 0,
     JS320_GROUP_IVP  = 1,   // channels 5, 6, 7  (current, voltage, power)
@@ -148,6 +153,7 @@ struct js320_ack_state_s {
     bool     dropping;
     uint64_t drop_until_sample_id;
     int64_t  drop_timeout_utc;
+    int64_t  frame_utc;  // arrival time of the family's latest frame
 };
 
 struct js320_drv_s {
@@ -959,6 +965,7 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
     // contract).  signal_ack scopes i/v/p (ch 5-7); gpi_ack scopes
     // GPI + trigger (ch 8-12).
     if ((channel >= 5U) && (channel <= 7U)) {
+        self->signal_ack.frame_utc = jsdrv_time_utc();
         if (js320_ack_should_drop(&self->signal_ack, sample_id)) {
             return;
         }
@@ -975,6 +982,7 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
             *samples_f32++ *= scale;
         }
     } else if ((channel >= 8U) && (channel <= 12U)) {
+        self->gpi_ack.frame_utc = jsdrv_time_utc();
         if (js320_ack_should_drop(&self->gpi_ack, sample_id)) {
             return;
         }
@@ -1026,8 +1034,15 @@ static void js320_handle_app(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_
 // Start a drop window for one ack family: bump the outstanding counter,
 // flag dropping, and arm the device thread timer so on_timeout fires if
 // the ack is lost.
+// Skipped when the family is idle with no recent frames, so a settings
+// replay before streaming (UI hot-plug) does not wait on acks.  A recent
+// frame means old-rate frames may still be in flight after a stop.
 static void js320_ack_begin(struct js320_ack_state_s * s,
-                            struct jsdrvp_mb_dev_s * dev) {
+                            struct jsdrvp_mb_dev_s * dev,
+                            bool streaming) {
+    if (!streaming && ((jsdrv_time_utc() - s->frame_utc) >= JS320_DWNN_DRAIN_TIME)) {
+        return;
+    }
     s->acks_outstanding += 1U;
     s->dropping = true;
     s->drop_timeout_utc = jsdrv_time_utc() + JS320_DWNN_ACK_TIMEOUT;
@@ -1037,10 +1052,9 @@ static void js320_ack_begin(struct js320_ack_state_s * s,
 }
 
 // An !ack arrived: latest sample_id wins as the drop high-water mark.
-// Expected to arrive with no outstanding request when the corresponding
-// dwnN change was applied while no channel in the family was streaming
-// (see js320_apply_signal_dwn_n and the gpi counterparts).  Silently
-// ignore in that case: there is no drop window to close.
+// Expected to arrive with no outstanding request when js320_ack_begin
+// skipped the window (idle family).  Silently ignore in that case: there
+// is no drop window to close.
 static void js320_ack_received(struct js320_ack_state_s * s,
                                uint64_t sample_id,
                                const char * label) {
@@ -1078,8 +1092,10 @@ static void js320_ack_timeout_check(struct js320_ack_state_s * s,
         return;
     }
     if (jsdrv_time_utc() >= s->drop_timeout_utc) {
-        JSDRV_LOGW("%s !ack timeout; resuming with %u ack(s) outstanding",
-                   label, (unsigned) s->acks_outstanding);
+        if (s->acks_outstanding) {  // else acked, but no frames arrived since
+            JSDRV_LOGW("%s !ack timeout; resuming with %u ack(s) outstanding",
+                       label, (unsigned) s->acks_outstanding);
+        }
         s->dropping = false;
         s->acks_outstanding = 0U;
         s->drop_until_sample_id = 0;
@@ -1127,12 +1143,7 @@ static void js320_signal_dwn_changed(struct js320_drv_s * self,
     }
     js320_signal_filters_update(self);
     js320_sbufs_clear(self);
-    // Skip the drop-until-ack window when no channel in the signal family is
-    // streaming: there are no in-flight old-rate samples to hide, and the
-    // firmware may not emit an !ack without an active stream.
-    if (js320_signal_family_streaming(self)) {
-        js320_ack_begin(&self->signal_ack, dev);
-    }
+    js320_ack_begin(&self->signal_ack, dev, js320_signal_family_streaming(self));
 }
 
 // Apply a new s/dwnN/N value: record it, run the shared dwn side
@@ -1169,9 +1180,7 @@ static void js320_apply_gpi_dwn_mode(struct js320_drv_s * self,
     for (uint8_t ch = 8U; ch <= 12U; ++ch) {
         js320_port_reset(self, dev, ch);
     }
-    if (js320_gpi_family_streaming(self)) {
-        js320_ack_begin(&self->gpi_ack, dev);
-    }
+    js320_ack_begin(&self->gpi_ack, dev, js320_gpi_family_streaming(self));
     jsdrvp_mb_dev_publish_to_device(dev, "s/gpi/+/dwnN/mode",
         &jsdrv_union_u32_r(mode));
 }
@@ -1185,9 +1194,7 @@ static void js320_apply_gpi_dwn_n(struct js320_drv_s * self,
     for (uint8_t ch = 8U; ch <= 12U; ++ch) {
         js320_port_reset(self, dev, ch);
     }
-    if (js320_gpi_family_streaming(self)) {
-        js320_ack_begin(&self->gpi_ack, dev);
-    }
+    js320_ack_begin(&self->gpi_ack, dev, js320_gpi_family_streaming(self));
     jsdrvp_mb_dev_publish_to_device(dev, "s/gpi/+/dwnN/N",
         &jsdrv_union_u32_r(n));
 }
@@ -1438,11 +1445,25 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
     return js320_cal_handle_publish(self->cal, subtopic, value);
 }
 
+// The 'h' replay finished, so the driver state is final.  Publish the
+// effective values, so the host reports every h/* topic after open in
+// both modes, including defaults it never set and the device's h/fs.
+// Publishing earlier would overwrite host values before the replay.
+static void js320_on_host_replayed(struct jsdrvp_mb_drv_s * drv,
+                                   struct jsdrvp_mb_dev_s * dev) {
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    jsdrvp_mb_dev_send_to_frontend(dev, "h/fs", &jsdrv_union_u32_r(self->fs));
+    jsdrvp_mb_dev_send_to_frontend(dev, "h/fp", &jsdrv_union_u32_r(self->publish_rate));
+    jsdrvp_mb_dev_send_to_frontend(dev, "h/i_scale", &jsdrv_union_f32_r((float) self->i_scale));
+    jsdrvp_mb_dev_send_to_frontend(dev, "h/v_scale", &jsdrv_union_f32_r((float) self->v_scale));
+    jsdrvp_mb_dev_open_complete(dev);
+}
+
 // Called after a deferred-open child instance sync completes.  After the
 // sensor 's' device instance, restore the host-side 'h' instance (h/fp,
 // h/fs, h/i_scale, h/v_scale) from the host cache so the driver's internal
 // state matches -- applied AFTER 's' so a host-cached h/fs wins over the
-// sensor sync's s/dwnN/N -- then complete the open.
+// sensor sync's s/dwnN/N -- then complete the open in js320_on_host_replayed.
 static void js320_on_instance_synced(struct jsdrvp_mb_drv_s * drv,
                                      struct jsdrvp_mb_dev_s * dev, char prefix) {
     (void) drv;
@@ -1452,8 +1473,7 @@ static void js320_on_instance_synced(struct jsdrvp_mb_drv_s * drv,
         // current values.  Runs BEFORE the 'h' replay so a cached h/fs
         // is applied with the correct mode.
         jsdrvp_mb_dev_topic_replay(dev, "s/dwnN");
-        jsdrvp_mb_dev_host_replay(dev, 'h');
-        jsdrvp_mb_dev_open_complete(dev);
+        jsdrvp_mb_dev_host_replay(dev, 'h');  // completes the open
     }
 }
 
@@ -1471,8 +1491,7 @@ static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
         // caller's open timeout.
         JSDRV_LOGW("sensor ready timeout; completing open without sensor sync");
         self->waiting_for_sensor = false;
-        jsdrvp_mb_dev_host_replay(dev, 'h');
-        jsdrvp_mb_dev_open_complete(dev);
+        jsdrvp_mb_dev_host_replay(dev, 'h');  // completes the open
     }
     js320_ack_timeout_check(&self->signal_ack, dev, "s/dwnN");
     js320_ack_timeout_check(&self->gpi_ack,    dev, "s/gpi/+/dwnN");
@@ -1527,6 +1546,7 @@ static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     self->drv.handle_app = js320_handle_app;
     self->drv.handle_cmd = js320_handle_cmd;
     self->drv.handle_publish = js320_handle_publish;
+    self->drv.on_host_replayed = js320_on_host_replayed;
     self->drv.on_timeout = js320_on_timeout;
     self->drv.open_children = js320_open_children;
     self->drv.on_instance_synced = js320_on_instance_synced;

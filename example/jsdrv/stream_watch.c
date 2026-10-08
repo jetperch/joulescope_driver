@@ -24,6 +24,10 @@
  * emits one JSON line per second to a file (flushed per line so evidence
  * survives kill -9 and host freezes), then exits with a code that encodes
  * the final streaming state.  See doc/plans/linux_host_sleep_repro.md.
+ *
+ * With --cycles, repeatedly stops and restarts the streams instead, and
+ * reports sample_id skips and stale first frames per cycle.  See
+ * doc/plans/js320_stream_discontinuity.md.
  */
 
 #include "jsdrv_prv.h"
@@ -47,10 +51,20 @@
 // diagnostic tool (see example/minibitty/stream.c for the same pattern).
 struct channel_s {
     const char * name;             // "i", "v", "p"
+    bool enabled;                  // selected by --signals
     volatile uint64_t samples;     // cumulative samples received
     volatile uint64_t msgs;        // cumulative !data messages received
     volatile uint64_t sample_id_last;
     uint64_t samples_prev;         // start-of-window snapshot (main thread)
+
+    // Restart cycle checks (--cycles), reset by the main thread while stopped.
+    volatile uint64_t skips;       // messages whose sample_id != sample_id_last
+    volatile uint64_t first_id;    // sample_id of the first message, 0 if none
+    volatile int64_t first_utc;    // arrival time of the first message
+    volatile int64_t last_utc;     // arrival time of the latest message
+    volatile uint32_t tick_rate;   // sample_id rate (Hz)
+    volatile uint64_t skip_expected;  // first skip: expected sample_id
+    volatile uint64_t skip_received;  // first skip: received sample_id
 };
 
 struct stream_watch_s {
@@ -72,8 +86,14 @@ static int usage(void) {
         "  --min-rate <sps>     Per-channel pass threshold (default 1000)\n"
         "  --eval <s>           Trailing seconds that must pass (default 3)\n"
         "  --out <path>         JSON lines output (default stdout)\n"
+        "  --cycles <n>         Stop and restart the streams n times instead\n"
+        "  --on-ms <ms>         Streaming time per cycle (default 500)\n"
+        "  --off-ms <ms>        Stopped time per cycle (default 1000)\n"
+        "  --fs-alt <hz>        Alternate h/fs with --fs while stopped\n"
+        "  --fs-delay-ms <ms>   Delay from stop to the h/fs change (default 0)\n"
+        "  --signals <chars>    Streams to enable from i, v, p (default ivp)\n"
         "exit code: 0=pass, 1=setup error, 2=rate criterion failed,\n"
-        "           3=device removed without re-add\n");
+        "           3=device removed without re-add, 4=restart cycle failed\n");
     return 1;
 }
 
@@ -92,6 +112,19 @@ static void on_data(void * user_data, const char * topic, const struct jsdrv_uni
     }
     const struct jsdrv_stream_signal_s * s =
         (const struct jsdrv_stream_signal_s *) value->value.bin;
+    int64_t now = jsdrv_time_utc();
+    if (0 == ch->first_id) {
+        ch->first_id = s->sample_id;
+        ch->first_utc = now;
+    } else if (s->sample_id != ch->sample_id_last) {
+        if (0 == ch->skips) {
+            ch->skip_expected = ch->sample_id_last;
+            ch->skip_received = s->sample_id;
+        }
+        ++ch->skips;
+    }
+    ch->last_utc = now;
+    ch->tick_rate = s->sample_rate;
     ch->samples += s->element_count;
     ++ch->msgs;
     ch->sample_id_last = s->sample_id + (uint64_t) s->element_count * s->decimate_factor;
@@ -114,6 +147,17 @@ static void on_device_remove(void * user_data, const char * topic, const struct 
     if ((value->type == JSDRV_UNION_STR)
             && (0 == strcmp(value->value.str, self->app->device.topic))) {
         self->device_removed = true;
+    }
+}
+
+#define EXIT_CYCLE_FAIL (4)
+// First-frame age allowed beyond off_ms / 2: the host aggregates frames
+// (h/fp, 50 ms default) and a 1 kHz device frame spans 123 ms.
+#define STALE_SLACK_MS (250.0)
+
+static void sleep_ms_quit(uint32_t ms) {
+    for (uint32_t t = 0; (t < ms) && !quit_; t += 10) {
+        jsdrv_thread_sleep_ms(10);
     }
 }
 
@@ -164,7 +208,7 @@ static bool window_emit(struct stream_watch_s * self, double t_start, double t_e
         uint64_t window = samples - ch->samples_prev;
         ch->samples_prev = samples;
         double rate = (dt > 0.0) ? ((double) window / dt) : 0.0;
-        if (rate < (double) min_rate) {
+        if (ch->enabled && (rate < (double) min_rate)) {
             ok = false;
         }
         fprintf(self->out, ",\"%s\":{\"window\":%" PRIu64 ",\"total\":%" PRIu64
@@ -185,6 +229,99 @@ static bool window_emit(struct stream_watch_s * self, double t_start, double t_e
     return ok;
 }
 
+// Publish every enabled channel, even after a failure, so cleanup stops
+// every stream.
+static int32_t streams_ctrl(struct stream_watch_s * self, uint32_t value) {
+    int32_t rc = 0;
+    for (uint32_t idx = 0; idx < CHANNEL_COUNT; ++idx) {
+        struct channel_s * ch = &self->channels[idx];
+        if (!ch->enabled) {
+            continue;
+        }
+        char subtopic[16];
+        snprintf(subtopic, sizeof(subtopic), "s/%s/ctrl", ch->name);
+        int32_t rc_ch = publish_u32(self->app, subtopic, value);
+        rc = rc ? rc : rc_ch;
+    }
+    return rc;
+}
+
+// One stop/restart cycle.  A first frame is stale when its sample_id is
+// older than the previous cycle's last sample_id plus the elapsed time,
+// by more than half of off_ms plus STALE_SLACK_MS: it was held across
+// the stop.  Returns
+// true when no channel skipped or delivered a stale first frame.
+// fs_next is published fs_delay_ms after the stop (0 skips it).
+static bool cycle_run(struct stream_watch_s * self, uint32_t cycle, uint32_t fs,
+                      uint32_t fs_next, uint32_t fs_delay_ms,
+                      uint32_t on_ms, uint32_t off_ms) {
+    uint64_t id_prev[CHANNEL_COUNT];
+    int64_t utc_prev[CHANNEL_COUNT];
+    for (uint32_t idx = 0; idx < CHANNEL_COUNT; ++idx) {
+        struct channel_s * ch = &self->channels[idx];
+        id_prev[idx] = ch->first_id ? ch->sample_id_last : 0;
+        utc_prev[idx] = ch->last_utc;
+        ch->skips = 0;
+        ch->first_id = 0;
+        ch->msgs = 0;
+    }
+    if (streams_ctrl(self, 1U)) {
+        return false;
+    }
+    sleep_ms_quit(on_ms);
+    streams_ctrl(self, 0U);
+    sleep_ms_quit(fs_delay_ms);
+    if (fs_next) {
+        publish_u32(self->app, "h/fs", fs_next);
+    }
+    sleep_ms_quit(off_ms - fs_delay_ms);  // let in-flight frames drain
+
+    bool ok = true;
+    fprintf(self->out, "{\"cycle\":%" PRIu32 ",\"fs\":%" PRIu32, cycle, fs);
+    for (uint32_t idx = 0; idx < CHANNEL_COUNT; ++idx) {
+        struct channel_s * ch = &self->channels[idx];
+        double age_ms = 0.0;
+        if (ch->first_id && id_prev[idx] && ch->tick_rate) {
+            double elapsed = (double) (ch->first_utc - utc_prev[idx]) / JSDRV_TIME_SECOND;
+            double expect = (double) id_prev[idx] + elapsed * (double) ch->tick_rate;
+            age_ms = (expect - (double) ch->first_id) * 1000.0 / (double) ch->tick_rate;
+        }
+        if (!ch->enabled) {
+            continue;
+        }
+        bool stale = age_ms > ((off_ms / 2.0) + STALE_SLACK_MS);
+        if (ch->skips || stale || (0 == ch->msgs)) {
+            ok = false;
+        }
+        fprintf(self->out, ",\"%s\":{\"msgs\":%" PRIu64 ",\"skips\":%" PRIu64
+                ",\"first_age_ms\":%.1f", ch->name, ch->msgs, ch->skips, age_ms);
+        if (ch->skips) {
+            fprintf(self->out, ",\"first_id\":%" PRIu64 ",\"skip_expected\":%" PRIu64
+                    ",\"skip_received\":%" PRIu64, ch->first_id, ch->skip_expected,
+                    ch->skip_received);
+        }
+        fprintf(self->out, "}");
+    }
+    fprintf(self->out, ",\"ok\":%s}\n", ok ? "true" : "false");
+    fflush(self->out);
+    return ok;
+}
+
+static int cycles_run(struct stream_watch_s * self, uint32_t cycles, uint32_t fs, uint32_t fs_alt,
+                      uint32_t fs_delay_ms, uint32_t on_ms, uint32_t off_ms) {
+    uint32_t failed = 0;
+    uint32_t cycle = 0;
+    for (; (cycle < cycles) && !quit_; ++cycle) {
+        uint32_t cycle_fs = (fs_alt && (cycle & 1U)) ? fs_alt : fs;
+        uint32_t next_fs = (fs_alt && !(cycle & 1U)) ? fs_alt : fs;
+        if (!cycle_run(self, cycle, cycle_fs, next_fs, fs_delay_ms, on_ms, off_ms)) {
+            ++failed;
+        }
+    }
+    printf("stream_watch cycles: %" PRIu32 " failed of %" PRIu32 "\n", failed, cycle);
+    return failed ? EXIT_CYCLE_FAIL : 0;
+}
+
 int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
     struct stream_watch_s watch;
     const char * device_filter = "u/js320";
@@ -193,6 +330,12 @@ int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
     uint32_t fs = 0U;
     uint32_t min_rate = 1000U;
     uint32_t eval_s = 3U;
+    uint32_t cycles = 0U;
+    const char * signals = "ivp";
+    uint32_t on_ms = 500U;
+    uint32_t off_ms = 1000U;
+    uint32_t fs_alt = 0U;
+    uint32_t fs_delay_ms = 0U;
 
     memset(&watch, 0, sizeof(watch));
     watch.app = self;
@@ -226,6 +369,36 @@ int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
             ARG_REQUIRE();
             ROE(jsdrv_cstr_to_u32(argv[0], &eval_s));
             ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--signals")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            signals = argv[0];
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--cycles")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &cycles));
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--on-ms")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &on_ms));
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--off-ms")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &off_ms));
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--fs-delay-ms")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &fs_delay_ms));
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--fs-alt")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(jsdrv_cstr_to_u32(argv[0], &fs_alt));
+            ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--out")) {
             ARG_CONSUME();
             ARG_REQUIRE();
@@ -235,8 +408,11 @@ int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
             return usage();
         }
     }
-    if ((0 == eval_s) || (eval_s > duration_s)) {
+    if ((0 == eval_s) || (eval_s > duration_s) || (fs_delay_ms > off_ms)) {
         return usage();
+    }
+    for (uint32_t idx = 0; idx < CHANNEL_COUNT; ++idx) {
+        watch.channels[idx].enabled = (NULL != strchr(signals, watch.channels[idx].name[0]));
     }
 
     watch.out = stdout;
@@ -281,9 +457,11 @@ int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
             goto exit;
         }
     }
-    if (publish_u32(self, "s/i/ctrl", 1U)
-            || publish_u32(self, "s/v/ctrl", 1U)
-            || publish_u32(self, "s/p/ctrl", 1U)) {
+    if (cycles) {
+        rc = cycles_run(&watch, cycles, fs, fs_alt, fs_delay_ms, on_ms, off_ms);
+        goto exit;
+    }
+    if (streams_ctrl(&watch, 1U)) {
         goto exit;
     }
 
@@ -326,9 +504,7 @@ int on_stream_watch(struct app_s * self, int argc, char * argv[]) {
 exit:
     // Clean close (the unclean-close scenarios kill this process instead).
     if (opened) {
-        publish_u32(self, "s/i/ctrl", 0U);
-        publish_u32(self, "s/v/ctrl", 0U);
-        publish_u32(self, "s/p/ctrl", 0U);
+        streams_ctrl(&watch, 0U);
     }
     while (data_subscribed) {
         unsubscribe_data(&watch, --data_subscribed);

@@ -16,7 +16,7 @@
 -->
 # JS320 stream sample_id discontinuities
 
-**Status**: proposed
+**Status**: in progress (findings 1-3 fixed; finding 4 open)
 **Created**: 2026-10-08
 
 ## Context
@@ -52,7 +52,7 @@ discontinuous.
    open goal that the host cache reflects the device state.  The fuzz
    skips the rate check in this case.
 
-## Proposal
+## Proposal (original)
 
 1. Reproduce each finding with a focused C tool (based on `fuzz.c`)
    that reports a failure rate.
@@ -63,3 +63,57 @@ discontinuous.
    whether it leaves the device stale.
 4. Finding 3: publish the effective `h/*` values at open in both modes.
 5. Run `fuzz` on the JS320 for 30 minutes per seed with no failures.
+
+## Progress (2026-10-08)
+
+**Repro tool.**  `jsdrv stream_watch --cycles N` stops and restarts the
+streams N times, with `--on-ms`, `--off-ms`, `--fs-alt` (alternate `h/fs`
+while stopped), `--fs-delay-ms` (delay from stop to the `h/fs` change)
+and `--signals`.  Each cycle reports per-channel skips and the first
+frame's age as one JSON line.
+
+**Finding 1: fixed (host).**  The root cause was a race, not stale
+frames: fuzz stops, changes `h/fs` and restarts within about 1 ms.  The
+~3 ms of frames already committed in the device pipeline arrive after
+the host switched to the new decimation, and `js320_ack_begin` armed the
+drop-until-ack window only while streaming.  It now also arms it when
+the family's last frame arrived within `JS320_DWNN_DRAIN_TIME` (500 ms).
+A settings replay before streaming (UI hot-plug) still skips the window.
+An acked window with no later frames now times out without a warning.
+`stream_watch --fs 1000000 --fs-alt 2000 --cycles 20`: 3 of 6 cycles
+failed before, 0 of 20 after.
+
+**Finding 2: fixed (gateware).**  `comm_wr.v` set `channel_discard` only
+when a word for a disabled channel arrived.  At 1 kHz, si_fwd writes one
+word per millisecond, so a disable and enable between two words skipped
+the discard.  Maintenance returned the buffer and allocated a new one,
+and the rest of the frame committed without its header words, carrying
+the buffer's previous `sample_id`.  Maintenance now sets
+`channel_discard` when it returns a buffer, so the rest of the frame is
+dropped.  `test_disable_enable_between_words` in
+`gateware/test/comm_wr` covers it.  Flashed to 8W2A (js320 1.1.11 dev);
+fuzz seed 2 now passes this point.
+
+**Finding 3: fixed (host).**  The JS320 driver publishes the effective
+`h/fs`, `h/fp`, `h/i_scale` and `h/v_scale` when the `h` replay
+completes.  `jsdrvp_mb_dev_host_replay()` now ends on the subscribe
+completion and calls the new `on_host_replayed` hook, which also
+completes the open.  Publishing earlier would overwrite host values
+before the replay, and an asynchronous replay applied the device's
+`s/dwnN/N` only after the publish.  The JS220 publishes `h/fs` and
+`h/fp` at connect.  Its `h/fs` default is 2 MHz while i, v and p cap at
+1 MHz, so fuzz allows that pair.
+
+4. **Open: the previous stream's tail after a same-rate restart.**  Fuzz
+   seed 2 on 8W2A, after about 50 streams: a 1 MHz stop and immediate
+   restart (no rate change) delivers the previous stream's in-flight
+   tail as the new stream's first message, then a forward gap of about
+   0.7 ms.  The frames are correctly labeled, so this is extra old data,
+   not a divergence.  `stream_watch --off-ms 1` did not reproduce it in
+   20 cycles.  Dropping the tail needs a device boundary for enable,
+   such as an `!ack` with the sample_id after the channel_select update
+   in fpga_mcu `app.c`, like `dwnN/!ack`.
+
+Hardware after the fixes: `test/hw/test_open_state.py` passes on both
+models.  Fuzz for 5 minutes: JS220 clean (43 opens, 144 streams); JS320
+fails only on finding 4.

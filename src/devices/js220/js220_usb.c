@@ -1714,6 +1714,8 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
             send_to_frontend(d, "c/hw/version", &jsdrv_union_u32_r(c->hw_version));
             send_to_frontend(d, "s/fpga/version", &jsdrv_union_u32_r(c->fpga_version));
             send_to_frontend(d, "h/filter", &jsdrv_union_u32_r(0));
+            send_to_frontend(d, "h/fs", &jsdrv_union_u32_r(d->fs));
+            send_to_frontend(d, "h/fp", &jsdrv_union_u32_r(d->publish_rate));
             send_to_frontend(d, "h/i_scale", &jsdrv_union_f32_r(d->i_scale));
             send_to_frontend(d, "h/v_scale", &jsdrv_union_f32_r(d->v_scale));
 

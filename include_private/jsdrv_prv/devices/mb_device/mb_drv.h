@@ -175,6 +175,19 @@ struct jsdrvp_mb_drv_s {
                                char prefix);
 
     /**
+     * @brief Called when a jsdrvp_mb_dev_host_replay() completes.
+     *
+     * handle_cmd has received every replayed value, so the driver state
+     * is final.  Lets the driver publish its effective host-side values,
+     * including defaults the host never set, then complete the open.
+     *
+     * @param drv This driver instance.
+     * @param dev The mb_device handle.
+     */
+    void (*on_host_replayed)(struct jsdrvp_mb_drv_s * drv,
+                             struct jsdrvp_mb_dev_s * dev);
+
+    /**
      * @brief Called to destroy the upper driver instance.
      *
      * @param drv This driver instance.  Free all resources including drv itself.
@@ -354,7 +367,8 @@ void jsdrvp_mb_dev_open_complete(struct jsdrvp_mb_dev_s * dev);
  * driver's handle_cmd.  Used for the host-side 'h' instance (topics such
  * as h/fp, h/fs, h/i_scale, h/v_scale that the driver owns in handle_cmd
  * rather than a device pubsub instance), to restore the driver's internal
- * state from the host cache on open.
+ * state from the host cache on open.  When handle_cmd has received every
+ * value, mb_device calls drv->on_host_replayed.
  *
  * @param dev The mb_device handle.
  * @param prefix The host-side instance prefix char (e.g. 'h').

@@ -519,7 +519,9 @@ static int32_t stream_ch_check(struct app_s * self, const char * name, struct st
         printf("ERROR: %s sample_id skips: %" PRIu64 "\n", name, ch->skips);
         rc = 1;
     }
-    if (ch->count && rate && (ch->rate != rate)) {
+    // The JS220 h/fs default is 2 MHz, but it caps i, v and p at 1 MHz.
+    bool capped = (rate == 2000000U) && (ch->rate == 1000000U);
+    if (ch->count && rate && (ch->rate != rate) && !capped) {
         printf("ERROR: %s streams at %u Hz, but host h/fs = %u Hz\n",
                name, (unsigned) ch->rate, (unsigned) rate);
         rc = 1;

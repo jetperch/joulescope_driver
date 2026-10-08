@@ -558,6 +558,37 @@ static void cmd_in(struct jsdrvp_mb_dev_s * d, const char * topic, const struct 
     assert_true(handle_cmd(d, m));  // frees m
 }
 
+static uint32_t host_replayed_count_;
+
+static void on_host_replayed_stub(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev) {
+    (void) drv;
+    (void) dev;
+    ++host_replayed_count_;
+}
+
+static void test_host_replay_completion(void ** state) {
+    (void) state;
+    struct jsdrvp_mb_dev_s * d = device_alloc();
+    struct jsdrvp_mb_drv_s drv;
+    memset(&drv, 0, sizeof(drv));
+    drv.on_host_replayed = on_host_replayed_stub;
+    d->drv = &drv;
+    host_replayed_count_ = 0;
+    unsubscribe_count_ = 0;
+
+    jsdrvp_mb_dev_host_replay(d, 'h');
+    assert_string_equal("u/js320/test/h", subscribe_done_topic_);
+    assert_int_equal(1, unsubscribe_count_);
+    cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/s"));  // other
+    assert_int_equal(0, host_replayed_count_);
+    cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/h"));
+    assert_int_equal(1, host_replayed_count_);
+    cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/h"));  // late
+    assert_int_equal(1, host_replayed_count_);
+    d->drv = NULL;
+    device_free(d);
+}
+
 static void test_gather_ends_on_subscribe_done(void ** state) {
     (void) state;
     struct jsdrvp_mb_dev_s * d = device_alloc();
@@ -622,6 +653,7 @@ int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_state_set_chunking),
             cmocka_unit_test(test_gather_ends_on_subscribe_done),
+            cmocka_unit_test(test_host_replay_completion),
             cmocka_unit_test(test_close_request_in_closed_acks),
             cmocka_unit_test(test_ll_terminated_stops_drain),
             cmocka_unit_test(test_stream_in_non_bin_dropped),

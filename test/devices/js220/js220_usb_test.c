@@ -724,6 +724,20 @@ static void test_filter(void ** state) {
     assert_int_equal(DOWNSAMPLE_SINC1, d->signal_downsample_filter);
 }
 
+// The connect publishes the effective h/fs and h/fp, so the host reports
+// them after open even when it never set them.
+static void test_connect_publishes_rates(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    connect_in(d, JSDRV_VERSION_ENCODE_U32(1, 3, 0), JSDRV_VERSION_ENCODE_U32(1, 3, 0));
+    struct jsdrvp_msg_s * m = backend_find("h/fs");
+    assert_non_null(m);
+    assert_int_equal(d->fs, m->value.value.u32);
+    assert_true(m->value.flags & JSDRV_UNION_FLAG_RETAIN);
+    m = backend_find("h/fp");
+    assert_non_null(m);
+    assert_int_equal(PUB_RATE_DEFAULT, m->value.value.u32);
+}
+
 static void test_scale(void ** state) {
     struct dev_s * d = (struct dev_s *) *state;
     connect_in(d, JSDRV_VERSION_ENCODE_U32(1, 3, 0), JSDRV_VERSION_ENCODE_U32(1, 3, 0));
@@ -837,6 +851,7 @@ int main(void) {
             cmocka_unit_test_setup_teardown(test_fp, setup, teardown),
             cmocka_unit_test_setup_teardown(test_filter_requires_fw_1_3, setup, teardown),
             cmocka_unit_test_setup_teardown(test_filter, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_connect_publishes_rates, setup, teardown),
             cmocka_unit_test_setup_teardown(test_scale, setup, teardown),
             cmocka_unit_test_setup_teardown(test_open_defaults_record, setup, teardown),
             cmocka_unit_test_setup_teardown(test_open_defaults_restore, setup, teardown),
