@@ -23,7 +23,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.0
 
-2026 Oct 7
+2026 Oct 8
 
 **JS220 behavior change: a `defaults` open now restores the default
 settings.**  Previously, opening a JS220 in `defaults` mode (the default
