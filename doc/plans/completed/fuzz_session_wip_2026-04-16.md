@@ -44,7 +44,7 @@ Follow-on work from the same session:
   comm link stays up across host disconnect/reconnect.
 
 The `sample_id skip` class of fuzz failures noted below remains
-deferred to `doc/plans/open_state_management.md`.
+deferred to `doc/plans/completed/open_state_management.md`.
 
 ## Landed (committed on feature/js320)
 
@@ -122,7 +122,7 @@ reverted — it's the wrong primitive:
 
 A redesign using `MB_STDMSG_STATE_TYPE_SET_CMD` (single atomic
 state-set round-trip) plus a new `JSDRV_DEVICE_OPEN_MODE_OVERRIDE` is
-planned in `doc/plans/open_state_management.md`. That plan also drops
+planned in `doc/plans/completed/open_state_management.md`. That plan also drops
 the hardcoded `{'c', 's'}` subtree list for generic MiniBitty support.
 
 ### Known-expected fuzz failures until the redesign lands
@@ -140,7 +140,7 @@ changes landed), reflecting a drifted `s/dwnN/N` between host and
 firmware across a close (host resets to default on close, firmware
 retains its register). The generic walk that would have fixed this is
 reverted. These skips are **expected** until the open-state-management
-redesign is implemented per `doc/plans/open_state_management.md`.
+redesign is implemented per `doc/plans/completed/open_state_management.md`.
 
 No crashes, no hangs — just stream-data mis-alignment on channels that
 depend on the drifted register.
@@ -149,6 +149,6 @@ depend on the drifted register.
 
 1. Commit the 7 in-flight items above in logical chunks from
    `feature/js320`.
-2. Start work on `doc/plans/open_state_management.md`.
+2. Start work on `doc/plans/completed/open_state_management.md`.
 3. When open-state-management is merged, re-run fuzz and confirm
    `sample_id skip` count drops to zero.

@@ -17,7 +17,7 @@
 
 # Open-path state management redesign
 
-**Status**: mostly complete; 3 items open (see below)
+**Status**: completed
 **Updated**: 2026-10-08
 
 ## Status summary
@@ -37,9 +37,8 @@ at the end describe what shipped.
 | Host-value gather completion | Done 2026-10: replaced the `mbg/` sentinel |
 | JS220 `defaults` open (#16) | Done 2026-10 |
 | No `default` on `!` topics | Done 2026-10: js320 and MiniBitty firmware |
-| Fuzz coverage of the open-mode mix | **Open**: `example/fuzz.c` always uses mode 0 |
-| `/!sync` to re-force state when open | **Open**: not started |
-| General child-instance discovery | **Open**: js320 hard-codes `'s'` and `'h'` |
+| Fuzz coverage of the open-mode mix | Done 2026-10: `example/fuzz.c` `--open-mode` |
+| General child-instance discovery | Moved to `../distributed_pubsub.md` |
 
 ## Context
 
@@ -247,10 +246,9 @@ Original plan; see "Status summary" for what changed.
 * ~~Is the `SET_CMD` MTU one frame or a chain?~~  A chain: the host chunks
   entries across frames with `FLAG_START` / `FLAG_END`.  The firmware
   reliably acks only the END frame.
-* Do we need a separate `/!sync` pubsub command on the host that can
-  run against an already-open device (not just during open) to
-  re-force state after some out-of-band desync? Possibly useful for
-  the Joulescope UI after suspend/resume cycles.  **Still open.**
+* ~~Do we need a `/!sync` command to re-force state on an open device?~~
+  No.  Host and device state must not diverge once open completes, so
+  any divergence is a bug to fix, not to resync.
 
 ## Relationship to the fuzz session WIP
 
@@ -414,3 +412,19 @@ are JS320 only).  It checks that RESUME adopts the device value and a
 fresh DEFAULTS open resets it, that DEFAULTS preserves a host value, and
 that `ro` topics are not corrupted.  A separate JS220 scope run found 0 of
 8 changed settings left after a fresh `defaults` open.
+
+## Fuzz coverage (2026-10-08)
+
+`example/fuzz.c` now picks `defaults` or `restore` at random for each
+open (`--open-mode defaults|restore|mix`, default `mix`).  After each
+open it reads the host `h/fs`.  At each stream stop it fails when:
+
+* a channel's `sample_id` is not continuous, or
+* the delivered rate (`sample_rate / decimate_factor`) differs from the
+  host `h/fs`, which means the host and device state diverged.
+
+JS220+ 002122 passes: 60 opens and over 200 streams across three
+4-minute runs.  JS320 8W2A fails within minutes in both open modes, on
+stream discontinuities that are unrelated to the open mode.  They are
+filed in `../js320_stream_discontinuity.md`, along with `h/fs` having no
+host value after open on both models.

@@ -30,7 +30,7 @@ During the 2026-04-16 fuzz session, JS320-specific assumptions leaked
 into `mb_device.c`. This plan identifies the leaks and proposes a
 refactor that moves each one back behind a hook.
 
-Sister plan: `doc/plans/open_state_management.md` redesigns the three
+Sister plan: `doc/plans/completed/open_state_management.md` redesigns the three
 open modes using `MB_STDMSG_STATE_TYPE_SET_CMD` and drops the
 `STATE_FETCH_PREFIXES` list via null-target GET_INIT. Some items
 below overlap with that plan — see § Interactions.
