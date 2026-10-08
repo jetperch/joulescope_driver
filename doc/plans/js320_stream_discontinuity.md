@@ -114,6 +114,40 @@ before the replay, and an asynchronous replay applied the device's
    such as an `!ack` with the sample_id after the channel_select update
    in fpga_mcu `app.c`, like `dwnN/!ack`.
 
+   MiniBitty confirmed delivery (publish `tracking_id`, response on
+   `h/!rsp`) does not provide this boundary.  The response carries only
+   the topic, tracking id and return code, with no device time.  The
+   fpga_mcu pubsub task (task_id 6) also sends it before the lower
+   priority app task (12) writes `channel_select`.  js320_drv forwards
+   the stream ctrl topics unconfirmed today.
+
 Hardware after the fixes: `test/hw/test_open_state.py` passes on both
 models.  Fuzz for 5 minutes: JS220 clean (43 opens, 144 streams); JS320
 fails only on finding 4.
+
+## JS110 (2026-10-08)
+
+Added to this investigation for a Windows report: an access violation in
+`Driver.finalize()` after a JS110 streamed (`monitor.py`, Ctrl-C, 7 of
+20 runs).  On Linux, `monitor.py` and `measure.py` did not crash in 20
+runs each, including under AddressSanitizer.  `fuzz --device
+u/js110/001612` under ASan reproduced a heap-use-after-free on every
+SIGINT while streaming:
+
+* The JS110 driver thread drained `ll.rsp_q` without a bound, so while
+  the stream outpaced processing it never saw FINALIZE.
+* `join()` timed out after 10 s and freed the device under the running
+  thread, which then used a freed downsampler.
+
+Fixed in all three upper-level drivers: the drain stops every
+`JSDRVP_UL_RSP_DRAIN_MAX` messages to check `ul.cmd_q`, and the JS110
+and JS220 joins now leak instead of freeing on timeout, like mb_device.
+ASan fuzz then passed 8 SIGINT-while-streaming runs (joins return 0).
+This is the likely cause of the Windows crash.  It needs confirmation on
+Windows.  See `ul_thread_loop_dedup.md`.
+
+The JS110 fuzz also found that an open republished the `h/fs` default
+(2 MHz) while the driver kept the last rate, so `h/fs` disagreed with
+the stream.  `on_sampling_frequency` now stores the rate.  Release fuzz
+on the JS110 then ran 240 s clean (36 opens, 113 streams).  Under ASan,
+the publish in progress when SIGINT arrives can time out (rc 11).

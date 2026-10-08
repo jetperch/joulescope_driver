@@ -180,6 +180,15 @@ settings.  See
 * Fixed h/fs, h/fp, h/i_scale and h/v_scale having no host value after a
   JS320 open until the application set them, and h/fs and h/fp after a
   JS220 open.  A JS320 restore open now reports the instrument's rate.
+* Fixed a use-after-free in Driver.finalize() and device close after a
+  JS110 streamed, the likely cause of intermittent access violations on
+  Windows.  A device thread busy with stream data never checked for the
+  finalize command, so the 10 s join timed out and freed the device under
+  the running thread.  Device threads now check for commands every 64
+  stream messages, and a join timeout leaks the device instead.
+* Fixed a JS110 open reporting h/fs as 2 MHz after the application set
+  another rate.
+* Fixed a libusb backend log message that could crash at INFO level.
 * Added "jsdrv stream_watch --cycles" to stop and restart streams and
   report sample_id skips per cycle, and stream sample_id and rate checks
   to the fuzz example.

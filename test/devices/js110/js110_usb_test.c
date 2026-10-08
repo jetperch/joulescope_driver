@@ -171,10 +171,23 @@ static void test_wait_for_sensor_command_error_frees_status_message(void ** stat
     assert_int_equal(msg_alloc_count_, msg_free_count_);
 }
 
+// An open republishes param_values, so h/fs must hold the rate in use.
+static void test_sampling_frequency_stored(void ** state) {
+    struct responder_s * r = (struct responder_s *) *state;
+    responder_start(r);
+    on_sampling_frequency(r->d, &jsdrv_union_u32_r(10000));
+    assert_int_equal(JSDRV_UNION_U32, r->d->param_values[PARAM_SAMPLE_FREQUENCY].type);
+    assert_int_equal(10000, r->d->param_values[PARAM_SAMPLE_FREQUENCY].value.u32);
+    for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(r->d->ports); ++idx) {
+        jsdrv_downsample_free(r->d->ports[idx].downsample);
+    }
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test_setup_teardown(test_wait_for_sensor_command_frees_status_messages, setup, teardown),
             cmocka_unit_test_setup_teardown(test_wait_for_sensor_command_error_frees_status_message, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_sampling_frequency_stored, setup, teardown),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

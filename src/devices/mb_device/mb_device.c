@@ -2423,7 +2423,8 @@ static JSDRV_THREAD_RETURN_TYPE driver_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
             ;
         }
         // note: ResetEvent handled automatically by msg_queue_pop_immediate
-        while (handle_rsp(d, msg_queue_pop_immediate(d->ll.rsp_q))) {
+        for (uint32_t n = 0; (n < JSDRVP_UL_RSP_DRAIN_MAX)
+                && handle_rsp(d, msg_queue_pop_immediate(d->ll.rsp_q)); ++n) {
             ;
         }
 

@@ -57,6 +57,17 @@ enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
  */
 #define JSDRVP_MSG_SUBSCRIBE_DONE "@/!subdn"
 
+/**
+ * @brief The maximum ll.rsp_q messages an upper-level device thread
+ *      handles before it checks ul.cmd_q again.
+ *
+ * A stream that outpaces processing never empties ll.rsp_q, so an
+ * unbounded drain never sees FINALIZE, and the join times out.  The
+ * queue event stays set while messages remain, so the thread does not
+ * wait between drains.
+ */
+#define JSDRVP_UL_RSP_DRAIN_MAX (64U)
+
 struct jsdrvp_payload_subscribe_s {  // also for unsubscribe
     char topic[JSDRV_TOPIC_LENGTH_MAX];
     struct jsdrv_pubsub_subscriber_s subscriber;

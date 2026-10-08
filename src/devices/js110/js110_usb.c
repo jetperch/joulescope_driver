@@ -1040,6 +1040,8 @@ static void on_sampling_frequency(struct js110_dev_s * d, const struct jsdrv_uni
     }
     fs = v.value.u32;
     JSDRV_LOGI("on_sampling_frequency(%lu)", fs);
+    // Stored so an open republishes the rate in use, not the default.
+    d->param_values[PARAM_SAMPLE_FREQUENCY] = jsdrv_union_u32_r(fs);
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(FIELDS); ++idx) {
         struct port_s *p = &d->ports[idx];
         if (NULL != p->downsample) {
@@ -1603,7 +1605,8 @@ static JSDRV_THREAD_RETURN_TYPE driver_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
             ;
         }
         // note: ResetEvent handled automatically by msg_queue_pop_immediate
-        while (handle_rsp(d, msg_queue_pop_immediate(d->ll.rsp_q))) {
+        for (uint32_t n = 0; (n < JSDRVP_UL_RSP_DRAIN_MAX)
+                && handle_rsp(d, msg_queue_pop_immediate(d->ll.rsp_q)); ++n) {
             ;
         }
     }
@@ -1631,6 +1634,12 @@ static void join(struct jsdrvp_ul_device_s * device) {
     // approaching this is a real bug.
     int32_t jrc = jsdrv_thread_join(&d->thread, 10000);
     JSDRV_LOGI("ul join(%s): joined rc=%d", d->ll.prefix, (int) jrc);
+    if (jrc) {
+        // The thread still runs and would use d after the free below.
+        // Leak d instead, like mb_device; the cause must be fixed.
+        JSDRV_LOGE("ul join(%s): LEAK - thread still running, refusing to free", d->ll.prefix);
+        return;
+    }
 
     for (uint32_t idx = 0; idx < JSDRV_ARRAY_SIZE(d->ports); ++idx) {
         struct port_s *p = &d->ports[idx];

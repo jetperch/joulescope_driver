@@ -243,7 +243,7 @@ static struct dev_s * device_lookup_by_usb_device(struct backend_s * s, libusb_d
 }
 
 static void device_add_announce(struct backend_s * s, struct dev_s * d) {
-    JSDRV_LOGI("device_add_announce %s %s", d->ll_device.prefix);
+    JSDRV_LOGI("device_add_announce %s", d->ll_device.prefix);
     struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(s->context);
     jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_ADD, sizeof(msg->topic));
     msg->value.type = JSDRV_UNION_BIN;
