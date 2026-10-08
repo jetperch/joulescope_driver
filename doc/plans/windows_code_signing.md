@@ -16,7 +16,7 @@
 -->
 # Windows code signing
 
-**Status**: in progress (stages 1-2 written, not yet run on GitHub)
+**Status**: in progress (stages 1-2 done; stage 3 next)
 **Created**: 2026-10-08
 
 ## Context
@@ -85,12 +85,13 @@ turned back on without a reset.
 
 ## Progress (2026-10-08)
 
-* Stage 1: `jetperch/github_actions` created locally (7aa185e): the
-  `windows_sign` action, a self-test workflow (builds an unsigned
-  `hello.exe` on `windows-latest` and `windows-11-arm`; signs and
-  expects Valid on `main`, else expects the skip), README, CHANGELOG
-  1.0.0, REUSE compliant.  Not yet pushed or tagged `v1`.
-* Stage 2: `build_native_win` signs `example/Release/*.exe` (static) or
-  `src/Release/jsdrv.dll` (shared) after the tests and before the
-  artifact and `jci-*` uploads, for pushes to `main` and `v*` tags.
-  This needs `jetperch/github_actions@v1` to exist first.
+* Stage 1 done: `jetperch/github_actions` (public) `v1.0.0` and `v1` at
+  5de6765.  The self-test signs `hello.exe` on `windows-latest` and
+  `windows-11-arm` with the organization `AZURE_*` secrets, and both
+  verify Valid.
+* Stage 2 done: run 37825328574 for 7ca6de7 signed and verified 6
+  executables per static build (x64, arm64) and `jsdrv.dll`.  The
+  `jci-windows-x86_64` `minibitty.exe` carries the JETPERCH LLC EV
+  certificate (GlobalSign) with a DigiCert timestamp.  The CI bench
+  suite passed on all four stations.  Smart App Control is off on the
+  benches, so this does not yet show acceptance with it enforcing.
