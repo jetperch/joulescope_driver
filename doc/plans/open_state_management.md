@@ -17,6 +17,30 @@
 
 # Open-path state management redesign
 
+**Status**: mostly complete; 3 items open (see below)
+**Updated**: 2026-10-08
+
+## Status summary
+
+The sections from "Context" through "Verification" are the original
+2026-04 plan, kept for history.  The two "Implementation status" sections
+at the end describe what shipped.
+
+| Item | Status |
+|---|---|
+| DEFAULTS = host value, else metadata default | Done: mb_device 2026-06, JS220 2026-10 |
+| Separate `OVERRIDE` mode | Dropped: DEFAULTS covers it |
+| Batched `SET_CMD` restore | Done 2026-06 (mb_device) |
+| Drop `STATE_FETCH_PREFIXES` | Done 2026-06, using the link identity instance |
+| Metadata `ro` flag, `jsdrv_meta_flags()` | Done 2026-04 (dd0103b) |
+| Settable filter, not name heuristics | Done 2026-10: `jsdrv_meta_is_settable()` |
+| Host-value gather completion | Done 2026-10: replaced the `mbg/` sentinel |
+| JS220 `defaults` open (#16) | Done 2026-10 |
+| No `default` on `!` topics | Done 2026-10: js320 and MiniBitty firmware |
+| Fuzz coverage of the open-mode mix | **Open**: `example/fuzz.c` always uses mode 0 |
+| `/!sync` to re-force state when open | **Open**: not started |
+| General child-instance discovery | **Open**: js320 hard-codes `'s'` and `'h'` |
+
 ## Context
 
 The current `jsdrv_device_open_mode_e` enumeration defines two
@@ -174,6 +198,9 @@ bitmask and a `JSDRV_META_FLAG_RO` constant.
 
 ## Critical files
 
+Original plan; see "Status summary" for what changed.
+
+
 * `C:\repos\Jetperch\joulescope_driver\include\jsdrv.h` —
   add `JSDRV_DEVICE_OPEN_MODE_OVERRIDE = 2`, update comments.
 * `C:\repos\Jetperch\joulescope_driver\include\jsdrv\meta.h` —
@@ -212,20 +239,18 @@ bitmask and a `JSDRV_META_FLAG_RO` constant.
 
 ## Open questions
 
-* Does the current `minibitty` pubsub `state_get_init` handler treat
-  null `target_topic` as "enumerate all subtrees", or does it require
-  a specific prefix? If the latter, firmware work is required before
-  the host can drop `STATE_FETCH_PREFIXES`.
-* Should `OVERRIDE` mode preserve topics absent from the host cache,
-  or force them to defaults? (Current table says "keep device's
-  current value" — confirm with intended use cases.)
-* Is the `SET_CMD` MTU determined by one USB frame (~512 bytes) or
-  does the firmware accept a chain via FLAG_START/FLAG_END? The
-  chunking strategy depends.
+* ~~Does `state_get_init` honor a null `target_topic`?~~  Moot: the host
+  manages the single instance named in the link identity.
+* ~~Should `OVERRIDE` preserve topics absent from the host cache?~~
+  Moot: `OVERRIDE` was dropped.  DEFAULTS forces absent topics to their
+  metadata default.
+* ~~Is the `SET_CMD` MTU one frame or a chain?~~  A chain: the host chunks
+  entries across frames with `FLAG_START` / `FLAG_END`.  The firmware
+  reliably acks only the END frame.
 * Do we need a separate `/!sync` pubsub command on the host that can
   run against an already-open device (not just during open) to
   re-force state after some out-of-band desync? Possibly useful for
-  the Joulescope UI after suspend/resume cycles.
+  the Joulescope UI after suspend/resume cycles.  **Still open.**
 
 ## Relationship to the fuzz session WIP
 
@@ -340,7 +365,7 @@ What shipped, and how it differs from the original plan above:
   tracks runtime transitions (e.g. `c/comm/sensor/state` 0→1); without
   it a non-retained publish would *clear* the prior cached value.
 
-* **Failure handling.**  Every step (gather sentinel, SET_RESP, missing
+* **Failure handling.**  Every step (gather completion, SET_RESP, missing
   metadata) advances on timeout rather than aborting; open always
   reaches OPEN#.
 
@@ -349,3 +374,43 @@ Verification end-states (the `OVERRIDE` row is subsumed by `DEFAULTS`):
 * `DEFAULTS`: with an empty host cache, every writable topic equals its
   metadata `default`; with a cached host value, that value is preserved.
 * `RESUME`: host retained values match the device's GET_RSP.
+
+## Implementation status (2026-10)
+
+Commits e01817d through f44b562 on main.  Validated on hardware with
+`test/hw/test_open_state.py` on JS220+ 002122 (fw 1.3.0) and JS320 8W2A
+(fw 1.1.11).
+
+* **JS220 `defaults` open
+  ([#16](https://github.com/jetperch/joulescope_driver/issues/16)).**
+  `js220_usb.c` previously pushed nothing in DEFAULTS mode, so settings
+  from a previous session persisted on the instrument until power cycle.
+  It now applies the same semantic as mb_device: it records each `$`
+  metadata default during the open, gathers the host's retained `c/` and
+  `s/` values, pushes host value else default, then reads the device
+  state back.  The JS220 has no `SET_CMD`, so it pushes one publish per
+  topic.  `/ctrl` topics are always left at their default, so an open
+  never restarts streaming, and `*/dwnN/N` is skipped because `h/fs`
+  owns it.  `mode='restore'` (RESUME) is the opt-out.  The CHANGELOG
+  2.5.0 entry leads with this behavior change.
+* **Shared settable filter.**  `jsdrv_meta_is_settable(topic, meta)` in
+  `src/meta.c` (`include_private/jsdrv_prv/meta_settable.h`) returns true
+  for a topic that is not `ro`, contains no `!` and has a scalar dtype.
+  Both drivers then take the value from the public `jsdrv_meta_default()`.
+  The topic check stays because older firmware defines defaults on `!`
+  topics.
+* **Gather completion.**  Subscribing with `JSDRV_PUBSUB_SUBSCRIBE_DONE`
+  (`"_/!subd"`) makes pubsub send `JSDRVP_MSG_SUBSCRIBE_DONE` to that
+  subscriber after its retained values.  Both drivers end the gather on
+  it, which removed the `mbg/` loopback sentinel and its two constraints
+  above.  See `completed/open_gather_completion.md`.
+* **Firmware metadata.**  `!` topics no longer define a `default`: 10 in
+  js320 `firmware/fpga_mcu/src/app.c` and `tick/!ev` in MiniBitty
+  `src/tasks/sys.c`.  The JS320 had 12 such defaults before; fw 1.1.11
+  has none.
+
+`test/hw/test_open_state.py` now runs on both models (the sensor tests
+are JS320 only).  It checks that RESUME adopts the device value and a
+fresh DEFAULTS open resets it, that DEFAULTS preserves a host value, and
+that `ro` topics are not corrupted.  A separate JS220 scope run found 0 of
+8 changed settings left after a fresh `defaults` open.
