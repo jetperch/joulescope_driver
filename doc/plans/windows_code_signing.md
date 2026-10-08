@@ -16,7 +16,7 @@
 -->
 # Windows code signing
 
-**Status**: in progress (stages 1-2 done; 3-4 written)
+**Status**: in progress (stages 1-4 done; stage 5 open)
 **Created**: 2026-10-08
 
 ## Context
@@ -104,3 +104,10 @@ turned back on without a reset.
   signs with the action before (bundled `.exe`, `.dll`, `.pyd`) and after
   (installer) Inno Setup, on main and `v*` tags only.  It used to sign
   every push.
+* Stages 3-4 verified: jsdrv run 37831578191 (c19dde7) signed every
+  Windows wheel; the x64 cp314 and arm64 cp312 `.pyd` carry the JETPERCH
+  LLC certificate, and the repacked `RECORD` hashes match.  UI run
+  37831582435 (e2ab059) signed 110 to 191 bundled files per Windows build
+  plus each installer; `joulescope_setup_1_7_1_nuitka.exe` carries the
+  certificate.  Not yet checked on a machine with Smart App Control
+  enforcing.
