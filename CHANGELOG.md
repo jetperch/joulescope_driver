@@ -171,6 +171,9 @@ settings.  See
   host values with a pubsub subscribe completion.  Applications no longer
   receive "mbg/..." publishes, and concurrent JS320 opens no longer share
   sentinel topics.
+* Fixed Python Driver.subscribe('') and unsubscribe('') raising
+  IndexError.  The empty (root) topic subscribes to all publishes, as in
+  the C API.
 
 ## 2.4.3
 

@@ -104,3 +104,18 @@ class TestDriverSubscribe(unittest.TestCase):
     def test_finalize_twice(self):
         self.d.finalize()
         self.d.finalize()
+
+    def test_root_topic(self):
+        topics = []
+        fn = lambda topic, value: topics.append(topic)
+        self.d.subscribe('', 'pub', fn)
+        self._publish(1)
+        self.assertIn(TOPIC, topics)
+        self.d.unsubscribe('', fn)
+        topics.clear()
+        self._publish(2)
+        self.assertNotIn(TOPIC, topics)
+
+    def test_publish_query_round_trip(self):
+        self._publish(42)
+        self.assertEqual(42, self.d.query(TOPIC))

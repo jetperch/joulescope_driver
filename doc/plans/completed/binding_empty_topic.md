@@ -16,7 +16,7 @@
 -->
 # Python binding rejects the empty (root) topic
 
-**Status**: proposed
+**Status**: completed
 **Created**: 2026-10-07
 
 ## Context
@@ -48,3 +48,12 @@ C string is terminated by construction.
    `subscribe('')` / `unsubscribe('')` on a driver without devices, and
    for a normal topic round trip.
 2. Rebuild the extension and run `pyjoulescope_driver/test`.
+
+## Outcome
+
+Completed 2026-10-08.  `_c_str()` in `binding.pyx` encodes all seven call
+sites, including the `rsp_topic` copy in `_pack_buffer_req`, which the
+plan missed.  `test_root_topic` and `test_publish_query_round_trip` in
+`pyjoulescope_driver/test/test_driver_subscribe.py` cover the fix.  All
+214 Python tests pass, and `test/hw/test_open_state.py` passes on JS320
+8W2A.

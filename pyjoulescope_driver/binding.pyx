@@ -314,7 +314,7 @@ cdef object _parse_buffer_rsp(c_jsdrv.jsdrv_buffer_response_s * r):
 
 cdef object _pack_buffer_req(r):
     rsp_topic = _topic_validate(r['rsp_topic'], 'rsp_topic')
-    cdef const uint8_t[:] rsp_topic_str = rsp_topic.encode('utf-8')
+    cdef const uint8_t[:] rsp_topic_str = _c_str(rsp_topic)
     cdef c_jsdrv.jsdrv_buffer_request_s s
     cdef uint8_t * u8_ptr
 
@@ -793,6 +793,12 @@ cdef object _topic_validate(topic, name='topic'):
     return topic
 
 
+cdef bytes _c_str(s):
+    # Terminate explicitly: a memoryview excludes the NUL that CPython
+    # stores after bytes, and an empty view has no [0] to pass to C.
+    return (s + '\0').encode('utf-8')
+
+
 cdef object _device_prefix_validate(device_prefix):
     device_prefix = _topic_validate(device_prefix, 'device_prefix').rstrip('/')
     if not device_prefix:
@@ -975,7 +981,7 @@ cdef class Driver:
         """
         cdef c_jsdrv.jsdrv_union_s v
         cdef char * byte_str
-        cdef const uint8_t[:] topic_str = _topic_validate(topic).encode('utf-8')
+        cdef const uint8_t[:] topic_str = _c_str(_topic_validate(topic))
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef c_jsdrv.jsdrv_context_s * context = self._context_get()
 
@@ -1037,7 +1043,7 @@ cdef class Driver:
         """
         cdef c_jsdrv.jsdrv_union_s v
         cdef char byte_str[1024]
-        cdef const uint8_t[:] topic_str = _topic_validate(topic).encode('utf-8')
+        cdef const uint8_t[:] topic_str = _c_str(_topic_validate(topic))
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef c_jsdrv.jsdrv_context_s * context = self._context_get()
 
@@ -1252,7 +1258,7 @@ cdef class Driver:
 
         :raise RuntimeError: on subscribe failure.
         """
-        cdef const uint8_t[:] topic_str = _topic_validate(topic).encode('utf-8')
+        cdef const uint8_t[:] topic_str = _c_str(_topic_validate(topic))
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef int32_t c_flags = 0
         cdef void * fn_ptr = <void *> fn
@@ -1280,7 +1286,7 @@ cdef class Driver:
             the default timeout.
         :raise: On error.
         """
-        cdef const uint8_t[:] topic_str = _topic_validate(topic).encode('utf-8')
+        cdef const uint8_t[:] topic_str = _c_str(_topic_validate(topic))
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         if self._context == NULL:
             return  # finalize stopped all subscriptions
@@ -1392,7 +1398,7 @@ cdef class Driver:
 
         device_prefix = _device_prefix_validate(device_prefix)
         topic = device_prefix + "/@/!open"
-        topic_str = topic.encode('utf-8')
+        topic_str = _c_str(topic)
 
         v.type = c_jsdrv.JSDRV_UNION_I32
         v.value.i32 = mode
@@ -1418,7 +1424,7 @@ cdef class Driver:
             return  # finalize closed all devices
         self._opened.discard(device_prefix)
         topic = device_prefix + "/@/!close"
-        topic_str = topic.encode('utf-8')
+        topic_str = _c_str(topic)
         # Zero flags and app: jsdrvp_msg_free interprets app.
         memset(&v, 0, sizeof(v))
         v.type = c_jsdrv.JSDRV_UNION_I32
