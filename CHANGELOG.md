@@ -39,6 +39,10 @@ explicitly, or open with `mode='restore'` to keep the instrument's current
 settings.  See
 [#16](https://github.com/jetperch/joulescope_driver/issues/16).
 
+* Signed the Windows executables (jsdrv.exe, minibitty.exe and the other
+  example tools) and jsdrv.dll in main and release builds, so Windows
+  Smart App Control does not block them.  The Python wheels are not
+  signed yet.
 * Added DevicePath, a str subclass with backend, model, serial_number,
   brand and is_bootloader properties and a match(spec) method.
   Driver.device_paths() now returns DevicePath instances, which remain
