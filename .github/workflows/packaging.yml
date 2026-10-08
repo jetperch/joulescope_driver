@@ -123,6 +123,21 @@ jobs:
         if: matrix.shared == 'OFF'
         run: cmake --build cmake_build --config Release --target RUN_TESTS
 
+      # Smart App Control blocks unsigned binaries without reputation.
+      # Sign trusted refs only: pull requests receive no secrets.
+      - name: Sign Windows binaries
+        if: >-
+          github.event_name == 'push' && (github.ref == 'refs/heads/main'
+          || startsWith(github.ref, 'refs/tags/v'))
+        uses: jetperch/github_actions/windows_sign@v1
+        with:
+          files: ${{ matrix.shared == 'ON' && 'cmake_build/src/Release/jsdrv.dll' || 'cmake_build/example/Release/*.exe' }}
+          azure_key_vault_uri: ${{ secrets.AZURE_KEY_VAULT_URI }}
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure_cert_name: ${{ secrets.AZURE_CERT_NAME }}
+
       - name: Create artifacts directory
         shell: bash
         run: mkdir artifacts
