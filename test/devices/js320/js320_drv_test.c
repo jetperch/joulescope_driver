@@ -425,13 +425,14 @@ static void test_on_open_publishes_param_meta(void ** state) {
 }
 
 
-// The 'h' replay completion publishes the effective h/* values, so the
-// host reports them even when it never set them.
+// The 'h' replay completion (on_instance_synced 'h') publishes the
+// effective h/* values, so the host reports them even when it never set
+// them.
 static void test_open_publishes_host_values(void ** state) {
     struct js320_drv_s * self = *state;
     self->drv.handle_cmd(&self->drv, NULL, "h/fs", &jsdrv_union_u32_r(2000));
     g_cap.frontend_send_count = 0;
-    self->drv.on_host_replayed(&self->drv, NULL);
+    self->drv.on_instance_synced(&self->drv, NULL, 'h');
     static const char * expect[] = {"h/fs", "h/fp", "h/i_scale", "h/v_scale"};
     assert_int_equal(JSDRV_ARRAY_SIZE(expect), g_cap.frontend_send_count);
     for (uint32_t i = 0; i < JSDRV_ARRAY_SIZE(expect); ++i) {
@@ -1488,7 +1489,7 @@ static void test_ctrl_ack_restart_drops_tail(void ** state) {
 // stream arms the window before any ack arrived.
 static void test_ctrl_ack_supported_from_meta(void ** state) {
     struct js320_drv_s * self = *state;
-    self->drv.on_topic_meta(&self->drv, NULL, "s/i/!ack", "{}");
+    assert_false(self->drv.handle_publish(&self->drv, NULL, "s/i/!ack$", &jsdrv_union_cjson_r("{}")));
     assert_true(self->ctrl_ack_supported);
     set_i_ctrl(self, 1);
     set_i_ctrl(self, 0);
@@ -1503,7 +1504,7 @@ static void test_ctrl_ack_quick_cycles(void ** state) {
     struct js320_drv_s * self = *state;
     float samples[4] = {0};
     uint64_t step = js320_device_decimate(self, 5);
-    self->drv.on_topic_meta(&self->drv, NULL, "s/i/!ack", "{}");
+    assert_false(self->drv.handle_publish(&self->drv, NULL, "s/i/!ack$", &jsdrv_union_cjson_r("{}")));
     set_i_ctrl(self, 1);  // unknown state: not counted
     set_i_ctrl(self, 0);  // ack 200
     set_i_ctrl(self, 1);  // ack 300

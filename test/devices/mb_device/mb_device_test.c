@@ -558,12 +558,13 @@ static void cmd_in(struct jsdrvp_mb_dev_s * d, const char * topic, const struct 
     assert_true(handle_cmd(d, m));  // frees m
 }
 
-static uint32_t host_replayed_count_;
+static char synced_prefix_;
 
-static void on_host_replayed_stub(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev) {
+static void on_instance_synced_stub(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
+                                    char prefix) {
     (void) drv;
     (void) dev;
-    ++host_replayed_count_;
+    synced_prefix_ = prefix;
 }
 
 static void test_host_replay_completion(void ** state) {
@@ -571,47 +572,56 @@ static void test_host_replay_completion(void ** state) {
     struct jsdrvp_mb_dev_s * d = device_alloc();
     struct jsdrvp_mb_drv_s drv;
     memset(&drv, 0, sizeof(drv));
-    drv.on_host_replayed = on_host_replayed_stub;
+    drv.on_instance_synced = on_instance_synced_stub;
     d->drv = &drv;
-    host_replayed_count_ = 0;
+    synced_prefix_ = 0;
     unsubscribe_count_ = 0;
 
     jsdrvp_mb_dev_host_replay(d, 'h');
     assert_string_equal("u/js320/test/h", subscribe_done_topic_);
     assert_int_equal(1, unsubscribe_count_);
     cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/s"));  // other
-    assert_int_equal(0, host_replayed_count_);
+    assert_int_equal(0, synced_prefix_);
     cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/h"));
-    assert_int_equal(1, host_replayed_count_);
+    assert_int_equal('h', synced_prefix_);
+    synced_prefix_ = 0;
     cmd_in(d, JSDRVP_MSG_SUBSCRIBE_DONE, &jsdrv_union_str("u/js320/test/h"));  // late
-    assert_int_equal(1, host_replayed_count_);
+    assert_int_equal(0, synced_prefix_);
     d->drv = NULL;
     device_free(d);
 }
 
-static char topic_meta_seen_[64];
+static char meta_publish_seen_[64];
+static bool meta_publish_consume_;
 
-static void on_topic_meta_stub(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
-                               const char * topic, const char * json_meta) {
+static bool handle_publish_stub(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
+                                const char * subtopic, const struct jsdrv_union_s * value) {
     (void) drv;
     (void) dev;
-    (void) json_meta;
-    jsdrv_cstr_copy(topic_meta_seen_, topic, sizeof(topic_meta_seen_));
+    assert_int_equal(JSDRV_UNION_JSON, value->type);
+    jsdrv_cstr_copy(meta_publish_seen_, subtopic, sizeof(meta_publish_seen_));
+    return meta_publish_consume_;
 }
 
-static void test_topic_meta_hook(void ** state) {
+// Metadata reaches the driver through handle_publish as "{topic}$".
+static void test_topic_meta_to_handle_publish(void ** state) {
     (void) state;
     struct jsdrvp_mb_dev_s * d = device_alloc();
     struct jsdrvp_mb_drv_s drv;
     memset(&drv, 0, sizeof(drv));
-    drv.on_topic_meta = on_topic_meta_stub;
+    drv.handle_publish = handle_publish_stub;
     d->drv = &drv;
     d->open_mode = 1;  // RESUME: no SET record
     d->state_fetch.blobs[0].topic[0] = 's';
     d->state_fetch.blob_count = 1;
-    topic_meta_seen_[0] = 0;
+    meta_publish_seen_[0] = 0;
+    meta_publish_consume_ = false;
     meta_fetch_on_topic(d, "./i/!ack", "{\"dtype\": \"u64\"}");
-    assert_string_equal("s/i/!ack", topic_meta_seen_);
+    assert_string_equal("s/i/!ack$", meta_publish_seen_);
+    assert_int_equal(1, backend_send_count_);  // forwarded
+    meta_publish_consume_ = true;
+    meta_fetch_on_topic(d, "./v/!ack", "{\"dtype\": \"u64\"}");
+    assert_int_equal(1, backend_send_count_);  // consumed
     d->drv = NULL;
     device_free(d);
 }
@@ -681,7 +691,7 @@ int main(void) {
             cmocka_unit_test(test_state_set_chunking),
             cmocka_unit_test(test_gather_ends_on_subscribe_done),
             cmocka_unit_test(test_host_replay_completion),
-            cmocka_unit_test(test_topic_meta_hook),
+            cmocka_unit_test(test_topic_meta_to_handle_publish),
             cmocka_unit_test(test_close_request_in_closed_acks),
             cmocka_unit_test(test_ll_terminated_stops_drain),
             cmocka_unit_test(test_stream_in_non_bin_dropped),

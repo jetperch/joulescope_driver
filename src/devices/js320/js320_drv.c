@@ -205,7 +205,7 @@ struct js320_drv_s {
     // firmware publishes s/{i,v,p}/!ack with the sample_id just after the
     // update, and the host drops frames that end at or before it.  Older
     // firmware lacks these topics, so the window arms only when the open
-    // metadata declared them, or an ack arrived during this open.
+    // metadata declared them (handle_publish "$"), or an ack arrived.
     struct js320_ack_state_s ctrl_ack[3];
     bool ctrl_ack_supported;
 
@@ -1484,6 +1484,11 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
         return true;
     }
     for (uint32_t k = 0U; k < 3U; ++k) {
+        size_t sz = strlen(CTRL_ACK_TOPICS[k]);
+        if ((0 == strncmp(subtopic, CTRL_ACK_TOPICS[k], sz)) && (0 == strcmp(subtopic + sz, "$"))) {
+            self->ctrl_ack_supported = true;  // the open metadata declares it
+            return false;  // forward the metadata
+        }
         if (0 == strcmp(subtopic, CTRL_ACK_TOPICS[k])) {
             struct jsdrv_union_s v = *value;
             if (0 == jsdrv_union_as_type(&v, JSDRV_UNION_U64)) {
@@ -1513,47 +1518,31 @@ static bool js320_handle_publish(struct jsdrvp_mb_drv_s * drv,
     return js320_cal_handle_publish(self->cal, subtopic, value);
 }
 
-static void js320_on_topic_meta(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
-                                const char * topic, const char * json_meta) {
-    struct js320_drv_s * self = (struct js320_drv_s *) drv;
-    (void) dev;
-    (void) json_meta;
-    for (uint32_t k = 0U; k < 3U; ++k) {
-        if (0 == strcmp(topic, CTRL_ACK_TOPICS[k])) {
-            self->ctrl_ack_supported = true;
-        }
-    }
-}
-
-// The 'h' replay finished, so the driver state is final.  Publish the
-// effective values, so the host reports every h/* topic after open in
-// both modes, including defaults it never set and the device's h/fs.
-// Publishing earlier would overwrite host values before the replay.
-static void js320_on_host_replayed(struct jsdrvp_mb_drv_s * drv,
-                                   struct jsdrvp_mb_dev_s * dev) {
-    struct js320_drv_s * self = (struct js320_drv_s *) drv;
-    jsdrvp_mb_dev_send_to_frontend(dev, "h/fs", &jsdrv_union_u32_r(self->fs));
-    jsdrvp_mb_dev_send_to_frontend(dev, "h/fp", &jsdrv_union_u32_r(self->publish_rate));
-    jsdrvp_mb_dev_send_to_frontend(dev, "h/i_scale", &jsdrv_union_f32_r((float) self->i_scale));
-    jsdrvp_mb_dev_send_to_frontend(dev, "h/v_scale", &jsdrv_union_f32_r((float) self->v_scale));
-    jsdrvp_mb_dev_open_complete(dev);
-}
-
 // Called after a deferred-open child instance sync completes.  After the
 // sensor 's' device instance, restore the host-side 'h' instance (h/fp,
 // h/fs, h/i_scale, h/v_scale) from the host cache so the driver's internal
 // state matches -- applied AFTER 's' so a host-cached h/fs wins over the
-// sensor sync's s/dwnN/N -- then complete the open in js320_on_host_replayed.
+// sensor sync's s/dwnN/N.  When the 'h' replay completes, the driver state
+// is final: publish the effective values, so the host reports every h/*
+// topic after open in both modes, including defaults it never set and the
+// device's h/fs, then complete the open.  Publishing before the replay
+// would overwrite host values.
 static void js320_on_instance_synced(struct jsdrvp_mb_drv_s * drv,
                                      struct jsdrvp_mb_dev_s * dev, char prefix) {
-    (void) drv;
-    if (prefix == 's') {
+    struct js320_drv_s * self = (struct js320_drv_s *) drv;
+    if (prefix == 'h') {
+        jsdrvp_mb_dev_send_to_frontend(dev, "h/fs", &jsdrv_union_u32_r(self->fs));
+        jsdrvp_mb_dev_send_to_frontend(dev, "h/fp", &jsdrv_union_u32_r(self->publish_rate));
+        jsdrvp_mb_dev_send_to_frontend(dev, "h/i_scale", &jsdrv_union_f32_r((float) self->i_scale));
+        jsdrvp_mb_dev_send_to_frontend(dev, "h/v_scale", &jsdrv_union_f32_r((float) self->v_scale));
+        jsdrvp_mb_dev_open_complete(dev);
+    } else if (prefix == 's') {
         // Restore the tracked s/dwnN registers (N + mode) from the host
         // cache, which the sensor sync just populated with the device's
         // current values.  Runs BEFORE the 'h' replay so a cached h/fs
         // is applied with the correct mode.
         jsdrvp_mb_dev_topic_replay(dev, "s/dwnN");
-        jsdrvp_mb_dev_host_replay(dev, 'h');  // completes the open
+        jsdrvp_mb_dev_host_replay(dev, 'h');  // then on_instance_synced('h')
     }
 }
 
@@ -1571,7 +1560,7 @@ static void js320_on_timeout(struct jsdrvp_mb_drv_s * drv,
         // caller's open timeout.
         JSDRV_LOGW("sensor ready timeout; completing open without sensor sync");
         self->waiting_for_sensor = false;
-        jsdrvp_mb_dev_host_replay(dev, 'h');  // completes the open
+        jsdrvp_mb_dev_host_replay(dev, 'h');  // then on_instance_synced('h')
     }
     js320_ack_timeout_check(&self->signal_ack, dev, "s/dwnN");
     js320_ack_timeout_check(&self->gpi_ack,    dev, "s/gpi/+/dwnN");
@@ -1629,8 +1618,6 @@ static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     self->drv.handle_app = js320_handle_app;
     self->drv.handle_cmd = js320_handle_cmd;
     self->drv.handle_publish = js320_handle_publish;
-    self->drv.on_host_replayed = js320_on_host_replayed;
-    self->drv.on_topic_meta = js320_on_topic_meta;
     self->drv.on_timeout = js320_on_timeout;
     self->drv.open_children = js320_open_children;
     self->drv.on_instance_synced = js320_on_instance_synced;

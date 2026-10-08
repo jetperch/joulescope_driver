@@ -114,6 +114,10 @@ struct jsdrvp_mb_drv_s {
      *
      * @param drv This driver instance.
      * @param dev The mb_device handle for calling service functions.
+     * During an open, also receives each topic's metadata as the topic
+     * with a "$" suffix (e.g., "s/i/!ack$") and a JSON value, so the
+     * driver can detect firmware features.
+     *
      * @param subtopic The device-relative topic (e.g., "c/jtag/!done").
      * @param value The published value.
      * @return true if consumed (will not be forwarded to frontend),
@@ -168,40 +172,15 @@ struct jsdrvp_mb_drv_s {
      *
      * @param drv This driver instance.
      * @param dev The mb_device handle.
+     * Also called with the host-side prefix (e.g. 'h') when a
+     * jsdrvp_mb_dev_host_replay() completes: handle_cmd has received
+     * every replayed value, so the driver state is final.
+     *
      * @param prefix The instance prefix char that just finished syncing.
      */
     void (*on_instance_synced)(struct jsdrvp_mb_drv_s * drv,
                                struct jsdrvp_mb_dev_s * dev,
                                char prefix);
-
-    /**
-     * @brief Called when a jsdrvp_mb_dev_host_replay() completes.
-     *
-     * handle_cmd has received every replayed value, so the driver state
-     * is final.  Lets the driver publish its effective host-side values,
-     * including defaults the host never set, then complete the open.
-     *
-     * @param drv This driver instance.
-     * @param dev The mb_device handle.
-     */
-    void (*on_host_replayed)(struct jsdrvp_mb_drv_s * drv,
-                             struct jsdrvp_mb_dev_s * dev);
-
-    /**
-     * @brief Called for each device topic's metadata during an open.
-     *
-     * Lets the driver detect firmware features from the topics that the
-     * device declares, before the open completes.
-     *
-     * @param drv This driver instance.
-     * @param dev The mb_device handle.
-     * @param topic The topic below the device prefix, such as "s/i/!ack".
-     * @param json_meta The JSON metadata string.
-     */
-    void (*on_topic_meta)(struct jsdrvp_mb_drv_s * drv,
-                          struct jsdrvp_mb_dev_s * dev,
-                          const char * topic,
-                          const char * json_meta);
 
     /**
      * @brief Called to destroy the upper driver instance.
@@ -384,7 +363,7 @@ void jsdrvp_mb_dev_open_complete(struct jsdrvp_mb_dev_s * dev);
  * as h/fp, h/fs, h/i_scale, h/v_scale that the driver owns in handle_cmd
  * rather than a device pubsub instance), to restore the driver's internal
  * state from the host cache on open.  When handle_cmd has received every
- * value, mb_device calls drv->on_host_replayed.
+ * value, mb_device calls drv->on_instance_synced with this prefix.
  *
  * @param dev The mb_device handle.
  * @param prefix The host-side instance prefix char (e.g. 'h').

@@ -598,7 +598,7 @@ void jsdrvp_mb_dev_host_replay(struct jsdrvp_mb_dev_s * dev, char prefix) {
     // handle_cmd, not a device pubsub instance -- so this restores the
     // driver's internal state from the host cache on open.  Safe for
     // host-side topics: they are applied by handle_cmd, not pushed to
-    // the device.  The subscribe completion calls drv->on_host_replayed.
+    // the device.  The subscribe completion calls drv->on_instance_synced.
     struct jsdrv_topic_s t;
     char p[2] = {prefix, '\0'};
     jsdrv_topic_set(&t, dev->ll.prefix);
@@ -847,29 +847,38 @@ static void meta_fetch_on_topic(void * user_data, const char * topic, const char
     } else {
         jsdrv_cstr_copy(resolved, topic, sizeof(resolved));
     }
-    // Publish as {device}/{resolved_topic}$ with JSON value
-    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(self->context);
-    struct jsdrv_topic_s t;
-    jsdrv_topic_set(&t, self->ll.prefix);
-    jsdrv_topic_append(&t, resolved);
-    size_t tlen = strlen(t.topic);
-    t.topic[tlen] = '$';
-    t.topic[tlen + 1] = '\0';
-    jsdrv_cstr_copy(m->topic, t.topic, sizeof(m->topic));
-    m->value.type = JSDRV_UNION_JSON;
-    m->value.size = (uint32_t)(strlen(json_meta) + 1);
-    m->value.flags = JSDRV_UNION_FLAG_RETAIN;
-    m->value.app = 0;
-    if (m->value.size <= sizeof(m->payload.bin)) {
-        m->value.value.str = m->payload.str;
-        memcpy(m->payload.str, json_meta, m->value.size);
-    } else {
-        char * ptr = jsdrv_alloc(m->value.size);
-        memcpy(ptr, json_meta, m->value.size);
-        m->value.value.str = ptr;
-        m->value.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
+    // Offer the metadata to the driver like any device publish, as
+    // {resolved_topic}$, so it can detect firmware features.
+    char meta_topic[sizeof(resolved) + 1];
+    jsdrv_cstr_join(meta_topic, resolved, "$", sizeof(meta_topic));
+    bool consumed = self->drv && self->drv->handle_publish
+            && self->drv->handle_publish(self->drv, self, meta_topic, &jsdrv_union_cjson_r(json_meta));
+
+    // Unless consumed, publish as {device}/{resolved_topic}$ with JSON value
+    if (!consumed) {
+        struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(self->context);
+        struct jsdrv_topic_s t;
+        jsdrv_topic_set(&t, self->ll.prefix);
+        jsdrv_topic_append(&t, resolved);
+        size_t tlen = strlen(t.topic);
+        t.topic[tlen] = '$';
+        t.topic[tlen + 1] = '\0';
+        jsdrv_cstr_copy(m->topic, t.topic, sizeof(m->topic));
+        m->value.type = JSDRV_UNION_JSON;
+        m->value.size = (uint32_t)(strlen(json_meta) + 1);
+        m->value.flags = JSDRV_UNION_FLAG_RETAIN;
+        m->value.app = 0;
+        if (m->value.size <= sizeof(m->payload.bin)) {
+            m->value.value.str = m->payload.str;
+            memcpy(m->payload.str, json_meta, m->value.size);
+        } else {
+            char * ptr = jsdrv_alloc(m->value.size);
+            memcpy(ptr, json_meta, m->value.size);
+            m->value.value.str = ptr;
+            m->value.flags |= JSDRV_UNION_FLAG_HEAP_MEMORY;
+        }
+        jsdrvp_backend_send(self->context, m);
     }
-    jsdrvp_backend_send(self->context, m);
 
     // DEFAULTS: record this topic's target value (metadata default) for
     // the SET_CMD push.  The resolved (instance-relative) topic matches
@@ -877,9 +886,6 @@ static void meta_fetch_on_topic(void * user_data, const char * topic, const char
     // override this default in place.
     if (0 == self->open_mode) {
         open_set_record(self, resolved, json_meta);
-    }
-    if (self->drv && self->drv->on_topic_meta) {
-        self->drv->on_topic_meta(self->drv, self, resolved, json_meta);
     }
 }
 
@@ -1730,9 +1736,10 @@ static bool handle_cmd(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         } else if (0 == strcmp(JSDRVP_MSG_SUBSCRIBE_DONE, msg->topic)) {
             if (d->host_replay_topic[0] && (msg->value.type == JSDRV_UNION_STR)
                     && (0 == strcmp(msg->value.value.str, d->host_replay_topic))) {
+                char prefix = d->host_replay_topic[strlen(d->host_replay_topic) - 1];
                 d->host_replay_topic[0] = 0;
-                if (d->drv && d->drv->on_host_replayed) {
-                    d->drv->on_host_replayed(d->drv, d);
+                if (d->drv && d->drv->on_instance_synced) {
+                    d->drv->on_instance_synced(d->drv, d, prefix);
                 }
             }
             // else a late gather completion: the gather already timed out

@@ -97,8 +97,8 @@ fuzz seed 2 now passes this point.
 **Finding 3: fixed (host).**  The JS320 driver publishes the effective
 `h/fs`, `h/fp`, `h/i_scale` and `h/v_scale` when the `h` replay
 completes.  `jsdrvp_mb_dev_host_replay()` now ends on the subscribe
-completion and calls the new `on_host_replayed` hook, which also
-completes the open.  Publishing earlier would overwrite host values
+completion and calls the existing `on_instance_synced` hook with `'h'`,
+which also completes the open.  Publishing earlier would overwrite host values
 before the replay, and an asynchronous replay applied the device's
 `s/dwnN/N` only after the publish.  The JS220 publishes `h/fs` and
 `h/fp` at connect.  Its `h/fs` default is 2 MHz while i, v and p cap at
@@ -127,8 +127,9 @@ before the replay, and an asynchronous replay applied the device's
    It arms the window on an enable that follows a known stop
    (`last_sent_ctrl` 0), and drops frames that end at or before the ack.
    Older firmware lacks these topics, so the host arms only when the
-   open metadata declared `s/{i,v,p}/!ack` (new `on_topic_meta` driver
-   hook from mb_device), or an ack arrived during the open.  Learning
+   open metadata declared `s/{i,v,p}/!ack` (mb_device now passes each
+   metadata entry to `handle_publish` as `{topic}$`), or an ack arrived
+   during the open.  Learning
    from the first ack alone was too late: a start, stop and restart
    within 1 ms of an open arrived before any ack.  Otherwise the host
    behaves as before, with no wait and no timeout.  Lost acks time out
