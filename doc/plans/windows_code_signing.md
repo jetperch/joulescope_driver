@@ -16,7 +16,7 @@
 -->
 # Windows code signing
 
-**Status**: in progress (stages 1-2 done; stage 3 next)
+**Status**: in progress (stages 1-2 done; 3-4 written)
 **Created**: 2026-10-08
 
 ## Context
@@ -69,9 +69,10 @@ Unsigned Windows outputs of `.github/workflows/packaging.yml`:
    artifacts and the `jci-*` bench tools are uploaded.  Add the
    `AZURE_*` secrets to this repo (or the organization).  Verify that
    `Get-AuthenticodeSignature` shows Valid for a `main` build.
-3. **Python wheels.**  Sign `binding*.pyd` before the wheel is packed:
-   a cibuildwheel `CIBW_REPAIR_WHEEL_COMMAND_WINDOWS` that unpacks the
-   wheel, signs, and repacks (`wheel pack` regenerates `RECORD`).
+3. **Python wheels.**  After cibuildwheel, unpack each Windows wheel,
+   sign `wheel_unpack/**/*.pyd` with the shared action, and repack
+   (`wheel pack` regenerates `RECORD`).  This keeps the signing in the
+   action, rather than in a cibuildwheel repair command.
    Verify the installed `.pyd` signature and an import on a machine with
    Smart App Control enforcing.
 4. **pyjoulescope_ui** uses the action instead of `azure_sign()`.
@@ -95,3 +96,11 @@ turned back on without a reset.
   certificate (GlobalSign) with a DigiCert timestamp.  The CI bench
   suite passed on all four stations.  Smart App Control is off on the
   benches, so this does not yet show acceptance with it enforcing.
+* `windows_sign` 1.1.0 (`v1` moved): recursive `<dir>/**/<name>`
+  patterns, self-tested on both Windows runners.
+* Stage 3 written: the `build_python_wheels` steps above.  A local
+  unpack and repack of a Linux wheel kept its name and still imports.
+* Stage 4 written: pyjoulescope_ui e2ab059 removes `azure_sign()` and
+  signs with the action before (bundled `.exe`, `.dll`, `.pyd`) and after
+  (installer) Inno Setup, on main and `v*` tags only.  It used to sign
+  every push.
