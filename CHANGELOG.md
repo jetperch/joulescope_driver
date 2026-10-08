@@ -197,6 +197,13 @@ settings.  See
   finalize command, so the 10 s join timed out and freed the device under
   the running thread.  Device threads now check for commands every 64
   stream messages, and a join timeout leaks the device instead.
+* Fixed an access violation on Windows when a device closes while a USB
+  control transfer is in flight, such as a JS110 status poll.  Freeing
+  the WinUSB handle aborted the transfer, and the device thread then
+  completed it with the freed handle.  Close now cancels and waits for
+  the transfer in flight, and answers each queued control transfer with
+  JSDRV_ERROR_CLOSED.  This was the remaining cause of intermittent
+  crashes when a program stopped a JS110 with Ctrl-C.
 * Fixed a JS110 open reporting h/fs as 2 MHz after the application set
   another rate.
 * Fixed a libusb backend log message that could crash at INFO level.

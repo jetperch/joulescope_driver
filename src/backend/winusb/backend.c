@@ -592,8 +592,32 @@ static void ep_finalize_by_id(struct dev_s * d, uint8_t ep_id) {
     }
 }
 
+static void ctrl_send_done(struct dev_s * d, int32_t ec);
+
+// Complete every queued control transfer before device_close frees the
+// WinUSB handle.  Freeing the handle aborts the transfer in flight and
+// signals ctrl_event, so ctrl_complete would otherwise call
+// WinUsb_GetOverlappedResult with the freed handle and crash.
+static void ctrl_abort(struct dev_s * d) {
+    if (jsdrv_list_is_empty(&d->ctrl_list)) {
+        return;
+    }
+    if (INVALID_HANDLE_VALUE != d->winusb) {
+        // Only the head is in flight.  Wait so that WinUSB no longer
+        // writes into its buffer.
+        ULONG sz = 0;
+        CancelIoEx(d->file, &d->ctrl_overlapped);
+        WinUsb_GetOverlappedResult(d->winusb, &d->ctrl_overlapped, &sz, TRUE);
+    }
+    while (!jsdrv_list_is_empty(&d->ctrl_list)) {
+        ctrl_send_done(d, JSDRV_ERROR_CLOSED);
+    }
+    ResetEvent(d->ctrl_event);
+}
+
 static void device_close(struct dev_s * d) {
     JSDRV_LOGI("device_close(%s)", d->device.prefix);
+    ctrl_abort(d);
 
     for (uint32_t idx = 1; idx < JSDRV_ARRAY_SIZE(d->endpoints); ++idx) {
         ep_finalize_by_id(d, idx);
