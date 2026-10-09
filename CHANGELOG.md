@@ -23,7 +23,26 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.0
 
-2026 Oct 8
+2026 Oct 9
+
+**Upgrade notes.**  Most applications need no changes.  Check these:
+
+* **JS220 `defaults` open now resets settings.**  Set what you need after
+  open, or open with `mode='restore'`.
+* **Command-line tools select devices with `--device`.**  set and
+  statistics drop their positional device, threads `-d` now means
+  `--device`, and info no longer shows values: use the new `values`.
+* **Statistics `charge_i128` / `energy_i128` (`int_value`) now use a
+  2\*\*-52 scale on every model.**  The f64 fields are unchanged.
+* **`device_filter` API replaced** (2.4.3 is yanked), and
+  `Driver.device_paths()` takes specs first: pass timeout by keyword.
+* **Errors are louder.**  Unreceived publish errors now log at ERROR,
+  and the host no longer retains values that the device rejected.
+* **`Driver.finalize` closes the devices it opened**, and later calls
+  raise RuntimeError.
+
+This release also fixes intermittent JS110 crashes on Windows and several
+JS320 streaming gaps.  Details follow.
 
 **JS220 behavior change: a `defaults` open now restores the default
 settings.**  Previously, opening a JS220 in `defaults` mode (the default
