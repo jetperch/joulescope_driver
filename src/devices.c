@@ -19,6 +19,11 @@
 #include "jsdrv_prv/frontend.h"
 #include <string.h>
 
+#if defined(UNITTEST) && UNITTEST
+// Provided by the frontend unit test.
+int32_t jsdrvp_ul_unittest_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context,
+                                   struct jsdrvp_ll_device_s * ll);
+#endif
 
 // Use python to generate UUIDs
 //     import uuid
@@ -43,6 +48,11 @@ const struct device_type_s device_types[] = {
     // JS320 '{0d2d4fac-cf4a-49b2-b961-681a96411685}',
     // bytes: {0x0d, 0x2d, 0x4f, 0xac, 0xcf, 0x4a, 0x49, 0xb2, 0xb9, 0x61, 0x68, 0x1a, 0x96, 0x41, 0x16, 0x85}
     {"js320", {0x0d2d4fac, 0xcf4a, 0x49b2, {0xb9, 0x61, 0x68, 0x1a, 0x96, 0x41, 0x16, 0x85}}, 0x16D0U, 0x135AU, jsdrvp_js320_device_factory},
+
+#if defined(UNITTEST) && UNITTEST
+    // A fake device for the frontend unit test.
+    {"tst", {0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, 0, 0, jsdrvp_ul_unittest_factory},
+#endif
 
     {NULL, {0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0}}, 0, 0, NULL}
 };

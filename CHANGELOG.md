@@ -204,6 +204,18 @@ settings.  See
   the transfer in flight, and answers each queued control transfer with
   JSDRV_ERROR_CLOSED.  This was the remaining cause of intermittent
   crashes when a program stopped a JS110 with Ctrl-C.
+* An open now completes when the device drops off the bus during the
+  open and enumerates again.  The frontend retries the open on the
+  re-added device and extends the open timeout to at least 3 s after the
+  removal.  Previously, the open timed out.  On Windows, a JS320 does this
+  when an open resumes its port within about 0.5 ms of USB selective
+  suspend starting, such as a reopen 2 s after a close: the USB core then
+  falls back to full speed, and Windows enumerates it again.
+  Applications that watch device additions and removals still see the
+  removal and addition.
+* The Windows backend now retries WinUsb_Initialize for up to about
+  200 ms when it fails with ERROR_BUSY, which Windows can return while it
+  resumes a selectively suspended device.  Previously, the open failed.
 * Fixed a JS110 open reporting h/fs as 2 MHz after the application set
   another rate.
 * Fixed a libusb backend log message that could crash at INFO level.

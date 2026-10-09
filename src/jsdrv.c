@@ -58,6 +58,18 @@
 #define UNITTEST 0
 #endif
 
+/**
+ * @brief The time to wait for a device that disappears during open.
+ *
+ * A device can drop off the bus during open and enumerate again shortly
+ * after, such as a JS320 whose USB resume races Windows selective
+ * suspend.  The frontend then retries the open on the re-added device,
+ * and extends the open timeout to at least this duration after the
+ * removal.
+ */
+#define OPEN_REENUMERATE_TIMEOUT_MS  (3000)
+#define OPEN_REENUMERATE_RETRY_MAX   (2)
+
 
 JSDRV_STATIC_ASSERT(DEVICE_LOOKUP_MAX < UINT16_MAX, too_many_devices);
 JSDRV_STATIC_ASSERT(JSDRV_STREAM_HEADER_SIZE == offsetof(struct jsdrv_stream_signal_s, data), jsdrv_stream_signal_s_header_size);
@@ -69,6 +81,16 @@ struct frontend_dev_s {
     struct jsdrv_context_s * context;
     struct jsdrvp_ul_device_s * device;
     struct jsdrv_list_s item;
+};
+
+/// An API open that waits for its return code, retried if the device re-enumerates.
+struct open_pending_s {
+    struct jsdrv_list_s item;
+    char prefix[JSDRV_TOPIC_LENGTH_MAX];
+    struct jsdrvp_msg_s * msg;               // copy of the open request
+    struct jsdrvp_api_timeout_s * timeout;   // owned by the waiting API caller
+    bool removed;                            // device removed, awaiting re-add
+    uint8_t retries;
 };
 
 
@@ -92,6 +114,7 @@ struct jsdrv_context_s {
     struct jsdrv_pubsub_s * pubsub;
     struct jsdrv_list_s devices;          // frontend_dev_s
     struct jsdrv_list_s cmd_timeouts;
+    struct jsdrv_list_s open_pending;     // open_pending_s
     jsdrv_thread_t thread;
 
     volatile bool do_exit;
@@ -267,6 +290,83 @@ static void timeout_add(struct jsdrv_context_s * c, struct jsdrvp_api_timeout_s 
     }
 }
 
+static void open_pending_free(struct jsdrv_context_s * c, struct open_pending_s * p) {
+    jsdrv_list_remove(&p->item);
+    jsdrvp_msg_free(c, p->msg);
+    jsdrv_free(p);
+}
+
+static void open_pending_add(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg) {
+    size_t sz = strlen(msg->topic);
+    size_t suffix_sz = strlen("/" JSDRV_MSG_OPEN);
+    if ((NULL == msg->timeout) || (sz <= suffix_sz) || !jsdrv_cstr_ends_with(msg->topic, "/" JSDRV_MSG_OPEN)) {
+        return;
+    }
+    struct open_pending_s * p = jsdrv_alloc_clr(sizeof(struct open_pending_s));
+    jsdrv_list_initialize(&p->item);
+    jsdrv_cstr_copy(p->prefix, msg->topic, sizeof(p->prefix));
+    p->prefix[sz - suffix_sz] = 0;
+    p->msg = jsdrvp_msg_clone(c, msg);
+    p->msg->timeout = NULL;
+    p->timeout = msg->timeout;
+    jsdrv_list_add_tail(&c->open_pending, &p->item);
+}
+
+// Call before signaling the timeout, which the API caller then frees.
+static void open_pending_forget(struct jsdrv_context_s * c, struct jsdrvp_api_timeout_s * timeout) {
+    struct jsdrv_list_s * item;
+    jsdrv_list_foreach(&c->open_pending, item) {
+        struct open_pending_s * p = JSDRV_CONTAINER_OF(item, struct open_pending_s, item);
+        if (p->timeout == timeout) {
+            open_pending_free(c, p);
+            return;
+        }
+    }
+}
+
+static struct open_pending_s * open_pending_find_rc(struct jsdrv_context_s * c, const char * rc_topic) {
+    struct jsdrv_list_s * item;
+    jsdrv_list_foreach(&c->open_pending, item) {
+        struct open_pending_s * p = JSDRV_CONTAINER_OF(item, struct open_pending_s, item);
+        if (0 == strcmp(p->timeout->topic, rc_topic)) {
+            return p;
+        }
+    }
+    return NULL;
+}
+
+static void open_pending_on_device_remove(struct jsdrv_context_s * c, const char * prefix) {
+    struct jsdrv_list_s * item;
+    int64_t t_min = jsdrv_time_utc() + JSDRV_TIME_MILLISECOND * OPEN_REENUMERATE_TIMEOUT_MS;
+    jsdrv_list_foreach(&c->open_pending, item) {
+        struct open_pending_s * p = JSDRV_CONTAINER_OF(item, struct open_pending_s, item);
+        if (p->removed || strcmp(p->prefix, prefix) || (p->retries >= OPEN_REENUMERATE_RETRY_MAX)) {
+            continue;
+        }
+        JSDRV_LOGI("open %s: device removed, wait for re-enumeration", prefix);
+        p->removed = true;
+        if (p->timeout->timeout < t_min) {
+            p->timeout->timeout = t_min;
+            jsdrv_list_remove(&p->timeout->item);
+            timeout_add(c, p->timeout);
+        }
+    }
+}
+
+static void open_pending_on_device_add(struct jsdrv_context_s * c, const char * prefix) {
+    struct jsdrv_list_s * item;
+    jsdrv_list_foreach(&c->open_pending, item) {
+        struct open_pending_s * p = JSDRV_CONTAINER_OF(item, struct open_pending_s, item);
+        if (!p->removed || strcmp(p->prefix, prefix)) {
+            continue;
+        }
+        JSDRV_LOGI("open %s: device added, retry open", prefix);
+        p->removed = false;
+        ++p->retries;
+        jsdrv_pubsub_publish(c->pubsub, jsdrvp_msg_clone(c, p->msg));  // transfers ownership
+    }
+}
+
 static void timeout_process(struct jsdrv_context_s * c) {
     struct jsdrv_list_s * item;
     struct jsdrvp_api_timeout_s * t;
@@ -275,6 +375,7 @@ static void timeout_process(struct jsdrv_context_s * c) {
         t = JSDRV_CONTAINER_OF(item, struct jsdrvp_api_timeout_s, item);
         if (t->timeout <= t_now) {
             jsdrv_list_remove(item);
+            open_pending_forget(c, t);
             t->return_code = JSDRV_ERROR_TIMED_OUT;
             jsdrv_os_event_signal(t->ev);
         } else {
@@ -292,6 +393,7 @@ static int32_t timeout_complete(struct jsdrv_context_s * c, const char * topic, 
         t = JSDRV_CONTAINER_OF(item, struct jsdrvp_api_timeout_s, item);
         if (0 == strcmp(t->topic, topic)) {
             jsdrv_list_remove(item);
+            open_pending_forget(c, t);
             t->return_code = rc;
             jsdrv_os_event_signal(t->ev);
             return 0;
@@ -319,6 +421,15 @@ static uint8_t on_return_code(void * user_data, struct jsdrvp_msg_s * msg) {
         memcpy(&rc, msg->value.value.bin, sizeof(rc));
     } else {
         JSDRV_LOGW("on_return_code %s unsupported type %d", msg->topic, msg->value.type);
+        return 0;
+    }
+
+    struct open_pending_s * open_pending = open_pending_find_rc(c, msg->topic);
+    if (open_pending && open_pending->removed) {
+        // The removed device instance answered.  Wait for the open on
+        // the re-added device instead.
+        JSDRV_LOGI("open %s: ignore return code %d from the removed device",
+                   open_pending->prefix, (int) rc);
         return 0;
     }
 
@@ -375,6 +486,7 @@ static bool handle_cmd_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
     }
     JSDRV_LOGD1("handle_cmd_msg %s", msg->topic);
     if (msg->timeout) {
+        open_pending_add(c, msg);
         timeout_add(c, msg->timeout);
         msg->timeout = NULL;
     }
@@ -581,6 +693,7 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
     jsdrv_pubsub_publish(c->pubsub, msg);  // transfers msg ownership
     device_removed_responder(c, d->prefix, JSDRV_PUBSUB_UNSUBSCRIBE);
     device_sub(d, JSDRV_PUBSUB_SUBSCRIBE);
+    open_pending_on_device_add(c, d->prefix);
 }
 
 static void device_remove(struct jsdrv_context_s * c, struct frontend_dev_s * d) {
@@ -635,6 +748,7 @@ static void device_remove_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * 
         return;
     }
     device_remove(c, d);
+    open_pending_on_device_remove(c, msg->value.value.str);
     jsdrv_pubsub_publish(c->pubsub, msg);  // transfers msg ownership
 }
 
@@ -751,8 +865,13 @@ static void timeouts_finalize(struct jsdrv_context_s * c) {
             break;
         }
         timeout = JSDRV_CONTAINER_OF(item, struct jsdrvp_api_timeout_s, item);
+        open_pending_forget(c, timeout);
         timeout->return_code = JSDRV_ERROR_ABORTED;
         jsdrv_os_event_signal(timeout->ev);
+    }
+    while (!jsdrv_list_is_empty(&c->open_pending)) {
+        struct jsdrv_list_s * p = jsdrv_list_peek_head(&c->open_pending);
+        open_pending_free(c, JSDRV_CONTAINER_OF(p, struct open_pending_s, item));
     }
 }
 
@@ -1020,6 +1139,7 @@ int32_t jsdrv_initialize(struct jsdrv_context_s ** context, const struct jsdrv_a
     c->init_status = 0;
     jsdrv_list_initialize(&c->devices);
     jsdrv_list_initialize(&c->cmd_timeouts);
+    jsdrv_list_initialize(&c->open_pending);
 
     MSG_QUEUE_ALLOC(c, c->msg_free);
     MSG_QUEUE_ALLOC(c, c->msg_free_data);

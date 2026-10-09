@@ -32,7 +32,9 @@
 #include "jsdrv_prv/thread.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv/error_code.h"
+#include "jsdrv/time.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 #define DEVICE_PREFIX "t/js220/123456"
 #define SUB_TIMEOUT_MS   (2000)
@@ -553,6 +555,222 @@ static void test_timeout(void ** state) {
 }
 #endif
 
+// A fake device for testing open across device re-enumeration.  The
+// frontend creates it for the "tst" model through device_types[].
+#define FAKE_PREFIX "t/tst/0001"
+#define FAKE_OPEN_TOPIC FAKE_PREFIX "/" JSDRV_MSG_OPEN
+
+struct fake_dev_s {
+    struct jsdrvp_ul_device_s ul;
+    struct jsdrv_context_s * context;
+    jsdrv_thread_t thread;
+    volatile int quit;
+    int32_t open_rc;   // < 0: ignore open requests, like a device that disappears
+};
+
+static volatile int32_t fake_open_rc_ = 0;      // open_rc for the next fake device
+static volatile uint32_t fake_open_count_ = 0;  // open requests received by all fake devices
+
+static void fake_send_rc(struct fake_dev_s * d, const char * topic, int32_t rc) {
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, "", &jsdrv_union_i32(rc));
+    jsdrv_cstr_join(m->topic, topic, "#", sizeof(m->topic));
+    jsdrvp_backend_send(d->context, m);
+}
+
+static JSDRV_THREAD_RETURN_TYPE fake_dev_thread(JSDRV_THREAD_ARG_TYPE lpParam) {
+    struct fake_dev_s * d = (struct fake_dev_s *) lpParam;
+    struct jsdrvp_msg_s * msg;
+    while (!d->quit) {
+        if (msg_queue_pop(d->ul.cmd_q, &msg, 1)) {
+            continue;
+        }
+        if (jsdrv_cstr_ends_with(msg->topic, "/" JSDRV_MSG_OPEN)) {
+            ++fake_open_count_;
+            if (d->open_rc >= 0) {
+                fake_send_rc(d, msg->topic, d->open_rc);
+            } else if (d->open_rc != -1) {
+                fake_send_rc(d, msg->topic, -d->open_rc);
+            }
+        } else if (jsdrv_cstr_ends_with(msg->topic, "/" JSDRV_MSG_CLOSE)) {
+            fake_send_rc(d, msg->topic, 0);
+        }
+        jsdrvp_msg_free(d->context, msg);
+    }
+    JSDRV_THREAD_RETURN();
+}
+
+static void fake_dev_join(struct jsdrvp_ul_device_s * device) {
+    struct fake_dev_s * d = (struct fake_dev_s *) device;
+    d->quit = 1;
+    jsdrv_thread_join(&d->thread, 1000);
+    msg_queue_finalize(d->ul.cmd_q, NULL);
+    free(d);
+}
+
+int32_t jsdrvp_ul_unittest_factory(struct jsdrvp_ul_device_s ** device, struct jsdrv_context_s * context,
+                                   struct jsdrvp_ll_device_s * ll) {
+    (void) ll;
+    struct fake_dev_s * d = calloc(1, sizeof(struct fake_dev_s));
+    d->context = context;
+    d->open_rc = fake_open_rc_;
+    d->ul.cmd_q = msg_queue_init();
+    d->ul.join = fake_dev_join;
+    assert_int_equal(0, jsdrv_thread_create(&d->thread, fake_dev_thread, d, 0));
+    *device = &d->ul;
+    return 0;
+}
+
+static void fake_add(struct test_s * self) {
+    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(self->context);
+    jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_ADD, sizeof(msg->topic));
+    msg->value = jsdrv_union_bin((const uint8_t *) &msg->payload.device, sizeof(msg->payload.device));
+    msg->value.app = JSDRV_PAYLOAD_TYPE_DEVICE;
+    memset(&msg->payload.device, 0, sizeof(msg->payload.device));
+    jsdrv_cstr_copy(msg->payload.device.prefix, FAKE_PREFIX, sizeof(msg->payload.device.prefix));
+    jsdrvp_backend_send(self->context, msg);
+    expect_subscribe_cmd_str(self, JSDRV_MSG_DEVICE_ADD, FAKE_PREFIX);
+    expect_subscribe_cmd_str(self, JSDRV_MSG_DEVICE_LIST, FAKE_PREFIX);
+}
+
+static void fake_remove(struct test_s * self) {
+    struct jsdrvp_msg_s * msg = jsdrvp_msg_alloc(self->context);
+    jsdrv_cstr_copy(msg->topic, JSDRV_MSG_DEVICE_REMOVE, sizeof(msg->topic));
+    msg->value = jsdrv_union_str(FAKE_PREFIX);
+    jsdrvp_backend_send(self->context, msg);
+    expect_subscribe_cmd_str(self, JSDRV_MSG_DEVICE_REMOVE, FAKE_PREFIX);
+    expect_subscribe_cmd_str(self, JSDRV_MSG_DEVICE_LIST, "");
+}
+
+struct open_thread_s {
+    struct jsdrv_context_s * context;
+    jsdrv_thread_t thread;
+    uint32_t timeout_ms;
+    volatile int32_t rc;
+    volatile int done;
+    int64_t duration;  // time64
+};
+
+static JSDRV_THREAD_RETURN_TYPE open_thread_fn(JSDRV_THREAD_ARG_TYPE lpParam) {
+    struct open_thread_s * o = (struct open_thread_s *) lpParam;
+    int64_t t_start = jsdrv_time_utc();
+    o->rc = jsdrv_publish(o->context, FAKE_OPEN_TOPIC, &jsdrv_union_i32(0), o->timeout_ms);
+    o->duration = jsdrv_time_utc() - t_start;
+    o->done = 1;
+    JSDRV_THREAD_RETURN();
+}
+
+static void open_start(struct test_s * self, struct open_thread_s * o, uint32_t timeout_ms) {
+    memset(o, 0, sizeof(*o));
+    o->context = self->context;
+    o->timeout_ms = timeout_ms;
+    assert_int_equal(0, jsdrv_thread_create(&o->thread, open_thread_fn, o, 0));
+}
+
+static int32_t open_wait(struct open_thread_s * o) {
+    assert_int_equal(0, jsdrv_thread_join(&o->thread, 10000));
+    assert_true(o->done);
+    return o->rc;
+}
+
+static void wait_for_open_count(uint32_t count) {
+    for (int i = 0; (i < 2000) && (fake_open_count_ < count); ++i) {
+        jsdrv_thread_sleep_ms(1);
+    }
+    assert_int_equal(count, fake_open_count_);
+}
+
+static void test_open(void ** state) {
+    SETUP();
+    fake_open_count_ = 0;
+    fake_open_rc_ = 0;
+    fake_add(self);
+    assert_int_equal(0, jsdrv_publish(self->context, FAKE_OPEN_TOPIC, &jsdrv_union_i32(0), 1000));
+    assert_int_equal(1, fake_open_count_);
+    fake_remove(self);
+    ASSERT_QUEUES_EMPTY(self);
+    TEARDOWN();
+}
+
+static void test_open_retry_after_reenumeration(void ** state) {
+    // A device can drop off the bus during open and enumerate again, such
+    // as a JS320 whose USB resume races Windows selective suspend.  The
+    // open must complete on the re-added device, even after the original
+    // timeout, rather than time out.
+    struct open_thread_s o;
+    SETUP();
+    fake_open_count_ = 0;
+    fake_open_rc_ = -1;  // the first device never answers the open
+    fake_add(self);
+    open_start(self, &o, 1000);
+    wait_for_open_count(1);
+    fake_remove(self);
+    jsdrv_thread_sleep_ms(1300);  // past the 1000 ms open timeout
+    assert_false(o.done);
+    fake_open_rc_ = 0;
+    fake_add(self);
+    assert_int_equal(0, open_wait(&o));
+    assert_int_equal(2, fake_open_count_);
+    fake_remove(self);
+    ASSERT_QUEUES_EMPTY(self);
+    TEARDOWN();
+}
+
+static void test_open_removed_not_readded(void ** state) {
+    struct open_thread_s o;
+    SETUP();
+    fake_open_count_ = 0;
+    fake_open_rc_ = -1;
+    fake_add(self);
+    open_start(self, &o, 500);
+    wait_for_open_count(1);
+    fake_remove(self);
+    assert_int_equal(JSDRV_ERROR_TIMED_OUT, open_wait(&o));
+    assert_int_equal(1, fake_open_count_);
+    ASSERT_QUEUES_EMPTY(self);
+    TEARDOWN();
+}
+
+static void test_open_readded_open_fails(void ** state) {
+    struct open_thread_s o;
+    SETUP();
+    fake_open_count_ = 0;
+    fake_open_rc_ = -1;
+    fake_add(self);
+    open_start(self, &o, 1000);
+    wait_for_open_count(1);
+    fake_remove(self);
+    fake_open_rc_ = -JSDRV_ERROR_IO;  // the re-added device rejects the open
+    fake_add(self);
+    assert_int_equal(JSDRV_ERROR_IO, open_wait(&o));
+    assert_int_equal(2, fake_open_count_);
+    fake_remove(self);
+    ASSERT_QUEUES_EMPTY(self);
+    TEARDOWN();
+}
+
+static void test_open_ignores_rc_from_removed_device(void ** state) {
+    struct open_thread_s o;
+    SETUP();
+    fake_open_count_ = 0;
+    fake_open_rc_ = -1;
+    fake_add(self);
+    open_start(self, &o, 1000);
+    wait_for_open_count(1);
+    fake_remove(self);
+    // A late error return code from the removed device instance.
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(self->context, FAKE_OPEN_TOPIC "#",
+                                                     &jsdrv_union_i32(JSDRV_ERROR_IO));
+    jsdrvp_backend_send(self->context, m);
+    jsdrv_thread_sleep_ms(50);
+    assert_false(o.done);
+    fake_open_rc_ = 0;
+    fake_add(self);
+    assert_int_equal(0, open_wait(&o));
+    fake_remove(self);
+    ASSERT_QUEUES_EMPTY(self);
+    TEARDOWN();
+}
+
 static volatile uint32_t log_warn_count_ = 0;
 static volatile uint32_t log_marker_count_ = 0;
 #define LOG_MARKER "frontend_test log marker"
@@ -633,6 +851,11 @@ int main(void) {
             cmocka_unit_test(test_discovery),
             cmocka_unit_test(test_backend_fwup_topic),
             cmocka_unit_test(test_publish_scalar_ignores_app),
+            cmocka_unit_test(test_open),
+            cmocka_unit_test(test_open_retry_after_reenumeration),
+            cmocka_unit_test(test_open_removed_not_readded),
+            cmocka_unit_test(test_open_readded_open_fails),
+            cmocka_unit_test(test_open_ignores_rc_from_removed_device),
             //cmocka_unit_test(test_device_open),
             //cmocka_unit_test(test_stream_raw_0),
             //cmocka_unit_test(test_timeout),
