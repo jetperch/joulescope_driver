@@ -775,6 +775,7 @@ cdef int32_t _driver_count = 0
 cdef bint _log_level_defaulted = False
 _TIMEOUT_MS_DEFAULT = 1000
 _TIMEOUT_MS_INIT = 5000
+_TIMEOUT_MS_OPEN = 3000  # JSDRV_TIMEOUT_MS_OPEN
 
 
 cdef int32_t _timeout_validate(value, default=None):
@@ -1376,7 +1377,9 @@ cdef class Driver:
             * 'raw': Open the device in raw mode for development or firmware update.
             * None: equivalent to 'defaults'.
 
-        :param timeout: The timeout in seconds.  None uses the default timeout.
+        :param timeout: The timeout in seconds.  None uses the default open
+            timeout, 3 seconds, which allows a device time to recover from
+            a host that exited without closing it.
         :return: The :class:`DeviceContext` for the open device, which
             closes the device on close() or when used as a context manager::
 
@@ -1387,7 +1390,7 @@ cdef class Driver:
         """
 
         cdef const uint8_t[:] topic_str
-        cdef int32_t timeout_ms = _timeout_validate(timeout)
+        cdef int32_t timeout_ms = _timeout_validate(timeout, _TIMEOUT_MS_OPEN)
         cdef c_jsdrv.jsdrv_union_s v
         cdef c_jsdrv.jsdrv_context_s * context = self._context_get()
         memset(&v, 0, sizeof(v))

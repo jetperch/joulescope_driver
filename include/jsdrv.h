@@ -209,6 +209,7 @@
 #define JSDRV_TIMEOUT_MS_ASYNC         0
 #define JSDRV_TIMEOUT_MS_DEFAULT       1000             ///< The recommended default timeout
 #define JSDRV_TIMEOUT_MS_INIT          5000             ///< The recommended default jsdrv_initialize() timeout.
+#define JSDRV_TIMEOUT_MS_OPEN          3000             ///< The recommended device open timeout, which allows recovery from a host that exited without closing.
 
 
 JSDRV_CPP_GUARD_START

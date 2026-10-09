@@ -216,6 +216,12 @@ settings.  See
 * The Windows backend now retries WinUsb_Initialize for up to about
   200 ms when it fails with ERROR_BUSY, which Windows can return while it
   resumes a selectively suspended device.  Previously, the open failed.
+* Increased the Python Driver.open default timeout from 1 s to 3 s, and
+  added JSDRV_TIMEOUT_MS_OPEN for C callers.  After a program exits
+  without closing a JS320, the next open can take more than 1 s while
+  the instrument recovers.  An open that timed out then exited during the
+  state read, which left a JS320 with older firmware refusing state
+  reads until reset.
 * Fixed a JS110 open reporting h/fs as 2 MHz after the application set
   another rate.
 * Fixed a libusb backend log message that could crash at INFO level.
