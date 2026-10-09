@@ -21,6 +21,17 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.1
+
+unreleased
+
+* Fixed opening a device that another process holds.  On Linux and macOS,
+  the open now fails at once with `IN_USE`, instead of an unnamed libusb
+  error code, such as `-6 UNKNOWN`, on the JS110 and JS220, and a timeout
+  on the JS320.  Each failed open also leaked a USB file descriptor until
+  the process exited.
+
+
 ## 2.5.0
 
 2026 Oct 9

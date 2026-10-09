@@ -284,7 +284,33 @@ static void device_close(struct dev_s * d) {
     }
 }
 
+static int32_t libusb_error_to_jsdrv(int rc) {
+    switch (rc) {
+        case LIBUSB_SUCCESS: return 0;
+        case LIBUSB_ERROR_ACCESS: return JSDRV_ERROR_PERMISSIONS;
+        case LIBUSB_ERROR_NO_DEVICE: return JSDRV_ERROR_NOT_FOUND;
+        case LIBUSB_ERROR_BUSY: return JSDRV_ERROR_IN_USE;  // claimed by another process
+        case LIBUSB_ERROR_TIMEOUT: return JSDRV_ERROR_TIMED_OUT;
+        case LIBUSB_ERROR_NO_MEM: return JSDRV_ERROR_NOT_ENOUGH_MEMORY;
+        case LIBUSB_ERROR_NOT_SUPPORTED: return JSDRV_ERROR_NOT_SUPPORTED;
+        default: return JSDRV_ERROR_IO;
+    }
+}
+
+static int32_t device_open_inner(struct dev_s * d);
+
 static int32_t device_open(struct dev_s * d) {
+    int32_t rc = device_open_inner(d);
+    if (rc && d->handle && (d->mode != DEVICE_MODE_OPEN)) {
+        // Opened, but could not configure or claim, such as when another
+        // process holds the device.  Close, or the next open leaks it.
+        libusb_close(d->handle);
+        d->handle = NULL;
+    }
+    return libusb_error_to_jsdrv(rc);
+}
+
+static int32_t device_open_inner(struct dev_s * d) {
     int rc;
     device_close(d);
 

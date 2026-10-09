@@ -261,6 +261,7 @@ struct jsdrvp_mb_dev_s {
     uint16_t tracking_id_next;  // for confirmed delivery, wraps but skips 0
     uint64_t in_frame_count;
     int32_t open_mode;          // jsdrv_device_open_mode_e
+    int32_t ll_open_rc;         // backend open error, reported when ST_CLOSED is reached
     int64_t timeout_utc;      // <= 0 to disable timeout
     int64_t drv_timeout_utc;  // upper driver timeout, <= 0 to disable
 
@@ -361,6 +362,7 @@ static void send_frame_ctrl_to_device(struct jsdrvp_mb_dev_s * d, uint8_t ctrl) 
 
 static bool on_ll_open(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
+    self->ll_open_rc = 0;
     self->out_frame_id = 0;
     self->in_frame_id = 0;
     // Drop any stale timesync maps from a previous open so accessors
@@ -1351,9 +1353,17 @@ static bool on_ll_close_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
 
 static bool on_ll_close_exit(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
-    if (!self->finalize_pending) {
+    if (self->finalize_pending) {
+        // no response
+    } else if (self->ll_open_rc) {
+        // The backend open failed, so answer the waiting API open now,
+        // in ST_CLOSED where a retry is accepted, rather than letting
+        // it time out.
+        send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(self->ll_open_rc));
+    } else {
         send_to_frontend(self, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(0));
     }
+    self->ll_open_rc = 0;
     return true;
 }
 
@@ -2278,11 +2288,17 @@ static bool handle_rsp(struct jsdrvp_mb_dev_s * d, struct jsdrvp_msg_s * msg) {
         // no action necessary
     } else if (0 == strcmp(JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN, msg->topic)) {
         event = (0 == msg->value.value.u32) ? EV_BACKEND_OPEN_BULK_ACK : EV_BACKEND_OPEN_BULK_NACK;
+        if (msg->value.value.i32) {
+            d->ll_open_rc = msg->value.value.i32;
+        }
     } else if (0 == strcmp(JSDRV_USBBK_MSG_BULK_IN_STREAM_CLOSE, msg->topic)) {
         // ignore, close will clean up
     } else if (msg->topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
         if (0 == strcmp(JSDRV_MSG_OPEN, msg->topic)) {
             event = (0 == msg->value.value.u32) ? EV_BACKEND_OPEN_ACK : EV_BACKEND_OPEN_NACK;
+            if (msg->value.value.i32) {
+                d->ll_open_rc = msg->value.value.i32;
+            }
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, msg->topic)) {
             event = EV_BACKEND_CLOSE_ACK;
         } else if (0 == strcmp(JSDRV_USBBK_MSG_POWER, msg->topic)) {

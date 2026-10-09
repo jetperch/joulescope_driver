@@ -100,10 +100,12 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
 
 static uint32_t backend_send_count_;
 static char backend_last_topic_[JSDRV_TOPIC_LENGTH_MAX];
+static struct jsdrv_union_s backend_last_value_;
 
 void jsdrvp_backend_send(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg) {
     ++backend_send_count_;
     jsdrv_cstr_copy(backend_last_topic_, msg->topic, sizeof(backend_last_topic_));
+    backend_last_value_ = msg->value;
     jsdrvp_msg_free(context, msg);
 }
 
@@ -483,6 +485,50 @@ static void test_close_request_in_closed_acks(void ** state) {
     device_free(d);
 }
 
+// --- Test: a failed backend open answers the API open with its error ---
+
+static void ll_rsp(struct jsdrvp_mb_dev_s * d, const char * topic, int32_t rc) {
+    handle_rsp(d, jsdrvp_msg_alloc_value(d->context, topic, &jsdrv_union_i32(rc)));
+}
+
+static void ll_cmd_q_drain(struct jsdrvp_mb_dev_s * d) {
+    struct jsdrvp_msg_s * m;
+    while (NULL != (m = msg_queue_pop_immediate(d->ll.cmd_q))) {
+        jsdrvp_msg_free(d->context, m);
+    }
+}
+
+static void test_ll_open_nack_reports_error(void ** state) {
+    (void) state;
+    struct jsdrvp_mb_dev_s * d = device_alloc();
+    d->state = ST_CLOSED;
+
+    // Such as another process that holds the device: the backend NACKs.
+    state_machine_process(d, EV_API_OPEN_REQUEST);
+    assert_int_equal(ST_LL_OPEN, d->state);
+    ll_rsp(d, JSDRV_MSG_OPEN, JSDRV_ERROR_IN_USE);
+    assert_int_equal(ST_LL_CLOSE, d->state);
+    assert_int_equal(0, backend_send_count_);  // not yet: a retry now would be dropped
+    ll_rsp(d, JSDRV_MSG_CLOSE, 0);
+    assert_int_equal(ST_CLOSED, d->state);
+    assert_int_equal(1, backend_send_count_);
+    assert_string_equal("u/js320/test/" JSDRV_MSG_OPEN "#", backend_last_topic_);
+    assert_int_equal(JSDRV_ERROR_IN_USE, backend_last_value_.value.i32);
+
+    // A retry is accepted, and a later close acks normally.
+    ll_cmd_q_drain(d);
+    state_machine_process(d, EV_API_OPEN_REQUEST);
+    assert_int_equal(ST_LL_OPEN, d->state);
+    state_machine_process(d, EV_API_CLOSE_REQUEST);
+    ll_rsp(d, JSDRV_MSG_CLOSE, 0);
+    assert_int_equal(ST_CLOSED, d->state);
+    assert_int_equal(2, backend_send_count_);
+    assert_string_equal("u/js320/test/" JSDRV_MSG_CLOSE "#", backend_last_topic_);
+
+    ll_cmd_q_drain(d);
+    device_free(d);
+}
+
 // --- Test: device-initiated PING is answered with PONG ---
 
 static void test_ping_answered_with_pong(void ** state) {
@@ -693,6 +739,7 @@ int main(void) {
             cmocka_unit_test(test_host_replay_completion),
             cmocka_unit_test(test_topic_meta_to_handle_publish),
             cmocka_unit_test(test_close_request_in_closed_acks),
+            cmocka_unit_test(test_ll_open_nack_reports_error),
             cmocka_unit_test(test_ll_terminated_stops_drain),
             cmocka_unit_test(test_stream_in_non_bin_dropped),
             cmocka_unit_test(test_ping_answered_with_pong),
