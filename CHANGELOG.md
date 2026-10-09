@@ -30,6 +30,8 @@ unreleased
   error code, such as `-6 UNKNOWN`, on the JS110 and JS220, and a timeout
   on the JS320.  Each failed open also leaked a USB file descriptor until
   the process exited.
+* Record.close() now logs a warning without a traceback when it cannot
+  stop a signal, such as after an unplug.  The file still closes.
 
 
 ## 2.5.0

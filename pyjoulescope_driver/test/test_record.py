@@ -193,6 +193,24 @@ class TestRecordClose(unittest.TestCase):
             r.open('/nonexistent_dir_zzz/out.jls')
         r.close()  # must not raise
 
+    def test_close_after_unplug(self):
+        driver = FakeDriver()
+        r = Record(driver, 'u/js320/000001', signals=['current'])
+        f = tempfile.NamedTemporaryFile(suffix='.jls', delete=False)
+        f.close()
+        self.addCleanup(os.remove, f.name)
+        r.open(f.name)
+
+        def publish(topic, value, timeout=None):
+            raise RuntimeError(f'jsdrv_publish failed 16 NOT_FOUND | {topic}')
+
+        driver.publish = publish
+        with self.assertLogs('pyjoulescope_driver.record', level='WARNING') as cm:
+            r.close()  # the file still closes
+        self.assertTrue(any('Could not publish' in x for x in cm.output), cm.output)
+        self.assertFalse(any('Traceback' in x for x in cm.output), cm.output)
+        with Reader(f.name):
+            pass
 
 if __name__ == '__main__':
     unittest.main()

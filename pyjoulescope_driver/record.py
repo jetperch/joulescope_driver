@@ -246,8 +246,8 @@ class Record:
                         self._driver.publish(ctrl_topic, 0, timeout=0.25)
                     except TimeoutError:
                         self._log.warning('Timed out in publish: %s <= 0', ctrl_topic)
-                    except Exception:
-                        self._log.exception('Exception in publish: %s <= 0', ctrl_topic)
+                    except Exception as ex:  # such as the device was unplugged
+                        self._log.warning('Could not publish %s <= 0: %s', ctrl_topic, ex)
         finally:
             self._wr.close()
             self._wr = None
