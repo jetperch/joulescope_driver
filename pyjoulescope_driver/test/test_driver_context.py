@@ -294,12 +294,14 @@ class TestLiveDevice(unittest.TestCase):
 
     def test_finalize_closes_opened(self):
         d = CloseRecordDriver()
+        self.addCleanup(d.finalize)  # one Driver per process, so never leak it
         d.open(self.device_path, mode='restore')
         d.finalize()
         self.assertEqual([self.device_path], d.closed)
 
     def test_finalize_skips_closed(self):
         d = CloseRecordDriver()
+        self.addCleanup(d.finalize)  # one Driver per process, so never leak it
         d.open(self.device_path, mode='restore').close()
         d.closed.clear()
         d.finalize()
@@ -307,6 +309,7 @@ class TestLiveDevice(unittest.TestCase):
 
     def test_finalize_skips_removed(self):
         d = CloseRecordDriver()
+        self.addCleanup(d.finalize)  # one Driver per process, so never leak it
         d.open(self.device_path, mode='restore')
         d.connected = ''  # the device appears removed
         d.finalize()
