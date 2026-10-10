@@ -150,6 +150,7 @@ class Record:
         self._utc_interval = time64.MINUTE
         self._log = logging.getLogger(__name__)
         self._wr = None
+        self._write_error = None
         self._data_map = {}
         self._driver = driver
         device_paths = [device_path] if isinstance(device_path, str) else device_path
@@ -197,6 +198,7 @@ class Record:
         if self._wr is not None:
             self.close()
         self._data_map.clear()
+        self._write_error = None
         self._wr = Writer(filename)
         if user_data is not None:
             for chunk_meta, data in user_data:
@@ -231,6 +233,9 @@ class Record:
         """Close the recording and release all resources.
 
         Safe to call repeatedly and after a failed :meth:`open`.
+
+        :raise RuntimeError: If a write failed, such as on a full disk.
+            The recording is closed, but the file may be incomplete.
         """
         if self._wr is None:
             return
@@ -249,12 +254,20 @@ class Record:
                     except Exception as ex:  # such as the device was unplugged
                         self._log.warning('Could not publish %s <= 0: %s', ctrl_topic, ex)
         finally:
-            self._wr.close()
-            self._wr = None
+            wr, self._wr = self._wr, None  # closed even if close() raises
+            wr.close()
 
     def _on_data(self, topic, value):
-        if self._wr is None:
+        if self._wr is None or self._write_error is not None:
             return
+        try:
+            self._write(topic, value)
+        except Exception as ex:
+            # pyjls latches write errors: stop writing, and close() raises.
+            self._write_error = ex
+            self._log.error('JLS write failed, recording stopped: %s', ex)
+
+    def _write(self, topic, value):
         signal = self._data_map[topic]
         decimate_factor = value['decimate_factor']
         signal_id = signal['signal_id']

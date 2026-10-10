@@ -105,6 +105,26 @@ class TestEntryPointUnplug(unittest.TestCase):
             self._run(record, filename=os.path.join(path, 'out.jls'), open='defaults',
                       frequency=None, set=[], signals='current,voltage', note=None)
 
+    def test_record_close_error(self):
+        # a write error makes Record.close() raise: report it, do not traceback
+        class FailingRecord(record.Record):
+            def close(self):
+                super().close()
+                raise RuntimeError('close IO[4]: Input/output error')
+
+        args = argparse.Namespace(jsdrv_log_level='off', device=None, duration=0.05, verbose=False,
+                                  open='defaults', frequency=None, set=[], signals='current',
+                                  note=None)
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as path:
+            args.filename = os.path.join(path, 'out.jls')
+            with mock.patch.object(record, 'Driver', FakeDriver), \
+                    mock.patch.object(record, 'Record', FailingRecord), \
+                    contextlib.redirect_stdout(out):
+                rc = record.on_cmd(args)
+        self.assertEqual(1, rc)
+        self.assertIn('ERROR: recording may be incomplete', out.getvalue())
+
     def test_statistics(self):
         self._run(statistics, frequency=2, js110_host=False)
 

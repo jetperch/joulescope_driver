@@ -116,20 +116,27 @@ def on_cmd(args):
                 if value in opened:
                     removed.append(value)
 
+            rc = 0
             try:
                 with d.subscribe('@/!remove', 'pub', on_remove):
                     while (t_stop is None or t_stop > time.time()) and not removed:
                         time.sleep(0.010)
                 if removed:
                     print(f'{removed[0]} removed: stop')
-                    return 1
-                if args.verbose:
+                    rc = 1
+                elif args.verbose:
                     print(f'Record complete due to duration')
             except KeyboardInterrupt:
                 if args.verbose:
                     print(f'Record complete due to user CTRL-C')
             finally:
-                wr.close()
+                try:
+                    wr.close()
+                except RuntimeError as ex:  # a write failed, such as on a full disk
+                    print(f'ERROR: recording may be incomplete: {ex}')
+                    rc = 1
+            if rc:
+                return rc
         finally:
             for device_path in opened:
                 if args.verbose:

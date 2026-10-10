@@ -39,6 +39,12 @@ This file contains the list of changes made to the Joulescope driver.
   running without data until Ctrl-C, and measure waited forever.
 * Record.close() now logs a warning without a traceback when it cannot
   stop a signal, such as after an unplug.  The file still closes.
+* Record now stops writing after the first JLS write error, such as a
+  full disk, and logs it once, instead of raising in every data callback.
+  Record.close() always releases the writer and raises RuntimeError when
+  the file may be incomplete; pyjls 0.19.0 reports these errors.  The
+  record entry point prints "ERROR: recording may be incomplete" and
+  exits 1.
 
 
 ## 2.5.0
