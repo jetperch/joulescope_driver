@@ -32,6 +32,9 @@ unreleased
   the process exited.
 * Record.close() now logs a warning without a traceback when it cannot
   stop a signal, such as after an unplug.  The file still closes.
+* The record, statistics and measure entry points now stop and exit 1
+  with "<device> removed: stop" when their device is unplugged.  They kept
+  running without data until Ctrl-C, and measure waited forever.
 * Fixed a memory leak on Linux and macOS: each unplug of an open device
   kept its pool of USB transfers, 175 to 345 KB, until the driver
   finalized.  Over 8 hours with 92 unplugs, a logger grew by 19 MB.

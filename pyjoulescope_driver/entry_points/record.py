@@ -110,9 +110,19 @@ def on_cmd(args):
                 user_data.append([0, args.note])
             wr.open(args.filename, user_data=user_data)
             t_stop = None if args.duration is None else time.time() + args.duration
+            removed = []
+
+            def on_remove(topic, value):  # an unplugged device sends no more data
+                if value in opened:
+                    removed.append(value)
+
             try:
-                while t_stop is None or t_stop > time.time():
-                    time.sleep(0.010)
+                with d.subscribe('@/!remove', 'pub', on_remove):
+                    while (t_stop is None or t_stop > time.time()) and not removed:
+                        time.sleep(0.010)
+                if removed:
+                    print(f'{removed[0]} removed: stop')
+                    return 1
                 if args.verbose:
                     print(f'Record complete due to duration')
             except KeyboardInterrupt:

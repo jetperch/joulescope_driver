@@ -87,11 +87,21 @@ def on_cmd(args):
                 d.publish(device + '/s/stats/scnt', scnt)
                 d.publish(device + '/s/stats/ctrl', 1)
                 d.subscribe(device + '/s/stats/value', 'pub', _on_statistics_value)
+        removed = []
+
+        def on_remove(topic, value):  # an unplugged device sends no more statistics
+            if value in devices:
+                removed.append(value)
+
         try:
             t_start = time.time()
-            while True:
-                if args.duration is not None and (time.time() - t_start) >= args.duration:
-                    break
-                time.sleep(0.025)
+            with d.subscribe('@/!remove', 'pub', on_remove):
+                while not removed:
+                    if args.duration is not None and (time.time() - t_start) >= args.duration:
+                        break
+                    time.sleep(0.025)
         except KeyboardInterrupt:
             sys.stdout.flush()
+        if removed:
+            print(f'{removed[0]} removed: stop')
+            return 1

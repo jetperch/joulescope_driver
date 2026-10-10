@@ -84,12 +84,21 @@ def measure(driver, device, duration=None, on_progress=None):
         return {'energy': 0.0, 'charge': 0.0, 'duration': 0.0}
     total_count = 10 * duration + 1  # need one extra since use first as a baseline
 
+    removed = []
+
     def _on_statistics_value(topic, value):
         data.append(value)
 
+    def _on_remove(topic, value):  # an unplugged device sends no more statistics
+        if value == device:
+            removed.append(value)
+
     driver.subscribe(device + '/s/stats/value', 'pub', _on_statistics_value)
+    remove_subscription = driver.subscribe('@/!remove', 'pub', _on_remove)
     try:
         while len(data) < total_count:
+            if removed:
+                raise RuntimeError(f'{device} removed: stop')
             time.sleep(0.050)
             duration_remaining = (total_count - len(data)) / 10
             if callable(on_progress):
@@ -97,6 +106,7 @@ def measure(driver, device, duration=None, on_progress=None):
     except KeyboardInterrupt:
         pass
     finally:
+        remove_subscription.unsubscribe()
         driver.unsubscribe(device + '/s/stats/value', _on_statistics_value)
 
     if len(data) < 2:  # interrupted before enough statistics arrived
@@ -126,7 +136,11 @@ def on_cmd(args):
         else:
             d.publish(device + '/s/stats/scnt', 100_000)  # 10 Hz at 1 Msps
         d.publish(device + '/s/stats/ctrl', 1)
-        data = measure(d, device, duration=args.duration, on_progress=args.no_progress)
+        try:
+            data = measure(d, device, duration=args.duration, on_progress=args.no_progress)
+        except RuntimeError as ex:  # such as removed
+            print(ex)
+            return 1
         d.publish(device + '/s/stats/ctrl', 0)
         d.close(device)
 
