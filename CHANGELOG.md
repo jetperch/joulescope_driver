@@ -23,21 +23,22 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.1
 
-unreleased
+2026 Oct 10
 
+* Fixed a memory leak on Linux and macOS: each unplug of an open device
+  kept its pool of USB transfers, 175 to 345 KB, until the driver
+  finalized.  Over 8 hours with 92 unplugs, a logger grew by 19 MB.
 * Fixed opening a device that another process holds.  On Linux and macOS,
   the open now fails at once with `IN_USE`, instead of an unnamed libusb
   error code, such as `-6 UNKNOWN`, on the JS110 and JS220, and a timeout
   on the JS320.  Each failed open also leaked a USB file descriptor until
-  the process exited.
-* Record.close() now logs a warning without a traceback when it cannot
-  stop a signal, such as after an unplug.  The file still closes.
+  the process exited.  Windows still reports `UNSPECIFIED`; see
+  pyjoulescope_examples doc/windows_test_plan.md.
 * The record, statistics and measure entry points now stop and exit 1
   with "<device> removed: stop" when their device is unplugged.  They kept
   running without data until Ctrl-C, and measure waited forever.
-* Fixed a memory leak on Linux and macOS: each unplug of an open device
-  kept its pool of USB transfers, 175 to 345 KB, until the driver
-  finalized.  Over 8 hours with 92 unplugs, a logger grew by 19 MB.
+* Record.close() now logs a warning without a traceback when it cannot
+  stop a signal, such as after an unplug.  The file still closes.
 
 
 ## 2.5.0
