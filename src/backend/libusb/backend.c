@@ -202,6 +202,17 @@ static struct transfer_s * transfer_alloc(struct dev_s * d) {
     return t;
 }
 
+// transfer_free pools transfers while the handle is open.  Release the
+// pool when the device goes away, or each removal strands it in its slot.
+static void transfers_free_drain(struct dev_s * d) {
+    struct jsdrv_list_s * item;
+    while (NULL != (item = jsdrv_list_remove_head(&d->transfers_free))) {
+        struct transfer_s * t = JSDRV_CONTAINER_OF(item, struct transfer_s, item);
+        libusb_free_transfer(t->transfer);
+        jsdrv_free(t);
+    }
+}
+
 static void transfer_free(struct transfer_s * t) {
     if (NULL == t) {
         return;
@@ -988,6 +999,7 @@ static void process_removing(struct backend_s * s) {
             libusb_close(d->handle);
             d->handle = NULL;
         }
+        transfers_free_drain(d);  // the slot goes to the tail of devices_free
         device_close_respond(d, 0);
 
         JSDRV_LOGI("process_removing(%s): LL_TERMINATED", d->ll_device.prefix);
@@ -1145,13 +1157,7 @@ static void device_close_all(struct backend_s * s) {
             d->usb_device = NULL;
         }
         device_close_respond(d, 0);
-        // transfer_free pools transfers while the handle is open.
-        struct jsdrv_list_s * item;
-        while (NULL != (item = jsdrv_list_remove_head(&d->transfers_free))) {
-            struct transfer_s * t = JSDRV_CONTAINER_OF(item, struct transfer_s, item);
-            libusb_free_transfer(t->transfer);
-            jsdrv_free(t);
-        }
+        transfers_free_drain(d);
     }
 }
 

@@ -34,6 +34,11 @@ The bulk IN retry state machine, which is pure logic once libusb is behind a sea
 5. `removing` or a non-`OPEN` mode cancels the retry, so a hotplug LEFT wins the race against a
    scheduled re-arm regardless of which lands first.
 6. `poll()` timeout is clamped to the next scheduled retry.
+7. Removing an opened device frees its slot's `transfers_free` pool.  Removal retires the slot
+   to the tail of `devices_free`, so the slots rotate, and before 2026-10-10 each one kept its
+   pool until finalize: 175 to 345 KB per unplug of an opened JS110, JS220 or JS320, bounded
+   only by 127 slots.  Found with a USB hub that power cycles each instrument during an 8 hour
+   `downsample_logging.py` soak.
 
 ## Approach
 

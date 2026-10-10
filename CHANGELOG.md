@@ -32,6 +32,9 @@ unreleased
   the process exited.
 * Record.close() now logs a warning without a traceback when it cannot
   stop a signal, such as after an unplug.  The file still closes.
+* Fixed a memory leak on Linux and macOS: each unplug of an open device
+  kept its pool of USB transfers, 175 to 345 KB, until the driver
+  finalized.  Over 8 hours with 92 unplugs, a logger grew by 19 MB.
 
 
 ## 2.5.0
