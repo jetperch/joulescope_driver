@@ -23,7 +23,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.1
 
-2026 Oct 10
+2026 Oct 13
 
 * Fixed a memory leak on Linux and macOS: each unplug of an open device
   kept its pool of USB transfers, 175 to 345 KB, until the driver
