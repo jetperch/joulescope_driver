@@ -27,6 +27,11 @@ from unittest import mock
 from pyjoulescope_driver import DevicePath, device_filter
 from pyjoulescope_driver.entry_points import measure, record, statistics
 
+try:
+    import pyjls
+except ImportError:
+    pyjls = None  # the wheel tests run without it: skip the record tests
+
 PATH = DevicePath('u/js220/000001')
 
 
@@ -100,11 +105,13 @@ class TestEntryPointUnplug(unittest.TestCase):
         self.assertEqual(1, rc)
         self.assertIn(f'{PATH} removed: stop', out.getvalue())
 
+    @unittest.skipIf(pyjls is None, 'pyjls not available')
     def test_record(self):
         with tempfile.TemporaryDirectory() as path:
             self._run(record, filename=os.path.join(path, 'out.jls'), open='defaults',
                       frequency=None, set=[], signals='current,voltage', note=None)
 
+    @unittest.skipIf(pyjls is None, 'pyjls not available')
     def test_record_close_error(self):
         # a write error makes Record.close() raise: report it, do not traceback
         class FailingRecord(record.Record):
