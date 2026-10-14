@@ -600,7 +600,11 @@ static void on_bulk_in_done(struct libusb_transfer * transfer) {
             bulk_in_retry_clear(d);
             bulk_in_start(t->device, pipe_id);
             if (0 == t->transfer->actual_length) {
-                JSDRV_LOGW("zero length bulk in transfer");
+                // The JS320 terminates the last bulk IN transfer with a
+                // zero-length packet; when the data already filled the host
+                // transfer exactly, the ZLP completes the next one alone.
+                JSDRV_LOGD1("%s zero length bulk in transfer, endpoint 0x%02x",
+                            d->ll_device.prefix, (unsigned) transfer->endpoint);
                 transfer_free(t);
             } else {
                 jsdrv_list_remove(&t->item); // not pending or free, temporary loan to upper layer

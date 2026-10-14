@@ -36,6 +36,11 @@ This file contains the list of changes made to the Joulescope driver.
 * Fixed Driver.unsubscribe() and unsubscribe_all() from a callback.  They
   treated the forced, asynchronous unsubscribe as confirmed and released
   the callback reference while C could still call it.
+* The libusb backend no longer warns "zero length bulk in transfer" at the
+  end of a JS320 stream.  The JS320 terminates its last bulk IN transfer
+  with a zero-length packet, which arrives alone in about 1 of 12 stops.
+  The message is now debug level and names the device and endpoint, as
+  the WinUSB backend already handled this case silently.
 
 
 ## 2.5.1
