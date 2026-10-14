@@ -92,6 +92,50 @@ class TestDriverSubscribe(unittest.TestCase):
         self.d.unsubscribe(TOPIC, c2.on_pub)  # confirms the earlier one, too
         self._assert_released(ref)
 
+    def test_is_driver_thread(self):
+        seen = []
+        fn = lambda topic, value: seen.append(self.d.is_driver_thread())
+        self.assertFalse(self.d.is_driver_thread())
+        self.d.subscribe(TOPIC, 'pub', fn)
+        self._publish(1)
+        self.assertEqual([True], seen)
+        self.d.unsubscribe(TOPIC, fn)
+        self.assertFalse(self.d.is_driver_thread())
+
+    def test_is_driver_thread_after_finalize(self):
+        self.d.finalize()
+        self.assertFalse(self.d.is_driver_thread())
+
+    def test_unsubscribe_from_callback_holds_until_confirmed(self):
+        # C forces a command from the driver thread asynchronous and
+        # returns 0 at once, so an unsubscribe with the default timeout
+        # from a callback is not confirmed: hold the callback.
+        d = self.d
+
+        class Once:
+            def __init__(self):
+                self.count = 0
+
+            def on_pub(self, topic, value):
+                self.count += 1
+                d.unsubscribe(TOPIC, self.on_pub)
+
+        c = Once()
+        ref = weakref.ref(c)
+        self.d.subscribe(TOPIC, 'pub', c.on_pub)
+        self._publish(1)
+        self.assertEqual(1, c.count)
+        self._publish(2)
+        self.assertEqual(1, c.count)  # the unsubscribe still ran
+        del c
+        gc.collect()
+        self.assertIsNotNone(ref())  # C may still call it
+
+        c2 = Counter()
+        self.d.subscribe(TOPIC, 'pub', c2.on_pub)
+        self.d.unsubscribe(TOPIC, c2.on_pub)  # confirms the earlier one, too
+        self._assert_released(ref)
+
     def test_unsubscribe_one_of_two(self):
         c1, c2 = Counter(), Counter()
         self.d.subscribe(TOPIC, 'pub', c1.on_pub)

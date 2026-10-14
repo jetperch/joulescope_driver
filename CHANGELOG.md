@@ -21,6 +21,23 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.2
+
+2026 Oct 14
+
+* Added jsdrv_is_driver_thread() and Driver.is_driver_thread(), which
+  report whether the caller is the driver thread that invokes the
+  subscriber callbacks.  The driver has always forced commands issued
+  from that thread to timeout 0, since a wait there would deadlock.
+  This is now the documented behavior: a callback may call the driver
+  with any timeout, and the command runs in order but reports its result
+  only to the log.  The log message for a forced timeout dropped from
+  warning to info.
+* Fixed Driver.unsubscribe() and unsubscribe_all() from a callback.  They
+  treated the forced, asynchronous unsubscribe as confirmed and released
+  the callback reference while C could still call it.
+
+
 ## 2.5.1
 
 2026 Oct 13

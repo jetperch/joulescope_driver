@@ -66,9 +66,12 @@ version of this guide and builds as `jsdrv_quickstart`.
   metadata defaults, to the device.  `restore` reads the device's current
   state into the host and leaves it unchanged.  `raw` is for firmware
   update only.
-* **Callbacks run on the driver thread**.  Keep them short, copy the data
-  out, and never call a blocking driver method from inside one.  Publish
-  with `timeout=0` from a callback.
+* **Callbacks run on the driver thread**.  Keep them short and copy the
+  data out.  A driver call from a callback cannot wait, so the driver
+  forces it asynchronous whatever its timeout: publish, subscribe and
+  unsubscribe return at once and report errors only to the log, and
+  query returns zeros.  `jsdrv_is_driver_thread()` and
+  `Driver.is_driver_thread()` tell the two cases apart.
 * **Finalize**: each Python `Driver` must be finalized, by the context
   manager or `finalize()`, and each C context must be passed to
   `jsdrv_finalize()`.  Finalize stops the driver threads and closes the
@@ -233,9 +236,11 @@ and `s/p/ctrl`, then `s/stats/ctrl`, as the example above does.
 
 ## Pitfalls
 
-* **Blocking in a callback deadlocks or times out.**  Callbacks run on the
-  driver thread.  Queue the data to another thread, and publish with
-  `timeout=0` (`JSDRV_TIMEOUT_MS_ASYNC`) if you must publish from one.
+* **A callback cannot wait for a result.**  Callbacks run on the driver
+  thread, which completes every command, so the driver forces commands
+  issued from a callback to `timeout=0` (`JSDRV_TIMEOUT_MS_ASYNC`).  A
+  publish from a callback works, but its error is only logged, and a
+  query returns zeros.  Queue work that needs a result to another thread.
 * **A C timeout of 0 means asynchronous** for `jsdrv_publish`,
   `jsdrv_subscribe`, `jsdrv_unsubscribe`, `jsdrv_open` and `jsdrv_close`,
   but means the default timeout for `jsdrv_initialize`, `jsdrv_query` and

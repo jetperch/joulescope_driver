@@ -864,6 +864,15 @@ cdef class Driver:
     to track device additions and removals.  :meth:`open` returns a
     :class:`DeviceContext`, and :meth:`subscribe` returns a
     :class:`SubscribeContext`.
+
+    The driver thread invokes the subscriber callbacks and completes
+    every command, so a callback cannot wait on the driver.  A Driver
+    method called from a callback is forced asynchronous, whatever its
+    timeout: :meth:`publish`, :meth:`subscribe` and :meth:`unsubscribe`
+    return at once and report any error only to the log, and
+    :meth:`query` returns a zeroed value.  Use :meth:`is_driver_thread`
+    to tell the two cases apart, and defer work that needs a result,
+    such as :meth:`open`, to another thread.
     """
     cdef c_jsdrv.jsdrv_context_s * _context
     # The C library holds a borrowed pointer to each callback, so these
@@ -1170,9 +1179,10 @@ cdef class Driver:
         This method calls on_add for the connected devices from the
         calling thread, so these on_add calls may use any Driver method.
         Afterwards, the driver thread calls on_add and on_remove, once for
-        each device addition and removal, in order.  Callbacks from the
-        driver thread must not block on the driver, so use timeout=0 or
-        defer blocking work, such as :meth:`open`, to another thread.
+        each device addition and removal, in order.  Driver calls from
+        these callbacks are forced asynchronous, see
+        :meth:`is_driver_thread`, so defer work that needs a result,
+        such as :meth:`open`, to another thread.
         """
         device_filter.find([], specs, brand)  # validate specs and brand
         lock = threading.Lock()
@@ -1284,8 +1294,13 @@ cdef class Driver:
         :param topic: The topic name string.
         :param fn: The function previously provided to :func:`subscribe`.
         :param timeout: The timeout in seconds.  None (default) uses
-            the default timeout.
+            the default timeout.  0 returns at once, and fn may still
+            be called until the driver thread handles the request.
         :raise: On error.
+
+        When this method returns after waiting, fn is no longer called.
+        From a callback, this method cannot wait, see
+        :meth:`is_driver_thread`.
         """
         cdef const uint8_t[:] topic_str = _c_str(_topic_validate(topic))
         cdef int32_t timeout_ms = _timeout_validate(timeout)
@@ -1304,8 +1319,11 @@ cdef class Driver:
 
         :param fn: The function previously provided to :func:`subscribe`.
         :param timeout: The timeout in seconds.  None (default) uses
-            the default timeout.
+            the default timeout.  0 returns at once, and fn may still
+            be called until the driver thread handles the request.
         :raise: On error.
+
+        See :meth:`unsubscribe`.
         """
         cdef int32_t timeout_ms = _timeout_validate(timeout)
         cdef int32_t rc = 0
@@ -1354,14 +1372,30 @@ cdef class Driver:
             return (topic is None or t == topic) and any(f is x for x in targets)
         removed = [f for t, f in self._subscribers if match(t, f)]
         self._subscribers[:] = [(t, f) for t, f in self._subscribers if not match(t, f)]
-        if timeout_ms == 0 or rc:
+        if timeout_ms == 0 or rc or self.is_driver_thread():
             # C has not confirmed the unsubscribe, so it may still call
             # these callbacks.  Hold them until C confirms a later one.
+            # From the driver thread, C forces the timeout to 0 and
+            # returns 0 at once, whatever timeout the caller gave.
             self._released.extend(removed)
         else:
             # C processes commands in order, so it also completed every
             # earlier unconfirmed unsubscribe.
             self._released.clear()
+
+    def is_driver_thread(self):
+        """Check if the caller is the driver thread.
+
+        :return: True when called from the driver thread, which invokes
+            the subscriber callbacks.  False otherwise, including after
+            :meth:`finalize`.
+
+        Driver methods called from the driver thread are forced
+        asynchronous, whatever their timeout.  See :class:`Driver`.
+        """
+        if self._context == NULL:
+            return False
+        return bool(c_jsdrv.jsdrv_is_driver_thread(self._context))
 
     def open(self, device_prefix, mode=None, timeout=None):
         """Open an attached device.

@@ -1004,12 +1004,17 @@ void jsdrvp_msg_free(struct jsdrv_context_s * context, struct jsdrvp_msg_s * msg
     }
 }
 
+bool jsdrv_is_driver_thread(struct jsdrv_context_s * context) {
+    return (NULL != context) && jsdrv_thread_is_current(&context->thread);
+}
+
 static int32_t api_cmd(struct jsdrv_context_s * context, struct jsdrvp_msg_s * m, uint32_t timeout_ms) {
     struct jsdrvp_api_timeout_s timeout;
     volatile int32_t rc = 0;
     if (timeout_ms) {
-        if (jsdrv_thread_is_current(&context->thread)) {
-            JSDRV_LOGW("API command %s invoked on jsdrv thread with timeout.  Forcing timeout=0.", m->topic);
+        if (jsdrv_is_driver_thread(context)) {
+            // A blocking wait here would deadlock: this thread completes the command.
+            JSDRV_LOGI("API command %s invoked on jsdrv thread with timeout.  Forcing timeout=0.", m->topic);
             timeout_ms = 0;
         } else {
             jsdrv_list_initialize(&timeout.item);

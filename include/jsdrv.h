@@ -29,6 +29,7 @@
 #include "jsdrv/union.h"
 #include "jsdrv/time.h"
 #include "jsdrv/tmap.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 /**
@@ -205,6 +206,16 @@
  * always synchronous and interpret timeout_ms == 0 as a request
  * to use the default timeout (#JSDRV_TIMEOUT_MS_DEFAULT or
  * #JSDRV_TIMEOUT_MS_INIT as appropriate).
+ *
+ * The driver thread invokes subscriber callbacks and completes every
+ * command, so a callback that blocks on a command would deadlock.
+ * When any of these functions is called from the driver thread, the
+ * driver forces timeout_ms to #JSDRV_TIMEOUT_MS_ASYNC and returns 0
+ * at once.  The command still runs, in order, but its result is only
+ * reported to the log.  jsdrv_query() then returns a zeroed value.
+ * Callbacks can therefore call the driver with any timeout; use
+ * jsdrv_is_driver_thread() to tell whether a call completed or was
+ * only queued.
  */
 #define JSDRV_TIMEOUT_MS_ASYNC         0
 #define JSDRV_TIMEOUT_MS_DEFAULT       1000             ///< The recommended default timeout
@@ -785,6 +796,19 @@ JSDRV_API int32_t jsdrv_unsubscribe(struct jsdrv_context_s * context, const char
 JSDRV_API int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
                                         jsdrv_subscribe_fn cbk_fn, void * cbk_user_data,
                                         uint32_t timeout_ms);
+
+/**
+ * @brief Check if the caller is the driver thread.
+ *
+ * @param context The Joulescope driver context.
+ * @return true when called from the driver thread, which invokes the
+ *      subscriber callbacks, and false otherwise, including for a
+ *      NULL context.
+ *
+ * The driver forces timeout_ms to #JSDRV_TIMEOUT_MS_ASYNC for commands
+ * issued from the driver thread.  See #JSDRV_TIMEOUT_MS_ASYNC.
+ */
+JSDRV_API bool jsdrv_is_driver_thread(struct jsdrv_context_s * context);
 
 /**
  * @brief Open a device.

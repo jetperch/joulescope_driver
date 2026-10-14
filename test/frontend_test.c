@@ -840,6 +840,41 @@ static void test_publish_scalar_ignores_app(void ** state) {
     TEARDOWN();
 }
 
+// Records jsdrv_is_driver_thread() and the return code of a blocking
+// command issued from the callback, which the driver forces asynchronous.
+static void is_driver_thread_fn(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) topic;
+    (void) value;
+    struct test_s * t = (struct test_s *) user_data;
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(t->context);
+    jsdrv_cstr_copy(m->topic, "is_driver_thread", sizeof(m->topic));
+    m->value = jsdrv_union_i32(jsdrv_is_driver_thread(t->context) ? 1 : 0);
+    msg_queue_push(t->sub_msgs, m);
+    // "other" avoids re-entering this callback; the publish is queued in order
+    int32_t rc = jsdrv_publish(t->context, "other/cbk", &jsdrv_union_i32(2), 1000);
+    m = jsdrvp_msg_alloc(t->context);
+    jsdrv_cstr_copy(m->topic, "cbk_publish_rc", sizeof(m->topic));
+    m->value = jsdrv_union_i32(rc);
+    msg_queue_push(t->sub_msgs, m);
+}
+
+static void test_is_driver_thread(void ** state) {
+    SETUP();
+    assert_false(jsdrv_is_driver_thread(NULL));
+    assert_false(jsdrv_is_driver_thread(self->context));
+    assert_int_equal(0, jsdrv_subscribe(self->context, "test", JSDRV_SFLAG_PUB, is_driver_thread_fn, self, 1000));
+    assert_int_equal(0, jsdrv_subscribe(self->context, "other", JSDRV_SFLAG_PUB, subscribe_cmd_fn, self, 1000));
+    // no device answers a plain topic, so a waiting publish would time out
+    assert_int_equal(0, jsdrv_publish(self->context, "test/value", &jsdrv_union_i32(1), 0));
+    expect_subscribe_cmd(self, "is_driver_thread", &jsdrv_union_i32(1));
+    expect_subscribe_cmd(self, "cbk_publish_rc", &jsdrv_union_i32(0));  // forced async: returns 0 at once
+    expect_subscribe_cmd(self, "other/cbk", &jsdrv_union_i32(2));  // and still runs
+    assert_int_equal(0, jsdrv_unsubscribe(self->context, "test", is_driver_thread_fn, self, 1000));
+    assert_int_equal(0, jsdrv_unsubscribe(self->context, "other", subscribe_cmd_fn, self, 1000));
+    ASSERT_QUEUES_EMPTY(self);
+    TEARDOWN();
+}
+
 int main(void) {
     int rv;
     jsdrv_log_initialize();
@@ -851,6 +886,7 @@ int main(void) {
             cmocka_unit_test(test_discovery),
             cmocka_unit_test(test_backend_fwup_topic),
             cmocka_unit_test(test_publish_scalar_ignores_app),
+            cmocka_unit_test(test_is_driver_thread),
             cmocka_unit_test(test_open),
             cmocka_unit_test(test_open_retry_after_reenumeration),
             cmocka_unit_test(test_open_removed_not_readded),
