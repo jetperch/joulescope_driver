@@ -127,13 +127,15 @@ def on_cmd(args):
             return 1
         model = device.model
         d.open(device)
-        d.publish(device + '/s/i/range/mode', 'auto')
         if model == 'js110':
+            # s/i/range/mode is the range suppression mode on the JS110
+            d.publish(device + '/s/i/range/select', 'auto')
             # host-side statistics require the i/v/p sample streams
             for topic in ['s/i/ctrl', 's/v/ctrl', 's/p/ctrl']:
                 d.publish(f'{device}/{topic}', 1)
             d.publish(device + '/s/stats/scnt', 200_000)  # 10 Hz at 2 Msps
         else:
+            d.publish(device + '/s/i/range/mode', 'auto')
             d.publish(device + '/s/stats/scnt', 100_000)  # 10 Hz at 1 Msps
         d.publish(device + '/s/stats/ctrl', 1)
         try:

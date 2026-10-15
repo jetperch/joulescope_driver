@@ -138,6 +138,36 @@ class TestEntryPointUnplug(unittest.TestCase):
     def test_measure(self):
         self._run(measure, no_progress=None, show_only=None)
 
+    def test_measure_js110_range(self):
+        # s/i/range/mode is the range suppression mode on the JS110, so
+        # 'auto' is PARAMETER_INVALID there.  Select the range instead.
+        js110 = DevicePath('u/js110/000001')
+        published = []
+
+        class FakeJs110Driver(FakeDriver):
+            def find_devices(self, specs=None, brand=None, timeout=None):
+                return device_filter.find([js110], specs, brand)
+
+            def find_one_device(self, specs=None, brand=None, timeout=None):
+                return device_filter.find_one([js110], specs, brand)
+
+            def publish(self, topic, value, timeout=None):
+                published.append((topic, value))
+
+            def subscribe(self, topic, flags, fn, timeout=None):
+                self.fns.setdefault(topic, []).append(fn)
+                if topic == '@/!remove':
+                    threading.Timer(0.2, fn, args=(topic, str(js110))).start()
+                return _Subscription(self, topic, fn)
+
+        args = argparse.Namespace(jsdrv_log_level='off', device=None, duration=30, verbose=False,
+                                  no_progress=None, show_only=None)
+        with mock.patch.object(measure, 'Driver', FakeJs110Driver), \
+                contextlib.redirect_stdout(io.StringIO()):
+            measure.on_cmd(args)
+        self.assertIn((f'{js110}/s/i/range/select', 'auto'), published)
+        self.assertNotIn(f'{js110}/s/i/range/mode', [topic for topic, _ in published])
+
 
 if __name__ == '__main__':
     unittest.main()
