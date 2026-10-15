@@ -553,6 +553,24 @@ static void bulk_out_send(struct dev_s * d, struct jsdrvp_msg_s * msg) {
 //# DEVICE                                                                    #
 //#############################################################################
 
+static int32_t windows_error_to_jsdrv(DWORD ec) {
+    switch (ec) {
+        case ERROR_SUCCESS: return 0;
+        case ERROR_ACCESS_DENIED:           // held by another process
+        case ERROR_SHARING_VIOLATION:
+            return JSDRV_ERROR_IN_USE;
+        case ERROR_FILE_NOT_FOUND:
+        case ERROR_PATH_NOT_FOUND:
+        case ERROR_DEVICE_NOT_CONNECTED:
+        case ERROR_NO_SUCH_DEVICE:
+            return JSDRV_ERROR_NOT_FOUND;
+        case ERROR_NOT_ENOUGH_MEMORY:
+        case ERROR_OUTOFMEMORY:
+            return JSDRV_ERROR_NOT_ENOUGH_MEMORY;
+        default: return JSDRV_ERROR_IO;
+    }
+}
+
 static int32_t device_open(struct dev_s * d) {
     JSDRV_LOGI("device_open(%s) %s", d->device.prefix, d->device_path);
 
@@ -570,8 +588,9 @@ static int32_t device_open(struct dev_s * d) {
                 NULL                                            // hTemplateFile
         );
         if (d->file == INVALID_HANDLE_VALUE) {
-            JSDRV_LOGE("device_open(%s) could not open device path %s", d->device.prefix, d->device_path);
-            return 1;
+            DWORD ec = GetLastError();
+            WINDOWS_LOGE("device_open(%s) could not open device path %s", d->device.prefix, d->device_path);
+            return windows_error_to_jsdrv(ec);
         }
         if (WinUsb_Initialize(d->file, &d->winusb)) {
             break;
@@ -586,7 +605,7 @@ static int32_t device_open(struct dev_s * d) {
         }
         SetLastError(ec);
         WINDOWS_LOGE("WinUsb_Initialize %s", d->device.prefix);
-        return 1;
+        return windows_error_to_jsdrv(ec);
     }
     DWORD ctrl_timeout = CONTROL_TIMEOUT_MS;
     if (!WinUsb_SetPipePolicy(d->winusb, 0, PIPE_TRANSFER_TIMEOUT, sizeof(ctrl_timeout), &ctrl_timeout)) {
