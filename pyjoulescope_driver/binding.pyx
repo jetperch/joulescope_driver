@@ -352,6 +352,7 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
     cdef uint16_t * u16_ptr;
     cdef uint32_t * u32_ptr;
     cdef uint64_t * u64_ptr;
+    cdef int64_t * i64_ptr;
     t = value[0].type
     try:
         if t == c_jsdrv.JSDRV_UNION_STR:
@@ -525,6 +526,24 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
                         v['frame_error'] = u32_ptr[8]
                         v['link_error'] = u32_ptr[9]
                         v['app_error'] = u32_ptr[10]
+                elif value[0].value.bin[2] == 0x04:  # MB_STDMSG_TIMESYNC_MAP
+                    if value[0].size < 80:
+                        _log_c.warning('MB_STDMSG_TIMESYNC_MAP malformed: size %d < 80', value[0].size)
+                        v = None
+                    else:
+                        # mb_timesync_map_v1_s: the device's counter to UTC map and
+                        # the sync exchange that last updated it
+                        i64_ptr = <int64_t *> &value[0].value.bin[0]
+                        v['stdmsg_type'] = 'timesync_map'
+                        v['utc'] = i64_ptr[1]
+                        v['counter'] = u64_ptr[2]
+                        v['counter_rate'] = u64_ptr[3] / 4294967296.0
+                        v['counter_ppb'] = u64_ptr[4]
+                        v['sync_count_start'] = u64_ptr[5]
+                        v['sync_count_end'] = u64_ptr[6]
+                        v['sync_utc_recv'] = i64_ptr[7]
+                        v['sync_utc_send'] = i64_ptr[8]
+                        v['update_counter'] = u32_ptr[18]
                 elif value[0].value.bin[2] == 0x07:  # MB_STDMSG_MEM
                     if value[0].size < 32:
                         _log_c.warning('MB_STDMSG_MEM malformed: size %d < 32 byte header', value[0].size)

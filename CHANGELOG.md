@@ -23,7 +23,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.2
 
-2026 Oct 14
+2026 Oct 15
 
 * Added jsdrv_is_driver_thread() and Driver.is_driver_thread(), which
   report whether the caller is the driver thread that invokes the
@@ -41,6 +41,12 @@ This file contains the list of changes made to the Joulescope driver.
   with a zero-length packet, which arrives alone in about 1 of 12 stops.
   The message is now debug level and names the device and endpoint, as
   the WinUSB backend already handled this case silently.
+* The Python binding decodes the MB_STDMSG_TIMESYNC_MAP stdmsg, which the
+  JS320 publishes on s/ts/!map, into a dict with the counter to UTC map,
+  the sync exchange that last updated it, and the update counter.  This
+  exposes the sensor's time synchronization to tools: a JS320 sensor
+  clock 268 s behind the host was the cause of a three-instrument read
+  that never completed.
 
 
 ## 2.5.1
