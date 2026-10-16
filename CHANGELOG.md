@@ -21,6 +21,20 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.3
+
+2026 Oct 16
+
+* Fixed opening a device that another process holds on Windows.  The open
+  failed with `1 UNSPECIFIED`, and now fails at once with `21 IN_USE`, as
+  on Linux and macOS since 2.5.1.  The WinUSB backend now maps the
+  Windows error code, which it also logs, to a jsdrv error code.
+* Fixed the measure entry point on the JS110, which always exited with
+  `PARAMETER_INVALID` for `s/i/range/mode`.  On the JS110, that topic is
+  the range suppression mode, so the entry point now selects the range
+  with `s/i/range/select`, as the record and statistics entry points do.
+
+
 ## 2.5.2
 
 2026 Oct 15
@@ -47,14 +61,6 @@ This file contains the list of changes made to the Joulescope driver.
   exposes the sensor's time synchronization to tools: a JS320 sensor
   clock 268 s behind the host was the cause of a three-instrument read
   that never completed.
-* Fixed opening a device that another process holds on Windows.  The open
-  failed with `1 UNSPECIFIED`, and now fails at once with `21 IN_USE`, as
-  on Linux and macOS since 2.5.1.  The WinUSB backend now maps the
-  Windows error code, which it also logs, to a jsdrv error code.
-* Fixed the measure entry point on the JS110, which always exited with
-  `PARAMETER_INVALID` for `s/i/range/mode`.  On the JS110, that topic is
-  the range suppression mode, so the entry point now selects the range
-  with `s/i/range/select`, as the record and statistics entry points do.
 
 
 ## 2.5.1
