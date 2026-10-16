@@ -21,6 +21,14 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.4
+
+2026 Oct 16
+
+* Added Python 3.15 support.
+* Changed the Python package license metadata to an SPDX license expression.
+
+
 ## 2.5.3
 
 2026 Oct 16

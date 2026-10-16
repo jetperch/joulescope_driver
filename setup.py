@@ -232,7 +232,7 @@ setuptools.setup(
     url=about['__url__'],
     author=about['__author__'],
     author_email=about['__author_email__'],
-    license=about['__license__'],
+    license_expression=about['__license__'],
 
     # Classifiers help users find your project by categorizing it.
     #
@@ -258,6 +258,7 @@ setuptools.setup(
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
         'Programming Language :: Python :: 3.14',
+        'Programming Language :: Python :: 3.15',
         'Programming Language :: Python :: Implementation :: CPython',
 
         # Topics
