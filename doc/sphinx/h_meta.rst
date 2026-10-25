@@ -20,6 +20,7 @@ Metadata handling
 =================
 
 .. doxygengroup:: jsdrv_meta
+    :project: jsdrv
     :members:
 
 

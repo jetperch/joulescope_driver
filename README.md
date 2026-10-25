@@ -39,8 +39,8 @@ with the first-generation python driver including:
 
 For more information, see:
 
-* [getting started](doc/getting_started.md) (Python and C lifecycle)
-* [streaming topics](doc/streaming_topics.md) (statistics and sample payloads)
+* [getting started][getting_started] (Python and C lifecycle)
+* [streaming topics][streaming_topics] (statistics and sample payloads)
 * [source code](https://github.com/jetperch/joulescope_driver)
 * [documentation](https://joulescope-driver.readthedocs.io/en/latest/)
 * [pypi](https://pypi.org/project/pyjoulescope-driver/)
@@ -51,13 +51,13 @@ For more information, see:
 
 ## Python Installation
 
-The python bindings work with Python 3.12 and later.
+The python bindings work with the [supported Python versions][supported_platforms].
 To use the python bindings, ensure that you have a compatible version
 of python installed on your host computer.  Then:
 
     python -m pip install pyjoulescope_driver
 
-For Ubuntu, you will also need to [install the udev rules](#ubuntu-2204-lts).
+For Ubuntu, you will also need to [install the udev rules](#ubuntu).
 
 You can then run the pyjoulescope_driver python entry points:
 
@@ -88,7 +88,7 @@ For macOS, install homebrew, then:
     brew install pkgconfig python3
 
 
-### Ubuntu 26.04 LTS
+### Ubuntu
 
 For Ubuntu:
 
@@ -120,13 +120,13 @@ This package includes a command-line tool, jsdrv:
     jsdrv scan
 
 The build also produces `jsdrv_quickstart` from
-[example/quickstart.c](example/quickstart.c), the minimal C program
-described in [doc/getting_started.md](doc/getting_started.md).
+[example/quickstart.c][quickstart_c], the minimal C program
+described in [getting started][getting_started].
 
 
 ### Build python bindings
 
-Install a compatible version of Python 3.12 or later.  To install
+Install a [supported version of Python][supported_platforms].  To install
 the pyjoulescope_driver dependencies:
 
     cd {your/repos/joulescope_driver}
@@ -150,10 +150,10 @@ On Windows, you may be prompted to install the
 ## License
 
 The Joulescope driver source code is licensed under the
-[Apache-2.0 license](LICENSES/Apache-2.0.txt).
+[Apache-2.0 license][license].
 The project is free for commercial and non-commercial use.
-The bundled [third-party](third-party/README.md) libraries are provided
-under their respective licenses, as recorded in [REUSE.toml](REUSE.toml).
+The bundled [third-party][third_party] libraries are provided
+under their respective licenses, as recorded in [REUSE.toml][reuse_toml].
 
 The project is compliant with
 [Reuse Software](https://reuse.software/).
@@ -172,3 +172,12 @@ python -m reuse spdx
 
 Each GitHub release includes this SPDX SBOM as the
 `joulescope_driver-vX.Y.Z.spdx` asset.
+
+<!-- Absolute links so they also work on PyPI and in the Sphinx docs. -->
+[getting_started]: https://github.com/jetperch/joulescope_driver/blob/main/doc/getting_started.md
+[streaming_topics]: https://github.com/jetperch/joulescope_driver/blob/main/doc/streaming_topics.md
+[quickstart_c]: https://github.com/jetperch/joulescope_driver/blob/main/example/quickstart.c
+[license]: https://github.com/jetperch/joulescope_driver/blob/main/LICENSES/Apache-2.0.txt
+[third_party]: https://github.com/jetperch/joulescope_driver/blob/main/third-party/README.md
+[reuse_toml]: https://github.com/jetperch/joulescope_driver/blob/main/REUSE.toml
+[supported_platforms]: https://docs.joulescope.com/getting_started/install_ui.html#supported-platforms

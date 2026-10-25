@@ -20,4 +20,5 @@ C-String utility functions
 ==========================
 
 .. doxygengroup:: jsdrv_cstr
+    :project: jsdrv
     :members:

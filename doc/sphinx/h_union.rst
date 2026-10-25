@@ -20,4 +20,5 @@ Union value type
 ================
 
 .. doxygengroup:: jsdrv_union
+    :project: jsdrv
     :members:

@@ -20,4 +20,5 @@ Error codes
 ===========
 
 .. doxygengroup:: jsdrv_ec
+    :project: jsdrv
     :members:

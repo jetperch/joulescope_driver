@@ -171,6 +171,7 @@ cdef class TimeMap:
         """Get the time map data.
 
         :param index: The index for the time map which is one of:
+
             - None: return all time maps in the instance.
             - int index: Return only this index.
             - (int start_index, int end_index): Return this range.

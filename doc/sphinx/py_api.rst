@@ -14,7 +14,7 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 
-.. _py_api:
+.. _jsdrv_py_api:
 
 Python API
 ==========

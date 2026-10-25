@@ -15,7 +15,7 @@
 # limitations under the License.
 -->
 
-(readme)=
+(jsdrv_readme)=
 
 ```{include} ../../README.md
 ```

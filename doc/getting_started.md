@@ -37,7 +37,7 @@ Python:
     python -m pyjoulescope_driver scan
 
 On Linux, also install the udev rules described in the
-[README](../README.md).  `scan` lists the connected device paths.
+[README][readme].  `scan` lists the connected device paths.
 
 C: build the static library, the `jsdrv` command-line tool and the examples
 with CMake as described in the README.  `example/quickstart.c` is the C
@@ -264,3 +264,5 @@ and `s/p/ctrl`, then `s/stats/ctrl`, as the example above does.
   `DeviceFilterError`.  Pass a serial number or model.
 * **Closing a removed device** raises in Python and returns an error in C.
   Subscribe to `@/!remove`, or use `Driver.device_watch`, to track removal.
+
+[readme]: https://github.com/jetperch/joulescope_driver/blob/main/README.md

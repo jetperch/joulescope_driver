@@ -20,4 +20,5 @@ Topic string utility functions
 ==============================
 
 .. doxygengroup:: jsdrv_topic
+    :project: jsdrv
     :members:

@@ -15,7 +15,7 @@
 # limitations under the License.
 -->
 
-(changelog)=
+(jsdrv_changelog)=
 
 ```{include} ../../CHANGELOG.md
 ```

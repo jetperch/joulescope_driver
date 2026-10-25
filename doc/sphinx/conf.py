@@ -46,6 +46,7 @@ read_the_docs_build = os.environ.get('READTHEDOCS', None) == 'True'
 # -- General configuration ---------------------------------------------------
 
 master_doc = 'index'
+myst_heading_anchors = 3
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -61,7 +62,6 @@ extensions = [
 
 source_suffix = {
     '.rst': 'restructuredtext',
-    '.txt': 'markdown',
     '.md': 'markdown',
 }
 

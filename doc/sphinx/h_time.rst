@@ -14,10 +14,11 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 
-.. _h_time:
+.. _jsdrv_h_time:
 
 Time representation and functions
 =================================
 
 .. doxygengroup:: jsdrv_time
+    :project: jsdrv
     :members:

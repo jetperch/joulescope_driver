@@ -20,4 +20,5 @@ JSDRV API
 =========
 
 .. doxygengroup:: jsdrv_api
+    :project: jsdrv
     :members:

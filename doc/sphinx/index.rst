@@ -16,6 +16,10 @@
 
 .. Joulescope Driver documentation master file
 
+=================
+Joulescope Driver
+=================
+
 
 
 Table of Contents

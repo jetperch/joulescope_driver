@@ -21,6 +21,13 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.5
+
+2026 Oct 25 [in progress]
+
+* Updated documentation for doc.joulescope.com deployment.
+
+
 ## 2.5.4
 
 2026 Oct 16
