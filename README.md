@@ -180,4 +180,4 @@ Each GitHub release includes this SPDX SBOM as the
 [license]: https://github.com/jetperch/joulescope_driver/blob/main/LICENSES/Apache-2.0.txt
 [third_party]: https://github.com/jetperch/joulescope_driver/blob/main/third-party/README.md
 [reuse_toml]: https://github.com/jetperch/joulescope_driver/blob/main/REUSE.toml
-[supported_platforms]: https://docs.joulescope.com/getting_started/install_ui.html#supported-platforms
+[supported_platforms]: https://docs.joulescope.com/en/getting_started/install_ui.html#supported-platforms
