@@ -16,7 +16,10 @@
 -->
 # Resize the stream buffer on a sample rate change
 
-**Status**: proposed (needs a design decision)
+**Status**: decided 2026-10-27: keep the driver as is.  A general fix needs a
+full redistribution of all buffers.  The UI instead stops streaming, sets the
+rate, and restores streaming (pyjoulescope_ui `Device._signal_frequency_request`),
+which re-allocates the buffer at the new rate.
 **Created**: 2026-10-26
 
 ## Problem
