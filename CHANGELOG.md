@@ -23,9 +23,14 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.5
 
-2026 Oct 25 [in progress]
+2026 Oct 27
 
 * Updated documentation for doc.joulescope.com deployment.
+* Fixed the stream buffer dropping all new samples after a signal sample
+  rate decrease while streaming, such as 1 MHz to 10 kHz.  The decimated
+  sample ids jumped backwards, so the buffer treated every new sample as a
+  duplicate until streaming restarted.  The buffer now restarts on a sample
+  rate change.
 
 
 ## 2.5.4

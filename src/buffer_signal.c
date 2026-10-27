@@ -305,6 +305,10 @@ static void bits_zero(uint8_t * dst, uint64_t dst_bit, uint64_t bit_count) {
 }
 
 void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s * s) {
+    // A sample rate change rescales sample_id (s->sample_id / decimate_factor),
+    // so the new samples cannot continue the existing buffer.
+    bool rate_change = (self->hdr.sample_rate != s->sample_rate)
+            || (self->hdr.decimate_factor != s->decimate_factor);
     self->hdr.sample_id = s->sample_id;
     self->hdr.field_id = s->field_id;
     self->hdr.index = s->index;
@@ -324,6 +328,13 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
     uint64_t sample_id = s->sample_id / self->hdr.decimate_factor;
     uint64_t sample_id_end = sample_id + length - 1;
     uint64_t sample_id_expect = self->sample_id_head;
+    if (rate_change && (self->sample_id_head != 0)) {
+        JSDRV_LOGI("bufsig_recv_data %s: sample rate change, sample_rate=%d, decimate=%d",
+                   self->topic, s->sample_rate, s->decimate_factor);
+        self->size_in_utc = JSDRV_F64_TO_TIME(
+            ((double) self->N) / (self->hdr.sample_rate / self->hdr.decimate_factor));
+        clear(self, 0);
+    }
     if (self->sample_id_head == 0) {
         JSDRV_LOGI("received initial sample, ignore skips, "
                    "sample_id=%" PRIu64 " | %" PRIu64

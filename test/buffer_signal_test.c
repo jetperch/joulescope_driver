@@ -153,25 +153,31 @@ static void test_alloc_unsupported_element_type(void **state) {
     jsdrv_bufsig_free(&b);
 }
 
-static void insert_samples(struct bufsig_s * b, uint64_t sample_id_start, uint32_t length) {
+// sample_id_start is in decimated (buffer) samples.
+static void insert_samples_decimated(struct bufsig_s * b, uint64_t sample_id_start, uint32_t length,
+        uint32_t decimate_factor) {
     struct jsdrv_stream_signal_s s;
     memset(&s, 0, sizeof(s));
-    s.sample_id = sample_id_start;
+    s.sample_id = sample_id_start * decimate_factor;
     s.field_id = JSDRV_FIELD_CURRENT;
     s.index = 7;
     s.element_type = JSDRV_DATA_TYPE_FLOAT;
     s.element_size_bits = 32;
     s.element_count = length;
     s.sample_rate = 1000000;
-    s.decimate_factor = 1;
+    s.decimate_factor = decimate_factor;
     s.time_map.offset_time = JSDRV_TIME_HOUR;
     s.time_map.counter_rate = s.sample_rate;
     s.time_map.offset_counter = 0;
     float * f32 = (float *) s.data;
     for (uint32_t i = 0; i < s.element_count; ++i) {
-        f32[i] = (s.sample_id + i) / 1000000.0f;
+        f32[i] = (sample_id_start + i) / 1000000.0f;
     }
     jsdrv_bufsig_recv_data(b, &s);
+}
+
+static void insert_samples(struct bufsig_s * b, uint64_t sample_id_start, uint32_t length) {
+    insert_samples_decimated(b, sample_id_start, length, 1);
 }
 
 static void check_samples(struct jsdrv_buffer_response_s * rsp, uint64_t sample_id_start, uint64_t length) {
@@ -465,6 +471,37 @@ static void test_samples_wrap(void **state) {
     process_request(&b, &req, rsp);
     check_samples(rsp, 999990, 1000);
 
+    jsdrv_bufsig_free(&b);
+}
+
+static void test_sample_rate_decrease(void **state) {
+    // Changing the sample rate while streaming rescales sample_id by the new
+    // decimate factor.  The buffer must restart rather than drop the new
+    // samples as duplicates (1 MHz -> 10 kHz froze the live buffer).
+    initialize();
+    for (uint64_t sample_id = 2000000; sample_id < 2500000; sample_id += 1000) {
+        insert_samples(&b, sample_id, 1000);
+    }
+    insert_samples_decimated(&b, 25000, 1000, 100);
+    insert_samples_decimated(&b, 26000, 1000, 100);
+
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = 25000;
+    req.time.samples.length = 2000;
+    uint64_t rsp_u64[1 << 12];
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
+    process_request(&b, &req, rsp);
+    assert_int_equal(JSDRV_BUFFER_RESPONSE_SAMPLES, rsp->response_type);
+    assert_int_equal(25000, rsp->info.time_range_samples.start);
+    assert_int_equal(2000, rsp->info.time_range_samples.length);
+    assert_int_equal(100 * JSDRV_TIME_SECOND, rsp->info.size_in_utc);
+    float * data = (float *) rsp->data;
+    for (uint32_t i = 0; i < 2000; ++i) {
+        assert_float_equal((25000 + i) / 1000000.0f, data[i], 1e-12);
+    }
     jsdrv_bufsig_free(&b);
 }
 
@@ -844,6 +881,7 @@ int main(void) {
             cmocka_unit_test(test_samples_start_end),
             cmocka_unit_test(test_samples_all),
             cmocka_unit_test(test_samples_wrap),
+            cmocka_unit_test(test_sample_rate_decrease),
             cmocka_unit_test(test_summary_simple),
             cmocka_unit_test(test_summary_level1),
             cmocka_unit_test(test_summary_nan_on_out_of_range),
