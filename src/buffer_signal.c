@@ -474,7 +474,8 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
             rsp_empty(rsp);
             return;
         }
-        JSDRV_LOGW("sample req too early: %" PRIu64 " -> %" PRIu64, sample_id, sample_id_tail);
+        // Normal when the requested range extends before the retained data.
+        JSDRV_LOGD1("sample req too early: %" PRIu64 " -> %" PRIu64, sample_id, sample_id_tail);
         length -= k;
         sample_id = sample_id_tail;
         rsp->info.time_range_samples.start = sample_id_tail;
@@ -486,7 +487,7 @@ static void samples_get(struct bufsig_s * self, struct jsdrv_buffer_response_s *
     }
     uint64_t sample_id_end = sample_id + length - 1;
     if (sample_id_end >= self->sample_id_head) {
-        JSDRV_LOGW("sample req too late: %" PRIu64 " -> %" PRIu64, sample_id + length, self->sample_id_head - 1);
+        JSDRV_LOGD1("sample req too late: %" PRIu64 " -> %" PRIu64, sample_id + length, self->sample_id_head - 1);
         length = self->sample_id_head - sample_id;
         rsp->info.time_range_samples.end = self->sample_id_head - 1;
     }

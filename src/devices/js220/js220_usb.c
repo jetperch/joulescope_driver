@@ -282,6 +282,7 @@ struct dev_s {
     uint16_t in_frame_id;
     uint64_t in_frame_count;
     uint32_t stream_in_port_enable;
+    uint32_t rcv_discard_count;  // stream frames discarded while not open
 
     struct js220_port0_connect_s port0_connect;
     uint32_t fs;  // sampling frequency
@@ -741,7 +742,11 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
     }
 
-    JSDRV_LOGI("open complete");
+    if (d->rcv_discard_count) {
+        JSDRV_LOGI("%s discarded %" PRIu32 " frames before open", d->ll.prefix, d->rcv_discard_count);
+        d->rcv_discard_count = 0;
+    }
+    JSDRV_LOGI("%s open complete", d->ll.prefix);
     update_state(d, ST_OPEN);
     return 0;
 }
@@ -1049,7 +1054,7 @@ static int32_t on_sampling_frequency(struct dev_s * d,  const struct jsdrv_union
 
     stream_suspend(d);
     d->fs = v.value.u32;
-    JSDRV_LOGI("on_sampling_frequency(%lu)", d->fs);
+    JSDRV_LOGI("%s on_sampling_frequency(%lu)", d->ll.prefix, d->fs);
     uint32_t gpi_n = SAMPLING_FREQUENCY / d->fs;
     if (d->fs < FS_MIN_ON_INSTRUMENT) {
         gpi_n = SAMPLING_FREQUENCY / FS_MIN_ON_INSTRUMENT;
@@ -1953,6 +1958,10 @@ static void handle_stream_in_mem(struct dev_s * d, uint32_t * p_u32, uint16_t si
         }
     } else if ((msg->hdr.op == JS220_PORT3_OP_READ_DATA) && (d->mem_hdr.op == JS220_PORT3_OP_READ_REQ)) {
         mem_handle_read_data(d, msg);
+    } else if (msg->hdr.op == JS220_PORT3_OP_ACK) {
+        // Late ack from an earlier, abandoned operation (such as a killed
+        // host process).  Aborting here would fail the retry that repairs it.
+        JSDRV_LOGW("mem in op %d, ignore stale ack arg=%d", d->mem_hdr.op, msg->hdr.arg);
     } else {
         JSDRV_LOGW("mem in op %d, received %d, arg=%d", d->mem_hdr.op, msg->hdr.op, msg->hdr.arg);
         mem_complete(d, JSDRV_ERROR_ABORTED);
@@ -1975,7 +1984,9 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
         // todo keep statistics
     } else if (hdr.h.port_id >= 16U) {
         if (d->state != ST_OPEN) {
-            JSDRV_LOGI("rcv port %d but discard, device not open", (int) hdr.h.port_id);
+            if (0 == d->rcv_discard_count++) {  // summarized on open complete
+                JSDRV_LOGI("%s rcv port %d but discard, device not open", d->ll.prefix, (int) hdr.h.port_id);
+            }
         } else if (hdr.h.port_id == (16U + 13U)) {
             handle_uart_in(d, p_u32 + 1, hdr.h.length);
         } else if (hdr.h.port_id == (16U + 14U)) {
@@ -2165,9 +2176,9 @@ int32_t jsdrvp_ul_js220_usb_factory(struct jsdrvp_ul_device_s ** device, struct 
     d->publish_rate = PUB_RATE_DEFAULT;  // Hz
     d->i_scale = 1.0f;
     d->v_scale = 1.0f;
-    on_sampling_frequency(d, &jsdrv_union_u32_r(SAMPLING_FREQUENCY));
     d->context = context;
     d->ll = *ll;
+    on_sampling_frequency(d, &jsdrv_union_u32_r(SAMPLING_FREQUENCY));  // after ll: logs prefix
     d->ul.cmd_q = msg_queue_init();
     d->ul.join = join;
     jsdrv_list_initialize(&d->open_deferred);

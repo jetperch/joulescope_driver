@@ -619,12 +619,24 @@ static void test_mem_new_command_aborts_active(void ** state) {
     assert_mem_idle(d);
 }
 
+static void test_mem_stale_ack_ignored(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    cmd_publish(d, "h/mem/s/app1/!erase", &jsdrv_union_u32(0));
+    port3_expect(d, JS220_PORT3_OP_ERASE, 0, 0);
+    ack_in(d, JS220_PORT3_OP_WRITE_DATA, 0, 2048);  // from an abandoned write
+    assert_null(backend_find("h/mem/s/app1/!erase"));
+    assert_int_equal(JS220_PORT3_OP_ERASE, d->mem_hdr.op);
+    ack_in(d, JS220_PORT3_OP_ERASE, 0, 0);
+    assert_int_equal(0, backend_return_code("h/mem/s/app1/!erase"));
+    assert_mem_idle(d);
+}
+
 static void test_mem_unexpected_op_aborts(void ** state) {
     struct dev_s * d = (struct dev_s *) *state;
-    cmd_publish(d, "h/mem/c/pers/!read", &jsdrv_union_u32(256));
-    port3_expect(d, JS220_PORT3_OP_READ_REQ, 0, 256);
-    ack_in(d, JS220_PORT3_OP_ERASE, 0, 0);  // ack for an op that is not active
-    assert_int_equal(JSDRV_ERROR_ABORTED, backend_return_code("h/mem/c/pers/!read"));
+    cmd_publish(d, "h/mem/c/app/!erase", &jsdrv_union_u32(0));
+    port3_expect(d, JS220_PORT3_OP_ERASE, 0, 0);
+    port3_in(d, JS220_PORT3_OP_READ_DATA, 0, 0, 0, NULL, 0);  // not an ack
+    assert_int_equal(JSDRV_ERROR_ABORTED, backend_return_code("h/mem/c/app/!erase"));
     assert_mem_idle(d);
 }
 
@@ -843,6 +855,7 @@ int main(void) {
             cmocka_unit_test_setup_teardown(test_mem_erase, setup, teardown),
             cmocka_unit_test_setup_teardown(test_mem_erase_error, setup, teardown),
             cmocka_unit_test_setup_teardown(test_mem_new_command_aborts_active, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_mem_stale_ack_ignored, setup, teardown),
             cmocka_unit_test_setup_teardown(test_mem_unexpected_op_aborts, setup, teardown),
             cmocka_unit_test_setup_teardown(test_mem_invalid_region, setup, teardown),
             cmocka_unit_test_setup_teardown(test_mem_invalid_op, setup, teardown),

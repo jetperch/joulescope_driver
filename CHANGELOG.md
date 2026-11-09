@@ -21,6 +21,27 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.6
+
+2026 Nov 9
+
+* Made the JS220 sensor FPGA update recover from an interrupted write.
+  A partial FPGA image prevents the sensor from booting at all, and the
+  device then cannot be updated over USB.  The update now scales the
+  write timeout with the image size.  On failure, it erases the FPGA
+  image, resets the updater and retries.  When the update starts in the
+  updater, it first erases any partial FPGA image left by an earlier
+  update.  A power loss during the FPGA write is still not recoverable
+  over USB.
+* Fixed JS220 memory operations failing with ABORTED after an earlier
+  memory operation was abandoned.  Late acks for the abandoned operation
+  are now ignored.
+* Added the device prefix to the JS220 sampling frequency and open log
+  messages, and summarized stream frames discarded before open.
+* Reduced "sample req too early/late" buffer messages to debug.  They
+  are normal when a request extends past the retained data.
+
+
 ## 2.5.5
 
 2026 Oct 27

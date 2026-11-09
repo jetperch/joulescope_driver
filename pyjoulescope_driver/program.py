@@ -40,6 +40,10 @@ SUBTYPE_RESET = {
     SUBTYPE_CTRL_APP:      'app',
     SUBTYPE_SENSOR_FPGA:   None,
 }
+FPGA_ATTEMPTS = 3
+FPGA_ERASE_TIMEOUT = 10.0       # seconds
+FPGA_WRITE_TIMEOUT_MIN = 10.0   # seconds
+FPGA_WRITE_RATE_MIN = 20000.0   # bytes per second, about 1/10 of a USB HS JS220
 
 
 def version_to_str(version):
@@ -111,8 +115,8 @@ class Programmer:
                 raise TimeoutError(msg)
             time.sleep(0.1)
 
-    def reset_to(self, subtype):
-        if self._running_subtype == subtype:
+    def reset_to(self, subtype, force=None):
+        if self._running_subtype == subtype and not force:
             return
         reset_target = SUBTYPE_RESET[subtype]
         _log.info(f'reset to {reset_target} {subtype}')
@@ -123,10 +127,49 @@ class Programmer:
         self._running_subtype = subtype
         self._driver.open(self._path, mode='restore')
 
+    def _sensor_fpga_erase(self):
+        region = TARGETS[SUBTYPE_SENSOR_FPGA]['mem_region']
+        for attempt in range(FPGA_ATTEMPTS):
+            try:
+                self.publish(region + '/!erase', 0, timeout=FPGA_ERASE_TIMEOUT)
+                return
+            except (TimeoutError, RuntimeError) as ex:
+                # The first command after an abandoned write may report ABORTED.
+                _log.warning('sensor_fpga erase %d failed: %s', attempt, ex)
+
+    def _sensor_fpga_program(self, segment, progress, progress_msg, p1, p2):
+        """Program the sensor FPGA primary image (s/app1).
+
+        A partial encrypted image does not boot, and the FPGA also fails to
+        fall back to its golden image.  The device then cannot open, so it
+        cannot be repaired over USB.  On failure, erase so that the FPGA boots
+        golden.  Then reset the updater, which otherwise still waits for the
+        abandoned write, and retry.
+        """
+        region = TARGETS[SUBTYPE_SENSOR_FPGA]['mem_region']
+        img = segment['img']
+        write_timeout = max(FPGA_WRITE_TIMEOUT_MIN, len(img) / FPGA_WRITE_RATE_MIN)
+        for attempt in range(FPGA_ATTEMPTS):
+            attempt_msg = '' if attempt == 0 else f' (retry {attempt})'
+            if attempt:
+                self.reset_to(SUBTYPE_CTRL_UPDATER1, force=True)
+            try:
+                progress(p1, progress_msg + ' erase' + attempt_msg)
+                self.publish(region + '/!erase', 0, timeout=FPGA_ERASE_TIMEOUT)
+                progress(p2, progress_msg + ' write' + attempt_msg)
+                self.publish(region + '/!write', img, timeout=write_timeout)
+                return None
+            except (TimeoutError, RuntimeError) as ex:
+                _log.warning('sensor_fpga attempt %d failed: %s', attempt, ex)
+            self._sensor_fpga_erase()
+        raise RuntimeError('Failed to program sensor_fpga')
+
     def segment_program(self, segment, progress, progress_msg, p1, p2):
         subtype = segment['subtype']
         target = TARGETS[subtype]
         _log.info('segment_program %s', target['name'])
+        if subtype == SUBTYPE_SENSOR_FPGA:
+            return self._sensor_fpga_program(segment, progress, progress_msg, p1, p2)
         for attempt in range(10):
             attempt_msg = '' if attempt == 0 else f' (retry {attempt})'
             progress(p1, progress_msg + attempt_msg)
@@ -139,14 +182,10 @@ class Programmer:
             self.publish(target['mem_region'] + '/!erase', 0, timeout=10)
             progress(p2, progress_msg + ' write' + attempt_msg)
             self.publish(target['mem_region'] + '/!write', segment['img'], timeout=10)
-            reset_to = SUBTYPE_RESET[subtype]
-            if reset_to is None:
-                return None
-            else:
-                self.reset_to(subtype)
-                version = self.version
-                if self.target_id == target['target_id'] and version == segment['version']:
-                    return version
+            self.reset_to(subtype)
+            version = self.version
+            if self.target_id == target['target_id'] and version == segment['version']:
+                return version
         raise RuntimeError(f'Failed to program {target["name"]}')
 
     def query(self, topic):
@@ -186,6 +225,12 @@ def release_program(driver: Driver, device_path: str, image: bytes,
         ctrl_app_version = programmer.version
     else:
         ctrl_app_version = None
+        if SUBTYPE_SENSOR_FPGA in segments:
+            # An earlier update may have stopped mid FPGA write.  The next
+            # reset would boot the sensor from that partial image, which
+            # bricks it.  Erase now, while the FPGA still runs.  The FPGA
+            # then reports golden and is reprogrammed below.
+            programmer._sensor_fpga_erase()
 
     progress(0.02, 'Check updater2 version')
     try:
