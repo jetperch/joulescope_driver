@@ -288,6 +288,7 @@ struct dev_s {
     uint32_t fs;  // sampling frequency
     uint32_t signal_downsample_filter;
     uint32_t gpi_downsample_filter;
+    bool connect_rsp;  // the response to JS220_CTRL_OP_CONNECT has arrived
     uint32_t publish_rate;
 
     struct port_s ports[PORTS_LENGTH]; // one for each port
@@ -622,9 +623,12 @@ static int32_t ping_wait(struct dev_s * d, uint32_t value) {
 static int32_t wait_for_connect(struct dev_s * d) {
     // only allowed response at this time is BULK IN, port 0, JS220_PORT0_OP_CONNECT
     // however, process all to be robust
+    if (d->connect_rsp) {
+        return 0;  // already arrived, while the control request was still pending
+    }
     d->ll_await_break_on = BREAK_CONNECT;
     ll_await(d, msg_filter_none, NULL, 1000);
-    if (!d->ll_await_break) {
+    if (!d->connect_rsp) {
         JSDRV_LOGE("OP_CONNECT timed out");
         return JSDRV_ERROR_TIMED_OUT;
     }
@@ -712,6 +716,7 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         return rc;
     }
 
+    d->connect_rsp = false;
     JSDRV_RETURN_ON_ERROR(d_ctrl_req(d, JS220_CTRL_OP_CONNECT));
 
     if (JSDRV_DEVICE_OPEN_MODE_RAW != opt) {  // normal operation
@@ -1724,6 +1729,7 @@ static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t 
             send_to_frontend(d, "h/i_scale", &jsdrv_union_f32_r(d->i_scale));
             send_to_frontend(d, "h/v_scale", &jsdrv_union_f32_r(d->v_scale));
 
+            d->connect_rsp = true;
             if (d->ll_await_break_on == BREAK_CONNECT) {
                 d->ll_await_break_on = BREAK_NONE;
                 d->ll_await_break = true;
