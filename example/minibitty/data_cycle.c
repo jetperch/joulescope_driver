@@ -64,6 +64,20 @@ struct sig_s {
 };
 
 static struct sig_s sigs_[SIG_COUNT];
+
+// --comm-stats: ctrl-side link statistics (mb_comm_stats_v1_s).
+static const char * const COMM_TOPICS[] = {
+    "c/comm/sensor/tx/!stat", "c/comm/sensor/rx/!stat",
+    "c/comm/usbd/tx/!stat", "c/comm/usbd/rx/!stat",
+};
+#define COMM_COUNT (sizeof(COMM_TOPICS) / sizeof(COMM_TOPICS[0]))
+struct comm_stat_s {
+    volatile uint32_t frames;
+    volatile uint32_t frame_error;
+    volatile uint32_t link_error;
+    volatile uint32_t app_error;
+};
+static struct comm_stat_s comm_[COMM_COUNT];
 static volatile bool target_present_ = false;
 
 static struct {
@@ -76,6 +90,8 @@ static struct {
     bool idle;
     bool no_close;       // keep the removed device open, like a stuck host
     bool recover;
+    bool comm_stats;     // report ctrl link statistics per check
+    uint32_t enable_delay_ms;  // wait after open before enabling the streams
     bool power_restore;  // power cycle after a failure
     enum phase_e phase;
     uint32_t window_ms;
@@ -108,9 +124,27 @@ static int usage(void) {
         "  --window-ms <ms>    Data check window [2000].\n"
         "  --no-close          Do not close the removed device.\n"
         "  --recover           On failure, try ctrl 0 then 1, then close and reopen.\n"
+        "  --comm-stats        Also report the ctrl sensor and USB link statistics.\n"
+        "  --enable-delay-ms <ms>  Wait after open before enabling streams [0].\n"
         "  --no-power-restore  Do not power cycle after a failure.\n"
     );
     return 1;
+}
+
+static void on_comm_stat(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) topic;
+    struct comm_stat_s * c = (struct comm_stat_s *) user_data;
+    // An 8-byte stdmsg header, then mb_comm_stats_v1_s: two u64 counters,
+    // then frames, bytes, frame_error, link_error, app_error.
+    if ((value->type != JSDRV_UNION_STDMSG) || (value->size < (8 + 16 + 20))) {
+        return;
+    }
+    uint32_t u32[5];
+    memcpy(u32, value->value.bin + 8 + 16, sizeof(u32));
+    c->frames += u32[0];
+    c->frame_error += u32[2];
+    c->link_error += u32[3];
+    c->app_error += u32[4];
 }
 
 static void sigs_reset(void) {
@@ -217,6 +251,15 @@ static void subscribe_all(struct app_s * self, bool subscribe) {
             jsdrv_unsubscribe(self->context, topic.topic, on_data, &sigs_[k], 0);
         }
     }
+    for (uint32_t k = 0; cfg_.comm_stats && (k < COMM_COUNT); ++k) {
+        jsdrv_topic_set(&topic, self->device.topic);
+        jsdrv_topic_append(&topic, COMM_TOPICS[k]);
+        if (subscribe) {
+            jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_comm_stat, &comm_[k], 0);
+        } else {
+            jsdrv_unsubscribe(self->context, topic.topic, on_comm_stat, &comm_[k], 0);
+        }
+    }
 }
 
 static void streams_set(struct app_s * self, uint32_t value, uint32_t timeout_ms) {
@@ -235,6 +278,7 @@ static int32_t device_open(struct app_s * self) {
         printf("  open %s failed: %d\n", self->device.topic, (int) rc);
         return rc;
     }
+    memset((void *) comm_, 0, sizeof(comm_));  // from open: include the open burst
     subscribe_all(self, true);
     return 0;
 }
@@ -250,6 +294,7 @@ static void device_close(struct app_s * self) {
 // Return true when i, v, and statistics all arrive.
 static bool stream_check(struct app_s * self, const char * label, bool enable) {
     if (enable) {
+        sleep_ms(cfg_.enable_delay_ms);
         streams_set(self, 1, JSDRV_TIMEOUT_MS_DEFAULT);
     }
     sleep_ms(1000);
@@ -265,6 +310,11 @@ static bool stream_check(struct app_s * self, const char * label, bool enable) {
         ok &= (sigs_[k].frames > 0);
     }
     printf(" -> %s\n", ok ? "OK" : "NO DATA");
+    for (uint32_t k = 0; cfg_.comm_stats && (k < COMM_COUNT); ++k) {
+        struct comm_stat_s * c = &comm_[k];
+        printf("    %-24s frames=%u frame_error=%u link_error=%u app_error=%u\n", COMM_TOPICS[k],
+               c->frames, c->frame_error, c->link_error, c->app_error);
+    }
     return ok;
 }
 
@@ -479,6 +529,14 @@ int on_data_cycle(struct app_s * self, int argc, char * argv[]) {
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--no-close")) {
             cfg_.no_close = true;
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--enable-delay-ms")) {
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            ROE(arg_u32(argv, &cfg_.enable_delay_ms));
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--comm-stats")) {
+            cfg_.comm_stats = true;
             ARG_CONSUME();
         } else if (0 == strcmp(argv[0], "--recover")) {
             cfg_.recover = true;
