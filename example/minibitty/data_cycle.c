@@ -21,7 +21,7 @@
  * @brief Cut a streaming device's USB data lines (or power) through a USB
  *      Insight Hub, then check that signal data returns.
  *
- * See js320/doc/plans/usb_data_disconnect.md.
+ * See js320/doc/plans/completed/usb_data_disconnect.md.
  */
 
 #include "minibitty_exe_prv.h"

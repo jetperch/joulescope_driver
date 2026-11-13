@@ -770,7 +770,7 @@ static int32_t js320_handle_stream_ctrl(struct js320_drv_s * self,
 // Forget the stream enables.  Each open learns them from the device: the
 // 's' sync replays the device's s/X/ctrl (js320_on_instance_synced).
 // A ctrl published while closed is never sent, so it must not count as
-// sent.  See js320/doc/plans/usb_data_disconnect.md.
+// sent.  See js320/doc/plans/completed/usb_data_disconnect.md.
 static void js320_stream_ctrl_clear(struct js320_drv_s * self) {
     for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
         self->ports[k].enabled = false;
