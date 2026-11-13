@@ -117,6 +117,7 @@ typedef int (*command_fn)(struct app_s * self, int argc, char * argv[]);
 
 int on_adapter(struct app_s * self, int argc, char * argv[]);
 int on_cal(struct app_s * self, int argc, char * argv[]);
+int on_data_cycle(struct app_s * self, int argc, char * argv[]);
 int on_firmware(struct app_s * self, int argc, char * argv[]);
 int on_fwup(struct app_s * self, int argc, char * argv[]);
 int on_force_remove(struct app_s * self, int argc, char * argv[]);

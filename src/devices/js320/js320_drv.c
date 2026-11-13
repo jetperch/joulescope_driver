@@ -767,6 +767,17 @@ static int32_t js320_handle_stream_ctrl(struct js320_drv_s * self,
     return 0;
 }
 
+// Forget the stream enables.  Each open learns them from the device: the
+// 's' sync replays the device's s/X/ctrl (js320_on_instance_synced).
+// A ctrl published while closed is never sent, so it must not count as
+// sent.  See js320/doc/plans/usb_data_disconnect.md.
+static void js320_stream_ctrl_clear(struct js320_drv_s * self) {
+    for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
+        self->ports[k].enabled = false;
+        self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
+    }
+}
+
 // --- Driver callbacks ---
 
 static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s * dev,
@@ -775,6 +786,7 @@ static void js320_on_open(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s *
     self->dev = dev;
     self->context = jsdrvp_mb_dev_context(dev);
     self->identity = identity;
+    js320_stream_ctrl_clear(self);
     js320_jtag_on_open(self->jtag, dev);
     js320_fwup_on_open(self->fwup, dev);
     js320_cal_on_open(self->cal, dev);
@@ -869,9 +881,7 @@ static void js320_on_close(struct jsdrvp_mb_drv_s * drv, struct jsdrvp_mb_dev_s 
     memset(&self->gpi_ack,    0, sizeof(self->gpi_ack));
     memset(self->ctrl_ack,    0, sizeof(self->ctrl_ack));
     self->ctrl_ack_supported = false;
-    for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
-        self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
-    }
+    js320_stream_ctrl_clear(self);
     self->waiting_for_sensor = false;
     self->sensor_link_up = false;
     js320_fwup_on_close(self->fwup);
@@ -1542,6 +1552,14 @@ static void js320_on_instance_synced(struct jsdrvp_mb_drv_s * drv,
         // current values.  Runs BEFORE the 'h' replay so a cached h/fs
         // is applied with the correct mode.
         jsdrvp_mb_dev_topic_replay(dev, "s/dwnN");
+        // Adopt the device's i/v/p stream enables.  The device keeps
+        // streaming through a USB data-only disconnect, and the frontend
+        // drops a client's matching ctrl publish as a duplicate, so
+        // without this the driver drops every frame as disabled.
+        // After s/dwnN, so the enables do not arm its !ack window.
+        for (uint8_t ch = 5U; ch <= 7U; ++ch) {
+            jsdrvp_mb_dev_topic_replay(dev, PORT_DEFS[ch].ctrl_topic);
+        }
         jsdrvp_mb_dev_host_replay(dev, 'h');  // then on_instance_synced('h')
     }
 }
@@ -1607,9 +1625,7 @@ static int32_t js320_drv_factory(struct jsdrvp_mb_drv_s ** drv) {
     self->gpi_dwn_mode = JS320_DEFAULT_GPI_DWN_MODE;
     self->gpi_dwn_n = JS320_DEFAULT_GPI_DWN_N;
     js320_sbufs_clear(self);
-    for (uint32_t k = 0U; k < JS320_CH_COUNT; ++k) {
-        self->last_sent_ctrl[k] = JS320_CTRL_UNKNOWN;
-    }
+    js320_stream_ctrl_clear(self);
     self->jtag = js320_jtag_alloc();
     self->fwup = js320_fwup_alloc();
     self->cal = js320_cal_alloc();

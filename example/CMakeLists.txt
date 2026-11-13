@@ -48,6 +48,7 @@ add_executable(minibitty_exe
         minibitty/adapter.c
         minibitty/boot_info.c
         minibitty/cal.c
+        minibitty/data_cycle.c
         minibitty/firmware.c
         minibitty/force_remove.c
         minibitty/fpga_mem.c

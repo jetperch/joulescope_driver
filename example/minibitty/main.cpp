@@ -148,6 +148,7 @@ int32_t app_power_target_check(const char * power_device, const char * target_fi
 const struct command_s COMMANDS[] = {
         {"adapter", on_adapter, "MiniBitty adapter"},
         {"cal", on_cal, "JS320 calibration: read/copy slots, offset cal"},
+        {"data_cycle", on_data_cycle, "Cut USB data via a USB Insight Hub and check streaming"},
         {"firmware", on_firmware, "Update device firmware"},
         {"force_remove", on_force_remove, "Stress test: force-remove DUT during streaming"},
         {"fpga_mem", on_fpga_mem, "Program FPGA flash memory"},

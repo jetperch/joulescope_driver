@@ -78,6 +78,9 @@ struct test_capture_s {
     struct frontend_send_s frontend_sends[CAPTURE_MAX];
     uint32_t frontend_send_count;
 
+    char topic_replays[CAPTURE_MAX][64];
+    uint32_t topic_replay_count;
+
     struct jsdrv_time_map_s time_map;
 };
 
@@ -241,7 +244,10 @@ void jsdrvp_mb_dev_host_replay(struct jsdrvp_mb_dev_s * dev, char prefix) {
 
 void jsdrvp_mb_dev_topic_replay(struct jsdrvp_mb_dev_s * dev, const char * subtopic) {
     (void) dev;
-    (void) subtopic;
+    if (g_cap.topic_replay_count < CAPTURE_MAX) {
+        jsdrv_cstr_copy(g_cap.topic_replays[g_cap.topic_replay_count++], subtopic,
+                        sizeof(g_cap.topic_replays[0]));
+    }
 }
 
 
@@ -442,6 +448,50 @@ static void test_open_publishes_host_values(void ** state) {
     assert_int_equal(2000, g_cap.frontend_sends[0].u32);
     assert_int_equal(20, g_cap.frontend_sends[1].u32);
     assert_int_equal(JSDRV_UNION_F32, g_cap.frontend_sends[2].type);
+}
+
+
+// The sensor sync replays the device's i/v/p stream enables after s/dwnN,
+// so the driver adopts streams that survived a USB data-only disconnect.
+static void test_sensor_sync_replays_stream_ctrl(void ** state) {
+    struct js320_drv_s * self = *state;
+    self->drv.on_instance_synced(&self->drv, NULL, 's');
+    static const char * expect[] = {"s/dwnN", "s/i/ctrl", "s/v/ctrl", "s/p/ctrl"};
+    assert_int_equal(JSDRV_ARRAY_SIZE(expect), g_cap.topic_replay_count);
+    for (uint32_t i = 0; i < JSDRV_ARRAY_SIZE(expect); ++i) {
+        assert_string_equal(expect[i], g_cap.topic_replays[i]);
+    }
+}
+
+// A ctrl published while closed is never sent: open forgets it, and the
+// replayed device value is then forwarded and passes frames.
+static void test_open_clears_closed_stream_ctrl(void ** state) {
+    struct js320_drv_s * self = *state;
+    self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(0));
+    assert_int_equal(0, self->last_sent_ctrl[5]);
+
+    struct mb_link_identity_s identity = {.vendor_id = 0x1234, .product_id = 0x0003};
+    self->drv.on_open(&self->drv, NULL, &identity);
+    assert_false(self->ports[5].enabled);
+    assert_int_equal(JS320_CTRL_UNKNOWN, self->last_sent_ctrl[5]);
+
+    g_cap.device_publish_count = 0;
+    self->drv.handle_cmd(&self->drv, NULL, "s/i/ctrl", &jsdrv_union_u32_r(1));  // replay
+    assert_true(self->ports[5].enabled);
+    const struct device_publish_s * p = find_publish("s/i/ctrl");
+    assert_non_null(p);
+    assert_int_equal(1, p->value_u32);
+    assert_false(self->ctrl_ack[0].dropping);  // first send after open: no !ack window
+}
+
+// Close forgets the stream enables, so a late tail is dropped.
+static void test_close_clears_stream_ctrl(void ** state) {
+    struct js320_drv_s * self = *state;
+    enable_signal_stream(self);
+    assert_true(self->ports[5].enabled);
+    self->drv.on_close(&self->drv, NULL);
+    assert_false(self->ports[5].enabled);
+    assert_int_equal(JS320_CTRL_UNKNOWN, self->last_sent_ctrl[5]);
 }
 
 
@@ -1607,6 +1657,9 @@ int main(void) {
         cmocka_unit_test_setup_teardown(test_dwnN_signal_drop_after_stop,     test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_tail_after_close_no_window, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_open_publishes_host_values,      test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_sensor_sync_replays_stream_ctrl, test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_open_clears_closed_stream_ctrl,  test_setup, test_teardown),
+        cmocka_unit_test_setup_teardown(test_close_clears_stream_ctrl,        test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_dwnN_unchanged_device_value_no_window, test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_disabled_port_drops_tail,        test_setup, test_teardown),
         cmocka_unit_test_setup_teardown(test_ctrl_ack_unsupported_no_window,  test_setup, test_teardown),

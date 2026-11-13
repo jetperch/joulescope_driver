@@ -32,7 +32,7 @@ command crash had to be fixed in both `main` functions.
   `example/minibitty/main.cpp`.
 - `publish_str`, `device_prefix`, `on_device_add`, `on_device_remove` and
   `wait_for_condition`: `example/minibitty/power_cycle.c`,
-  `force_remove.c` and `fuzz_fwup.c`.
+  `force_remove.c`, `fuzz_fwup.c` and `data_cycle.c`.
 - A `publish` helper that formats and prints the value:
   `example/jsdrv/capture.c`, `demo.c`, `threads.c` and `stream_buffer.c`.
 - The `--device` option parsing: most `example/jsdrv` commands.
@@ -56,5 +56,5 @@ files.
 3. Move the hotplug target tracking (`device_prefix`, add and remove
    callbacks, `wait_for_condition`) and `publish_str` into
    `example/minibitty/target_tracker.c`, and use it from `power_cycle`,
-   `force_remove` and `fuzz_fwup`.
+   `force_remove`, `fuzz_fwup` and `data_cycle`.
 4. Share one `publish` helper in `example/jsdrv`.

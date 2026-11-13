@@ -21,6 +21,23 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.7
+
+2026 Nov 13 [in progress]
+
+* Fixed JS320 signal data that did not return after a USB data-only
+  disconnect while streaming, such as a cable glitch or a hub port reset
+  that keeps VBUS on.  The device kept streaming, but the reopened driver
+  dropped every i, v, and p frame as disabled, and the frontend dropped
+  the matching `s/X/ctrl` publish as a duplicate.  The driver now adopts
+  the device's stream enables on open, and forgets ctrl values published
+  while the device is closed.
+* Added the `minibitty data_cycle` command, which cuts a device's USB data
+  lines or power through a USB Insight Hub and checks that streaming
+  returns.  It runs `uih`, or with `--hub-stdio` asks its parent process to
+  switch the hub, as the joulescope_ci runner does.
+
+
 ## 2.5.6
 
 2026 Nov 9
