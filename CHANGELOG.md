@@ -32,6 +32,16 @@ This file contains the list of changes made to the Joulescope driver.
   the matching `s/X/ctrl` publish as a duplicate.  The driver now adopts
   the device's stream enables on open, and forgets ctrl values published
   while the device is closed.
+* Fixed JS220 open failing with "OP_CONNECT timed out" when the
+  instrument's connect response arrived before its control request
+  completed.  The backend completes the two transfers independently, so
+  either order can happen on any host.  The open now arms its wait before
+  sending the request, and a response or pong for another request no
+  longer ends an unrelated wait, such as the close after a failed open.
+  A connect response that reports an error, is short, or has a different
+  protocol version now fails the open at once with that error, and a
+  pong from an earlier ping no longer completes a later one.
+  Thanks to Maxime Vincent for finding and diagnosing the race (PR #24).
 * Added the `minibitty data_cycle` command, which cuts a device's USB data
   lines or power through a USB Insight Hub and checks that streaming
   returns.  It runs `uih`, or with `--hub-stdio` asks its parent process to

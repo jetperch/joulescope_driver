@@ -353,18 +353,22 @@ static void meta_in(struct dev_s * d, const char * topic, const char * meta) {
     pubsub_in(d, topic, &jsdrv_union_json(meta));
 }
 
-// Queue the instrument's "c/!pong" for a later ping_wait().
-static void pong_queue(struct dev_s * d, uint32_t value) {
-    uint8_t buf[JS220_USB_FRAME_LENGTH];
-    uint16_t sz = pubsub_pack(buf, JS220_TOPIC_PONG, &jsdrv_union_u32(value));
+// Queue an instrument frame for a later ll_await(), as the backend would.
+static void frame_queue(struct dev_s * d, uint8_t port_id, const void * payload, uint16_t length) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
     jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_STREAM_IN_DATA, sizeof(m->topic));
     uint32_t * frame = (uint32_t *) m->payload.bin;
     memset(frame, 0, FRAME_SIZE_BYTES);
-    frame[0] = js220_frame_hdr_pack(d->in_frame_id, sz, 1);
-    memcpy(&frame[1], buf, sz);
+    frame[0] = js220_frame_hdr_pack(d->in_frame_id, length, port_id);
+    memcpy(&frame[1], payload, length);
     m->value = jsdrv_union_bin(m->payload.bin, FRAME_SIZE_BYTES);
     msg_queue_push(d->ll.rsp_q, m);
+}
+
+// Queue the instrument's "c/!pong" for a later ping_wait().
+static void pong_queue(struct dev_s * d, uint32_t value) {
+    uint8_t buf[JS220_USB_FRAME_LENGTH];
+    frame_queue(d, 1, buf, pubsub_pack(buf, JS220_TOPIC_PONG, &jsdrv_union_u32(value)));
 }
 
 // Queue a message from the frontend, such as a host retained value.
@@ -672,9 +676,8 @@ static void test_mem_closed(void ** state) {
 
 // --- Host-side parameter tests ---
 
-static void connect_in(struct dev_s * d, uint32_t fw_version, uint32_t fpga_version) {
-    uint8_t buf[sizeof(struct js220_port0_header_s) + sizeof(struct js220_port0_connect_s)];
-    memset(buf, 0, sizeof(buf));
+static void connect_pack(uint8_t * buf, uint32_t fw_version, uint32_t fpga_version) {
+    memset(buf, 0, JS220_PORT0_CONNECT_LENGTH);
     struct js220_port0_header_s * hdr = (struct js220_port0_header_s *) buf;
     struct js220_port0_connect_s * c = (struct js220_port0_connect_s *) &hdr[1];
     hdr->op = JS220_PORT0_OP_CONNECT;
@@ -682,6 +685,11 @@ static void connect_in(struct dev_s * d, uint32_t fw_version, uint32_t fpga_vers
     c->fw_version = fw_version;
     c->hw_version = JSDRV_VERSION_ENCODE_U32(1, 0, 0);
     c->fpga_version = fpga_version;
+}
+
+static void connect_in(struct dev_s * d, uint32_t fw_version, uint32_t fpga_version) {
+    uint8_t buf[JS220_PORT0_CONNECT_LENGTH];
+    connect_pack(buf, fw_version, fpga_version);
     frame_in(d, 0, buf, (uint16_t) sizeof(buf));
 }
 
@@ -842,6 +850,192 @@ static void test_open_defaults_reset(void ** state) {
     assert_false(d->open_defaults_recording);
 }
 
+// --- Open sequence tests ---
+//
+// d_open() runs against responses queued in ll.rsp_q in the order the
+// backend delivers them.  The backend completes control and bulk IN
+// transfers independently, so either order is valid.
+
+#define FW_1_3 JSDRV_VERSION_ENCODE_U32(1, 3, 0)
+#define OPEN_FAST_MS (500U)  // well under the 1 s connect and ping timeouts
+
+static void connect_queue(struct dev_s * d, uint32_t protocol_major, uint16_t length) {
+    uint8_t buf[JS220_PORT0_CONNECT_LENGTH];
+    connect_pack(buf, FW_1_3, FW_1_3);
+    struct js220_port0_connect_s * c = (struct js220_port0_connect_s *)
+            &buf[sizeof(struct js220_port0_header_s)];
+    c->protocol_version = JSDRV_VERSION_ENCODE_U32(protocol_major, 0, 0);
+    frame_queue(d, 0, buf, length);
+}
+
+static void connect_queue_ok(struct dev_s * d) {
+    connect_queue(d, JS220_PROTOCOL_VERSION_MAJOR, JS220_PORT0_CONNECT_LENGTH);
+}
+
+// Queue the backend response to a d_ctrl_req(): one status byte.
+static void ctrl_in_queue(struct dev_s * d, uint8_t status) {
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc(d->context);
+    jsdrv_cstr_copy(m->topic, JSDRV_USBBK_MSG_CTRL_IN, sizeof(m->topic));
+    m->payload.bin[0] = status;
+    m->value = jsdrv_union_bin(m->payload.bin, 1);
+    msg_queue_push(d->ll.rsp_q, m);
+}
+
+// Queue the responses that precede OP_CONNECT: DISCONNECT, stream open.
+static void open_queue_start(struct dev_s * d) {
+    d->state = ST_OPENING;
+    ctrl_in_queue(d, 0);
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN,
+                                                     &jsdrv_union_i32(0));
+    msg_queue_push(d->ll.rsp_q, m);
+}
+
+static int32_t open_timed(struct dev_s * d, int32_t opt, uint32_t * elapsed_ms) {
+    uint32_t t_start = jsdrv_time_ms_u32();
+    int32_t rc = d_open(d, opt);
+    *elapsed_ms = jsdrv_time_ms_u32() - t_start;
+    return rc;
+}
+
+static void assert_open_complete(struct dev_s * d) {
+    assert_int_equal(ST_OPEN, d->state);
+    assert_int_equal(EVENT_IDLE, d->connect_event.state);
+    assert_int_equal(EVENT_IDLE, d->pong_event.state);
+    assert_int_equal(FW_1_3, d->port0_connect.fw_version);
+    assert_non_null(backend_find("c/fw/version"));
+    assert_null(msg_queue_pop_immediate(d->ll.rsp_q));
+}
+
+// The connect response is dispatched by the OP_CONNECT control wait.
+static void test_open_connect_before_ctrl_rsp(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    uint32_t elapsed_ms;
+    open_queue_start(d);
+    connect_queue_ok(d);
+    ctrl_in_queue(d, 0);
+    pong_queue(d, 1);
+    pong_queue(d, 2);
+    assert_int_equal(0, open_timed(d, JSDRV_DEVICE_OPEN_MODE_RESUME, &elapsed_ms));
+    assert_true(elapsed_ms < OPEN_FAST_MS);
+    assert_open_complete(d);
+}
+
+static void test_open_connect_after_ctrl_rsp(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    uint32_t elapsed_ms;
+    open_queue_start(d);
+    ctrl_in_queue(d, 0);
+    connect_queue_ok(d);
+    pong_queue(d, 1);
+    pong_queue(d, 2);
+    assert_int_equal(0, open_timed(d, JSDRV_DEVICE_OPEN_MODE_RESUME, &elapsed_ms));
+    assert_true(elapsed_ms < OPEN_FAST_MS);
+    assert_open_complete(d);
+}
+
+// A failed connect leaves nothing armed: the late response must not end
+// the close's control wait early.
+static void test_open_connect_timeout_then_late_rsp(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    uint32_t elapsed_ms;
+    open_queue_start(d);
+    ctrl_in_queue(d, 0);
+    assert_int_equal(JSDRV_ERROR_TIMED_OUT, open_timed(d, JSDRV_DEVICE_OPEN_MODE_RESUME, &elapsed_ms));
+    assert_int_equal(EVENT_IDLE, d->connect_event.state);
+
+    connect_queue_ok(d);
+    ctrl_in_queue(d, 0);
+    assert_int_equal(0, d_ctrl_req(d, JS220_CTRL_OP_DISCONNECT));
+    assert_int_equal(EVENT_IDLE, d->connect_event.state);
+    assert_null(msg_queue_pop_immediate(d->ll.rsp_q));
+}
+
+static void test_open_connect_protocol_mismatch(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    uint32_t elapsed_ms;
+    open_queue_start(d);
+    connect_queue(d, JS220_PROTOCOL_VERSION_MAJOR + 1, JS220_PORT0_CONNECT_LENGTH);
+    ctrl_in_queue(d, 0);
+    assert_int_equal(JSDRV_ERROR_NOT_SUPPORTED, open_timed(d, JSDRV_DEVICE_OPEN_MODE_RESUME, &elapsed_ms));
+    assert_true(elapsed_ms < OPEN_FAST_MS);
+    assert_int_equal(EVENT_IDLE, d->connect_event.state);
+    assert_int_equal(0, d->port0_connect.fw_version);  // not applied
+}
+
+static void test_open_connect_short(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    uint32_t elapsed_ms;
+    open_queue_start(d);
+    connect_queue(d, JS220_PROTOCOL_VERSION_MAJOR, JS220_PORT0_CONNECT_LENGTH - 4);
+    ctrl_in_queue(d, 0);
+    assert_int_equal(JSDRV_ERROR_INVALID_MESSAGE_LENGTH,
+                     open_timed(d, JSDRV_DEVICE_OPEN_MODE_RESUME, &elapsed_ms));
+    assert_true(elapsed_ms < OPEN_FAST_MS);
+    assert_int_equal(0, d->port0_connect.fw_version);  // not applied
+}
+
+// On failure, the instrument sends an empty payload and the error in status.
+static void test_open_connect_status_error(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    uint32_t elapsed_ms;
+    struct js220_port0_header_s hdr = {.op = JS220_PORT0_OP_CONNECT, .status = 7, .arg = 0};
+    open_queue_start(d);
+    ctrl_in_queue(d, 0);
+    frame_queue(d, 0, &hdr, (uint16_t) sizeof(hdr));
+    assert_int_equal(7, open_timed(d, JSDRV_DEVICE_OPEN_MODE_RESUME, &elapsed_ms));
+    assert_true(elapsed_ms < OPEN_FAST_MS);
+    assert_int_equal(EVENT_IDLE, d->connect_event.state);
+    assert_int_equal(0, d->port0_connect.fw_version);  // not applied
+}
+
+static void test_open_ctrl_error_disarms(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    uint32_t elapsed_ms;
+    open_queue_start(d);
+    ctrl_in_queue(d, 5);
+    assert_int_equal(5, open_timed(d, JSDRV_DEVICE_OPEN_MODE_RESUME, &elapsed_ms));
+    assert_int_equal(EVENT_IDLE, d->connect_event.state);
+}
+
+// RAW does not wait for the connect response, but still applies it.
+static void test_open_raw_applies_connect(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    uint32_t elapsed_ms;
+    open_queue_start(d);
+    ctrl_in_queue(d, 0);
+    assert_int_equal(0, open_timed(d, JSDRV_DEVICE_OPEN_MODE_RAW, &elapsed_ms));
+    assert_int_equal(ST_OPEN, d->state);
+    connect_in(d, FW_1_3, FW_1_3);
+    assert_int_equal(EVENT_IDLE, d->connect_event.state);
+    assert_int_equal(FW_1_3, d->port0_connect.fw_version);
+    assert_non_null(backend_find("c/fw/version"));
+}
+
+// A pong from an earlier ping does not complete a later one.
+static void test_ping_wait_ignores_stale_pong(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    pong_queue(d, 1);
+    pong_queue(d, 2);
+    assert_int_equal(0, ping_wait(d, 2));
+    assert_int_equal(EVENT_IDLE, d->pong_event.state);
+    assert_null(msg_queue_pop_immediate(d->ll.rsp_q));
+}
+
+static void test_ping_wait_stale_pong_only(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    pong_queue(d, 1);
+    assert_int_equal(JSDRV_ERROR_TIMED_OUT, ping_wait(d, 2));
+    assert_int_equal(EVENT_IDLE, d->pong_event.state);
+}
+
+// A pong arriving when no ping waits is forwarded, and completes nothing.
+static void test_pong_unsolicited(void ** state) {
+    struct dev_s * d = (struct dev_s *) *state;
+    pubsub_in(d, JS220_TOPIC_PONG, &jsdrv_union_u32(7));
+    assert_int_equal(EVENT_IDLE, d->pong_event.state);
+    assert_non_null(backend_find(JS220_TOPIC_PONG));
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test_setup_teardown(test_mem_read, setup, teardown),
@@ -866,6 +1060,17 @@ int main(void) {
             cmocka_unit_test_setup_teardown(test_filter, setup, teardown),
             cmocka_unit_test_setup_teardown(test_connect_publishes_rates, setup, teardown),
             cmocka_unit_test_setup_teardown(test_scale, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_connect_before_ctrl_rsp, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_connect_after_ctrl_rsp, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_connect_timeout_then_late_rsp, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_connect_protocol_mismatch, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_connect_short, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_connect_status_error, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_ctrl_error_disarms, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_open_raw_applies_connect, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_ping_wait_ignores_stale_pong, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_ping_wait_stale_pong_only, setup, teardown),
+            cmocka_unit_test_setup_teardown(test_pong_unsolicited, setup, teardown),
             cmocka_unit_test_setup_teardown(test_open_defaults_record, setup, teardown),
             cmocka_unit_test_setup_teardown(test_open_defaults_restore, setup, teardown),
             cmocka_unit_test_setup_teardown(test_open_defaults_late_done, setup, teardown),

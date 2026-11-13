@@ -254,10 +254,21 @@ struct field_def_s PORT_MAP[] = {
 
 JSDRV_STATIC_ASSERT(PORTS_LENGTH == JSDRV_ARRAY_SIZE(PORT_MAP), ports_length);
 
-enum break_e {
-    BREAK_NONE = 0,
-    BREAK_CONNECT = 1,
-    BREAK_PUBSUB_TOPIC = 2,
+// A request answered by an instrument event on the bulk IN stream rather
+// than by the backend response to the request itself.  The backend
+// completes control and bulk IN transfers independently, so the event may
+// arrive while another wait, such as the request's own control transfer,
+// dispatches the stream.  Arm the event before sending the request, and
+// wait with event_wait(), which returns it to EVENT_IDLE on every exit.
+enum event_state_e {
+    EVENT_IDLE = 0,     // no request outstanding: the event completes nothing
+    EVENT_PENDING = 1,  // request sent or about to be sent
+    EVENT_DONE = 2,     // event arrived, rc holds its result
+};
+
+struct event_s {
+    enum event_state_e state;
+    int32_t rc;
 };
 
 struct port_s {
@@ -291,10 +302,9 @@ struct dev_s {
     uint32_t publish_rate;
 
     struct port_s ports[PORTS_LENGTH]; // one for each port
-    enum break_e ll_await_break_on;
-    bool ll_await_break;
-    char ll_await_break_topic[JSDRV_TOPIC_LENGTH_MAX];
-    struct jsdrv_union_s ll_await_break_value;
+    struct event_s connect_event;  // port 0 connect response to JS220_CTRL_OP_CONNECT
+    struct event_s pong_event;     // JS220_TOPIC_PONG response to JS220_TOPIC_PING
+    uint32_t pong_value;           // the ping value that completes pong_event
     volatile bool do_exit;
     // Set when LL has emitted JSDRV_MSG_TYPE_LL_TERMINATED into ll.rsp_q.
     // Causes the UL thread to exit and emit DEVICE_REMOVE on msg_backend
@@ -383,12 +393,19 @@ static bool msg_filter_by_topic(void * user_data, struct dev_s * d, struct jsdrv
     return (0 == strcmp(msg->topic, topic));
 }
 
-static struct jsdrvp_msg_s * ll_await(struct dev_s * d, msg_filter_fn filter_fn, void * filter_user_data, uint32_t timeout_ms) {
+// Dispatch backend responses until filter_fn claims one, which is
+// returned, or until event (optional) is done or the timeout expires,
+// which return NULL.  Only the caller's own message or event ends the
+// wait, so events for other requests never abort it.
+static struct jsdrvp_msg_s * ll_await(struct dev_s * d, msg_filter_fn filter_fn, void * filter_user_data,
+                                      const struct event_s * event, uint32_t timeout_ms) {
     uint32_t t_now = jsdrv_time_ms_u32();
     uint32_t t_end = t_now + timeout_ms;
-    d->ll_await_break = false;
 
-    while (!d->ll_await_break && !d->do_exit) {
+    while (!d->do_exit) {
+        if (event && (EVENT_DONE == event->state)) {
+            return NULL;  // may have completed before this wait started
+        }
 #if _WIN32
         HANDLE h = msg_queue_handle_get(d->ll.rsp_q);
         WaitForSingleObject(h, timeout_ms);
@@ -420,7 +437,42 @@ static struct jsdrvp_msg_s * ll_await(struct dev_s * d, msg_filter_fn filter_fn,
 }
 
 static struct jsdrvp_msg_s * ll_await_topic(struct dev_s * d, const char * topic, uint32_t timeout_ms) {
-    return ll_await(d, msg_filter_by_topic, (void *) topic, timeout_ms);
+    return ll_await(d, msg_filter_by_topic, (void *) topic, NULL, timeout_ms);
+}
+
+static void event_arm(struct event_s * event) {
+    event->state = EVENT_PENDING;
+    event->rc = 0;
+}
+
+static void event_disarm(struct event_s * event) {
+    event->state = EVENT_IDLE;
+    event->rc = 0;
+}
+
+// Returns true if the event was pending and is now done.
+static bool event_complete(struct event_s * event, int32_t rc) {
+    if (EVENT_PENDING != event->state) {
+        return false;
+    }
+    event->state = EVENT_DONE;
+    event->rc = rc;
+    return true;
+}
+
+// Wait for an armed event, then disarm it.  Returns the event's result.
+static int32_t event_wait(struct dev_s * d, struct event_s * event, uint32_t timeout_ms) {
+    ll_await(d, msg_filter_none, NULL, event, timeout_ms);
+    int32_t rc;
+    if (EVENT_DONE == event->state) {
+        rc = event->rc;
+    } else if (d->do_exit) {
+        rc = JSDRV_ERROR_ABORTED;
+    } else {
+        rc = JSDRV_ERROR_TIMED_OUT;
+    }
+    event_disarm(event);
+    return rc;
 }
 
 #if 0
@@ -590,51 +642,43 @@ exit:
     return rv;
 }
 
-static int32_t ll_await_pubsub_topic(struct dev_s * d, const char * topic, uint32_t timeout_ms) {
-    jsdrv_cstr_copy(d->ll_await_break_topic, topic, sizeof(d->ll_await_break_topic));
-    d->ll_await_break_on = BREAK_PUBSUB_TOPIC;
-    ll_await(d, msg_filter_none, NULL, timeout_ms);
-    if (!d->ll_await_break) {
-        JSDRV_LOGE("ll_await_pubsub_topic(%s) timed out", topic);
-        return JSDRV_ERROR_TIMED_OUT;
-    }
-    return 0;
-}
-
+// The instrument answers in order, so the pong carrying this value also
+// confirms that it processed everything published before the ping.
 static int32_t ping_wait(struct dev_s * d, uint32_t value) {
     JSDRV_LOGD1("ping_wait(%" PRIu32 ")", value);
+    d->pong_value = value;
+    event_arm(&d->pong_event);
     bulk_out_publish(d, JS220_TOPIC_PING, &jsdrv_union_u32(value));
-
-    if (!ll_await_pubsub_topic(d, JS220_TOPIC_PONG, 1000)) {
-        if ((d->ll_await_break_value.type != JSDRV_UNION_U32) || (d->ll_await_break_value.value.u32 != value)) {
-            JSDRV_LOGW("ping_wait value mismatch: send=%" PRIu32 ", recv=%" PRIu32,
-                     value, d->ll_await_break_value.value.u32);
-        } else {
-            JSDRV_LOGD1("ping_wait(%" PRIu32 ") done", value);
-        }
-        return 0;
+    int32_t rc = event_wait(d, &d->pong_event, 1000);
+    if (rc) {
+        JSDRV_LOGW("ping_wait(%" PRIu32 ") failed %" PRId32, value, rc);
     } else {
-        JSDRV_LOGW("ping_wait(%" PRIu32 ") timed out", value);
-        return JSDRV_ERROR_TIMED_OUT;
+        JSDRV_LOGD1("ping_wait(%" PRIu32 ") done", value);
     }
+    return rc;
 }
 
-static int32_t wait_for_connect(struct dev_s * d) {
-    // only allowed response at this time is BULK IN, port 0, JS220_PORT0_OP_CONNECT
-    // however, process all to be robust
-    d->ll_await_break_on = BREAK_CONNECT;
-    ll_await(d, msg_filter_none, NULL, 1000);
-    if (!d->ll_await_break) {
-        JSDRV_LOGE("OP_CONNECT timed out");
-        return JSDRV_ERROR_TIMED_OUT;
+// Send JS220_CTRL_OP_CONNECT and wait for its port 0 connect response.
+// The response may arrive before the control transfer completes.
+static int32_t connect_req(struct dev_s * d) {
+    event_arm(&d->connect_event);
+    int32_t rc = d_ctrl_req(d, JS220_CTRL_OP_CONNECT);
+    if (rc) {
+        event_disarm(&d->connect_event);
+        return rc;
     }
-    return 0;
+    rc = event_wait(d, &d->connect_event, 1000);
+    if (JSDRV_ERROR_TIMED_OUT == rc) {
+        JSDRV_LOGE("OP_CONNECT timed out");
+    } else if (rc) {
+        JSDRV_LOGE("OP_CONNECT failed %" PRId32, rc);
+    }
+    return rc;
 }
 
 static int32_t d_open_ll(struct dev_s * d, int32_t opt) {
     JSDRV_LOGI("open_ll(opt=%d)", opt);
     int32_t rc;
-    d->ll_await_break_on = BREAK_NONE;
 
     if (d->state != ST_CLOSED) {
         JSDRV_LOGE("open_ll but not closed");
@@ -664,8 +708,8 @@ static void d_reset(struct dev_s * d) {
     d->in_frame_count = 0;
     d->stream_in_port_enable = 0;
 
-    d->ll_await_break_on = BREAK_NONE;
-    d->ll_await_break = false;
+    event_disarm(&d->connect_event);
+    event_disarm(&d->pong_event);
     sbuf_f32_clear(&d->i_buf);
     sbuf_f32_clear(&d->v_buf);
     sbuf_f32_clear(&d->p_buf);
@@ -712,10 +756,8 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
         return rc;
     }
 
-    JSDRV_RETURN_ON_ERROR(d_ctrl_req(d, JS220_CTRL_OP_CONNECT));
-
     if (JSDRV_DEVICE_OPEN_MODE_RAW != opt) {  // normal operation
-        JSDRV_RETURN_ON_ERROR(wait_for_connect(d));
+        JSDRV_RETURN_ON_ERROR(connect_req(d));
         JSDRV_LOGD1("query metadata");
         d->open_defaults_recording = (JSDRV_DEVICE_OPEN_MODE_DEFAULTS == opt);
         JSDRV_RETURN_ON_ERROR(bulk_out_publish(d, "$", &jsdrv_union_null()));
@@ -739,6 +781,8 @@ static int32_t d_open(struct dev_s * d, int32_t opt) {
             JSDRV_LOGW("invalid open mode: %d", opt);
         }
     } else {
+        // RAW does not wait: handle_port0_connect applies the response when it arrives.
+        JSDRV_RETURN_ON_ERROR(d_ctrl_req(d, JS220_CTRL_OP_CONNECT));
         send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
     }
 
@@ -1670,63 +1714,70 @@ static void handle_statistics_in(struct dev_s * d, uint32_t * p_u32, uint16_t si
     }
 }
 
+// Validate and apply the port 0 connect response.  Returns 0 or the error
+// that fails the open waiting on it.
+static int32_t handle_port0_connect(struct dev_s * d, const struct js220_port0_header_s * hdr,
+                                    const struct js220_port0_connect_s * connect, uint16_t size) {
+    char prot_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
+    char fw_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
+    char hw_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
+    char fpga_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
+
+    JSDRV_LOGI("port0 connect rsp");
+    if (hdr->status) {  // failure: the payload is empty
+        JSDRV_LOGE("connect failed, status %u", (unsigned) hdr->status);
+        return hdr->status;
+    }
+    if (size < JS220_PORT0_CONNECT_LENGTH) {
+        JSDRV_LOGE("connect message size mismatch: %u < %u",
+                   (unsigned) size, (unsigned) JS220_PORT0_CONNECT_LENGTH);
+        return JSDRV_ERROR_INVALID_MESSAGE_LENGTH;
+    }
+    jsdrv_version_u32_to_str(connect->protocol_version, prot_ver_str, sizeof(prot_ver_str));
+    if (JSDRV_VERSION_DECODE_U32_MAJOR(connect->protocol_version) != JS220_PROTOCOL_VERSION_MAJOR) {
+        JSDRV_LOGE("Protocol version mismatch: local=%s, remote=%s",
+                 JS220_PROTOCOL_VERSION_STR, prot_ver_str);
+        return JSDRV_ERROR_NOT_SUPPORTED;
+    }
+    d->port0_connect = *connect;
+    struct js220_port0_connect_s * c = &d->port0_connect;
+
+    jsdrv_version_u32_to_str(c->fw_version, fw_ver_str, sizeof(fw_ver_str));
+    jsdrv_version_u32_to_str(c->hw_version, hw_ver_str, sizeof(hw_ver_str));
+    jsdrv_version_u32_to_str(c->fpga_version, fpga_ver_str, sizeof(fpga_ver_str));
+    JSDRV_LOGI("JS220 app_id=%d, FW=%s, HW=%s, FPGA=%s, protocol=%s",
+             c->app_id, fw_ver_str, hw_ver_str, fpga_ver_str, prot_ver_str);
+    send_to_frontend(d, "c/fw/version$", &jsdrv_union_cjson_r(fw_ver_meta));
+    send_to_frontend(d, "c/hw/version$", &jsdrv_union_cjson_r(hw_ver_meta));
+    send_to_frontend(d, "h/fs$", &jsdrv_union_cjson_r(sampling_frequency_meta));
+    send_to_frontend(d, "h/fp$", &jsdrv_union_cjson_r(publish_rate_meta));
+    if (has_on_instrument_downsample(d)) {
+        send_to_frontend(d, "h/filter$", &jsdrv_union_cjson_r(signal_downsample_filter));
+    }
+    send_to_frontend(d, "h/i_scale$", &jsdrv_union_cjson_r(i_scale_factor));
+    send_to_frontend(d, "h/v_scale$", &jsdrv_union_cjson_r(v_scale_factor));
+    send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
+    send_to_frontend(d, "c/fw/version", &jsdrv_union_u32_r(c->fw_version));
+    send_to_frontend(d, "c/hw/version", &jsdrv_union_u32_r(c->hw_version));
+    send_to_frontend(d, "s/fpga/version", &jsdrv_union_u32_r(c->fpga_version));
+    send_to_frontend(d, "h/filter", &jsdrv_union_u32_r(0));
+    send_to_frontend(d, "h/fs", &jsdrv_union_u32_r(d->fs));
+    send_to_frontend(d, "h/fp", &jsdrv_union_u32_r(d->publish_rate));
+    send_to_frontend(d, "h/i_scale", &jsdrv_union_f32_r(d->i_scale));
+    send_to_frontend(d, "h/v_scale", &jsdrv_union_f32_r(d->v_scale));
+    return 0;
+}
+
 static void handle_stream_in_port0(struct dev_s * d, uint32_t * p_u32, uint16_t size) {
-    (void) d;
-    (void) size;
     struct js220_port0_header_s * hdr = (struct js220_port0_header_s *) p_u32;
     union js220_port0_payload_u * p = (union js220_port0_payload_u *) &hdr[1];
 
     switch (hdr->op) {
         case JS220_PORT0_OP_CONNECT: {
-            char prot_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
-            char fw_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
-            char hw_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
-            char fpga_ver_str[JSDRV_VERSION_STR_LENGTH_MAX];
-
-            d->port0_connect = p->connect;
-            struct js220_port0_connect_s * c = &d->port0_connect;
-
-            JSDRV_LOGI("port0 connect rsp");
-            jsdrv_version_u32_to_str(c->protocol_version, prot_ver_str, sizeof(prot_ver_str));
-            if (JSDRV_VERSION_DECODE_U32_MAJOR(c->protocol_version) != JS220_PROTOCOL_VERSION_MAJOR) {
-                JSDRV_LOGE("Protocol version mismatch: local=%s, remote=%s",
-                         JS220_PROTOCOL_VERSION_STR, prot_ver_str);
-                break;
-            }
-
-            size_t sz_expect = sizeof(struct js220_port0_header_s) + sizeof(struct js220_port0_connect_s);
-            if (size < sz_expect) {
-                JSDRV_LOGW("connect message size mismatch: %zu < %zu", size, sz_expect);
-                break;
-            }
-
-            jsdrv_version_u32_to_str(c->fw_version, fw_ver_str, sizeof(fw_ver_str));
-            jsdrv_version_u32_to_str(c->hw_version, hw_ver_str, sizeof(hw_ver_str));
-            jsdrv_version_u32_to_str(c->fpga_version, fpga_ver_str, sizeof(fpga_ver_str));
-            JSDRV_LOGI("JS220 app_id=%d, FW=%s, HW=%s, FPGA=%s, protocol=%s",
-                     c->app_id, fw_ver_str, hw_ver_str, fpga_ver_str, prot_ver_str);
-            send_to_frontend(d, "c/fw/version$", &jsdrv_union_cjson_r(fw_ver_meta));
-            send_to_frontend(d, "c/hw/version$", &jsdrv_union_cjson_r(hw_ver_meta));
-            send_to_frontend(d, "h/fs$", &jsdrv_union_cjson_r(sampling_frequency_meta));
-            send_to_frontend(d, "h/fp$", &jsdrv_union_cjson_r(publish_rate_meta));
-            if (has_on_instrument_downsample(d)) {
-                send_to_frontend(d, "h/filter$", &jsdrv_union_cjson_r(signal_downsample_filter));
-            }
-            send_to_frontend(d, "h/i_scale$", &jsdrv_union_cjson_r(i_scale_factor));
-            send_to_frontend(d, "h/v_scale$", &jsdrv_union_cjson_r(v_scale_factor));
-            send_to_frontend(d, "h/!reset$", &jsdrv_union_cjson_r(reset_meta));
-            send_to_frontend(d, "c/fw/version", &jsdrv_union_u32_r(c->fw_version));
-            send_to_frontend(d, "c/hw/version", &jsdrv_union_u32_r(c->hw_version));
-            send_to_frontend(d, "s/fpga/version", &jsdrv_union_u32_r(c->fpga_version));
-            send_to_frontend(d, "h/filter", &jsdrv_union_u32_r(0));
-            send_to_frontend(d, "h/fs", &jsdrv_union_u32_r(d->fs));
-            send_to_frontend(d, "h/fp", &jsdrv_union_u32_r(d->publish_rate));
-            send_to_frontend(d, "h/i_scale", &jsdrv_union_f32_r(d->i_scale));
-            send_to_frontend(d, "h/v_scale", &jsdrv_union_f32_r(d->v_scale));
-
-            if (d->ll_await_break_on == BREAK_CONNECT) {
-                d->ll_await_break_on = BREAK_NONE;
-                d->ll_await_break = true;
+            int32_t rc = handle_port0_connect(d, hdr, &p->connect, size);
+            if (!event_complete(&d->connect_event, rc)) {
+                // RAW open, or late: applied, but no open is waiting on it.
+                JSDRV_LOGI("port0 connect rsp without pending connect, rc=%" PRId32, rc);
             }
             break;
         }
@@ -1809,10 +1860,15 @@ static void handle_stream_in_pubsub(struct dev_s * d, uint32_t * p_u32, uint16_t
     jsdrv_union_value_to_str(&m->value, buf, (uint32_t) sizeof(buf), 1);
     JSDRV_LOGD1("publish from dev: %s %s", p->topic, buf);
 
-    if ((d->ll_await_break_on == BREAK_PUBSUB_TOPIC) && (0 == strcmp(d->ll_await_break_topic, p->topic))) {
-        d->ll_await_break_on = BREAK_NONE;
-        d->ll_await_break = true;
-        d->ll_await_break_value = m->value;
+    if ((EVENT_PENDING == d->pong_event.state) && (0 == strcmp(JS220_TOPIC_PONG, p->topic))) {
+        if ((JSDRV_UNION_U32 == m->value.type) && (d->pong_value == m->value.value.u32)) {
+            event_complete(&d->pong_event, 0);
+        } else {
+            // From an earlier, abandoned ping: completing on it would
+            // let the open race ahead of the instrument.
+            JSDRV_LOGW("ignore stale pong %" PRIu32 ", expect %" PRIu32,
+                       m->value.value.u32, d->pong_value);
+        }
     }
 
     if (d->open_defaults_recording) {
