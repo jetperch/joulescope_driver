@@ -32,7 +32,8 @@ command crash had to be fixed in both `main` functions.
   `example/minibitty/main.cpp`.
 - `publish_str`, `device_prefix`, `on_device_add`, `on_device_remove` and
   `wait_for_condition`: `example/minibitty/power_cycle.c`,
-  `force_remove.c`, `fuzz_fwup.c` and `data_cycle.c`.
+  `force_remove.c`, `fuzz_fwup.c` and `data_cycle.c`, plus `publish_u32` in
+  `data_cycle.c` and `publish_load.c`.
 - A `publish` helper that formats and prints the value:
   `example/jsdrv/capture.c`, `demo.c`, `threads.c` and `stream_buffer.c`.
 - The `--device` option parsing: most `example/jsdrv` commands.

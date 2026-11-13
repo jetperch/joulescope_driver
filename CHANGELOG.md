@@ -36,6 +36,8 @@ This file contains the list of changes made to the Joulescope driver.
   lines or power through a USB Insight Hub and checks that streaming
   returns.  It runs `uih`, or with `--hub-stdio` asks its parent process to
   switch the hub, as the joulescope_ci runner does.
+* Added the `minibitty publish_load` command, which streams a chosen set of
+  JS320 signals and counts confirmed sensor publishes that time out.
 
 
 ## 2.5.6

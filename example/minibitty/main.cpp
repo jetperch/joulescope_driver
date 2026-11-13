@@ -160,6 +160,7 @@ const struct command_s COMMANDS[] = {
         {"loopback", on_loopback, "Loopback data to test throughput and error rate"},
         {"mem", on_mem, "Memory read/write/erase/verify via stdmsg_mem protocol"},
         {"power_cycle", on_power_cycle, "Power cycle target and test open reliability"},
+        {"publish_load", on_publish_load, "Confirmed JS320 sensor publishes while streaming"},
         {"publish", on_publish_cmd, "Publish a single value to a device topic"},
         {"stream", on_stream, "Stream data"},
         {"stream_test", on_stream_test, "JS320 streaming pipeline regression test"},

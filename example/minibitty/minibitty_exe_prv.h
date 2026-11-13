@@ -134,6 +134,7 @@ int on_suspend_test(struct app_s * self, int argc, char * argv[]);
 int on_throughput(struct app_s * self, int argc, char * argv[]);
 int on_timesync(struct app_s * self, int argc, char * argv[]);
 int on_publish_cmd(struct app_s * self, int argc, char * argv[]);
+int on_publish_load(struct app_s * self, int argc, char * argv[]);
 int on_pubsub_info(struct app_s * self, int argc, char * argv[]);
 int on_state_get(struct app_s * self, int argc, char * argv[]);
 int on_pubsub_sniffer(struct app_s * self, int argc, char * argv[]);
