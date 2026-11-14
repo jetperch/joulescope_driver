@@ -342,12 +342,13 @@ void jsdrv_bufsig_recv_data(struct bufsig_s * self, struct jsdrv_stream_signal_s
                    s->sample_id, sample_id, s->sample_rate, s->decimate_factor);
         clear(self, sample_id);
     } else if (sample_id_end < sample_id_expect) {
-        JSDRV_LOGI("bufsig_recv_data %s: duplicate rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
+        // The whole frame is before the head: the sample_id source restarted
+        // without a device remove.  Restart the buffer here and keep this
+        // frame.  Dropping it instead would drop every later frame too, until
+        // sample_id caught up with the old head.
+        JSDRV_LOGI("bufsig_recv_data %s: restart rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
                    self->topic, sample_id, sample_id_end, sample_id_expect);
-        if ((sample_id_expect - sample_id_end) < self->N) {
-            clear(self, sample_id);
-        }
-        return;
+        clear(self, sample_id);
     } else if (sample_id < sample_id_expect) {
         JSDRV_LOGI("bufsig_recv_data %s: overlap rcv=[%" PRIu64 ", %" PRIu64 "] expect=%" PRIu64,
                    self->topic, sample_id, sample_id_end, sample_id_expect);

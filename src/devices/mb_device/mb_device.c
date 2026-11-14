@@ -203,6 +203,14 @@ struct state_fetch_s {
 // consecutive lost or late pongs before escalating.
 #define LINK_SILENCE_TIMEOUT       (3 * KEEPALIVE_INTERVAL)
 
+// Handshake replay escalation.  A replay that the device never answers,
+// such as when the backend read pipe died without a removal, would
+// otherwise request forever while the client believes the device is open.
+// After this many CONNECT_REQ timeouts (250 ms each), close and reopen the
+// backend on the same session, and repeat until the device answers or is
+// removed.  A client open is bounded by its API open timeout instead.
+#define LINK_REPLAY_REOPEN_TIMEOUTS (20)
+
 enum events_e {
     EV_INVALID,
     EV_STATE_ENTER,
@@ -271,6 +279,11 @@ struct jsdrvp_mb_dev_s {
     // AWAIT_REQ and it will never transmit), so replay the link handshake.
     uint8_t revalidate_remaining;  // pings left; 0 = revalidation inactive
     int64_t revalidate_utc;        // next ping (or give-up) time
+
+    // Handshake replay escalation (see LINK_REPLAY_REOPEN_TIMEOUTS).
+    bool     link_replay;          // replaying the handshake of an open session
+    bool     ll_reopen;            // closing the backend to reopen it
+    uint16_t link_request_timeouts;  // CONNECT_REQ timeouts in this backend open
 
     // Session keep-alive (see KEEPALIVE_INTERVAL).  keepalive_en is a
     // diagnostic/test knob (topic h/link/keep); disabling it lets
@@ -363,6 +376,8 @@ static void send_frame_ctrl_to_device(struct jsdrvp_mb_dev_s * d, uint8_t ctrl) 
 static bool on_ll_open(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     self->ll_open_rc = 0;
+    self->ll_reopen = false;
+    self->link_request_timeouts = 0;
     self->out_frame_id = 0;
     self->in_frame_id = 0;
     // Drop any stale timesync maps from a previous open so accessors
@@ -415,6 +430,34 @@ static bool on_link_identify(struct jsdrvp_mb_dev_s * self, uint8_t event) {
         (uint32_t *) &identity, sizeof(identity) >> 2);
     timeout_set(self);
     return true;
+}
+
+static bool on_link_replay_start(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) event;
+    self->link_replay = true;
+    self->link_request_timeouts = 0;
+    return true;
+}
+
+// Guard: a replay that the device has not answered reopens the backend.
+static bool on_link_request_timeout_reopen(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) event;
+    if (!self->link_replay || self->finalize_pending || self->ll_terminated) {
+        return false;
+    }
+    if (++self->link_request_timeouts < LINK_REPLAY_REOPEN_TIMEOUTS) {
+        return false;
+    }
+    JSDRV_LOGW("link replay unanswered after %u requests: reopen the backend",
+               (unsigned) self->link_request_timeouts);
+    self->ll_reopen = true;
+    return true;
+}
+
+// Guard: the backend closed for a replay reopen, so open it again.
+static bool on_ll_close_reopen(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    (void) event;
+    return self->ll_reopen && !self->finalize_pending && !self->ll_terminated;
 }
 
 // --- State fetch: !state GET to restore device retained values ---
@@ -1257,6 +1300,7 @@ static void state_set_on_rsp(struct jsdrvp_mb_dev_s * self, uint8_t status) {
 static bool on_open_enter(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
     timeout_clear(self);
+    self->link_replay = false;
     self->keepalive_utc = jsdrv_time_utc();  // first keep-alive immediately
     self->rx_utc = self->keepalive_utc;      // fresh silence window per session
 
@@ -1353,7 +1397,15 @@ static bool on_ll_close_timeout(struct jsdrvp_mb_dev_s * self, uint8_t event) {
 
 static bool on_ll_close_exit(struct jsdrvp_mb_dev_s * self, uint8_t event) {
     (void) event;
-    if (self->finalize_pending) {
+    if (self->link_replay) {
+        // A replay reopen is internal, and the client still believes the
+        // device is open.  If the reopen failed, such as for a removed
+        // device, the removal reaches the client instead.
+        if (!on_ll_close_reopen(self, event)) {
+            JSDRV_LOGW("link replay ended closed, rc=%d", (int) self->ll_open_rc);
+            self->link_replay = false;
+        }
+    } else if (self->finalize_pending) {
         // no response
     } else if (self->ll_open_rc) {
         // The backend open failed, so answer the waiting API open now,
@@ -1407,6 +1459,7 @@ const struct state_machine_transition_s state_machine_ll_bulk_open[] = {
 
 const struct state_machine_transition_s state_machine_link_request[] = {
     {EV_LINK_CONNECT_ACK, ST_LINK_IDENTITY, NULL},
+    {EV_TIMEOUT, ST_LL_CLOSE, on_link_request_timeout_reopen},
     {EV_TIMEOUT, ST_LINK_REQUEST, NULL},
     {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
     TRANSITION_END
@@ -1473,7 +1526,7 @@ const struct state_machine_transition_s state_machine_open[] = {
     // Host resume found the link dead: replay the handshake on the same
     // session.  ST_LINK_REQUEST -> ST_LINK_IDENTITY -> ST_OPEN re-runs
     // the open restore (drv->on_open + state_fetch).
-    {EV_LINK_REVALIDATE_FAILED, ST_LINK_REQUEST, NULL},
+    {EV_LINK_REVALIDATE_FAILED, ST_LINK_REQUEST, on_link_replay_start},
     TRANSITION_END
 };
 
@@ -1497,6 +1550,8 @@ const struct state_machine_transition_s state_machine_ll_close_pend[] = {
 };
 
 const struct state_machine_transition_s state_machine_ll_close[] = {
+    {EV_BACKEND_CLOSE_ACK, ST_LL_OPEN, on_ll_close_reopen},
+    {EV_TIMEOUT, ST_LL_OPEN, on_ll_close_reopen},
     {EV_BACKEND_CLOSE_ACK, ST_CLOSED, NULL},
     {EV_TIMEOUT, ST_CLOSED, on_ll_close_timeout},
     TRANSITION_END
@@ -1554,6 +1609,12 @@ static bool transitions_evaluate(struct jsdrvp_mb_dev_s * self, uint8_t state, u
 }
 
 static void state_machine_process(struct jsdrvp_mb_dev_s * self, uint8_t event) {
+    if ((event == EV_API_OPEN_REQUEST) || (event == EV_API_CLOSE_REQUEST)) {
+        // A client open or close ends any replay: a close must be acked,
+        // and an open is bounded by its own timeout.
+        self->link_replay = false;
+        self->ll_reopen = false;
+    }
     if (!transitions_evaluate(self, 0, event)) {
         if (!transitions_evaluate(self, self->state, event)) {
             // API-level events (OPEN/CLOSE) should never be silently

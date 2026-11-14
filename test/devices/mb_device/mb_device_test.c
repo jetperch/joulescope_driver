@@ -529,6 +529,132 @@ static void test_ll_open_nack_reports_error(void ** state) {
     device_free(d);
 }
 
+// --- Handshake replay that never gets an answer escalates to a reopen ---
+
+// Escalate a synthetic open session to a handshake replay (ST_LINK_REQUEST).
+static void enter_replay(struct jsdrvp_mb_dev_s * d) {
+    enter_open(d);
+    time_now_ += LINK_SILENCE_TIMEOUT + JSDRV_TIME_MILLISECOND * 100;
+    driver_thread_timed_work(d);  // first ping
+    for (uint32_t k = 0; k < REVALIDATE_PING_RETRIES; ++k) {
+        time_now_ += REVALIDATE_PING_INTERVAL;
+        driver_thread_timed_work(d);
+    }
+    assert_int_equal(ST_LINK_REQUEST, d->state);
+    ll_cmd_q_drain(d);
+}
+
+// Let n CONNECT_REQ timeouts elapse.
+static void link_request_timeouts(struct jsdrvp_mb_dev_s * d, uint32_t n) {
+    for (uint32_t k = 0; k < n; ++k) {
+        time_now_ += JSDRV_TIME_SECOND / 4;
+        driver_thread_timed_work(d);
+    }
+}
+
+// Count ll.cmd_q messages with the topic, and free everything.
+static uint32_t ll_cmd_q_count(struct jsdrvp_mb_dev_s * d, const char * topic) {
+    uint32_t count = 0;
+    struct jsdrvp_msg_s * m;
+    while (NULL != (m = msg_queue_pop_immediate(d->ll.cmd_q))) {
+        if (0 == strcmp(topic, m->topic)) {
+            ++count;
+        }
+        jsdrvp_msg_free(d->context, m);
+    }
+    return count;
+}
+
+static void test_replay_escalates_to_ll_reopen(void ** state) {
+    (void) state;
+    struct jsdrvp_mb_dev_s * d = device_alloc();
+    enter_replay(d);
+
+    // The device does not answer: keep requesting, then reopen the backend,
+    // such as for a read pipe that died without a removal.
+    link_request_timeouts(d, LINK_REPLAY_REOPEN_TIMEOUTS - 1);
+    assert_int_equal(ST_LINK_REQUEST, d->state);
+    link_request_timeouts(d, 1);
+    assert_int_equal(ST_LL_CLOSE, d->state);
+    assert_int_equal(1, ll_cmd_q_count(d, JSDRV_MSG_CLOSE));
+
+    // The reopen is internal: the frontend sees no close or open.
+    ll_rsp(d, JSDRV_MSG_CLOSE, 0);
+    assert_int_equal(ST_LL_OPEN, d->state);
+    assert_int_equal(1, ll_cmd_q_count(d, JSDRV_MSG_OPEN));
+    ll_rsp(d, JSDRV_MSG_OPEN, 0);
+    assert_int_equal(ST_LL_BULK_OPEN, d->state);
+    ll_rsp(d, JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN, 0);
+    assert_int_equal(ST_LINK_REQUEST, d->state);
+    assert_int_equal(0, backend_send_count_);
+
+    // Still no answer: the reopen repeats.
+    ll_cmd_q_drain(d);
+    link_request_timeouts(d, LINK_REPLAY_REOPEN_TIMEOUTS);
+    assert_int_equal(ST_LL_CLOSE, d->state);
+    assert_int_equal(0, backend_send_count_);
+
+    ll_cmd_q_drain(d);
+    device_free(d);
+}
+
+static void test_replay_reopen_failure_ends_closed(void ** state) {
+    (void) state;
+    struct jsdrvp_mb_dev_s * d = device_alloc();
+    enter_replay(d);
+    link_request_timeouts(d, LINK_REPLAY_REOPEN_TIMEOUTS);
+    ll_rsp(d, JSDRV_MSG_CLOSE, 0);
+    assert_int_equal(ST_LL_OPEN, d->state);
+
+    // The device is gone: end closed and leave it to the removal.
+    ll_rsp(d, JSDRV_MSG_OPEN, JSDRV_ERROR_NOT_FOUND);
+    assert_int_equal(ST_LL_CLOSE, d->state);
+    ll_rsp(d, JSDRV_MSG_CLOSE, 0);
+    assert_int_equal(ST_CLOSED, d->state);
+    assert_int_equal(0, backend_send_count_);
+
+    ll_cmd_q_drain(d);
+    device_free(d);
+}
+
+static void test_replay_reopen_close_request_acks(void ** state) {
+    (void) state;
+    struct jsdrvp_mb_dev_s * d = device_alloc();
+    enter_replay(d);
+    link_request_timeouts(d, LINK_REPLAY_REOPEN_TIMEOUTS);
+    ll_rsp(d, JSDRV_MSG_CLOSE, 0);
+    assert_int_equal(ST_LL_OPEN, d->state);
+
+    // The client closes during the reopen: close normally and ack it.
+    state_machine_process(d, EV_API_CLOSE_REQUEST);
+    assert_int_equal(ST_LL_CLOSE, d->state);
+    ll_rsp(d, JSDRV_MSG_CLOSE, 0);
+    assert_int_equal(ST_CLOSED, d->state);
+    assert_int_equal(1, backend_send_count_);
+    assert_string_equal("u/js320/test/" JSDRV_MSG_CLOSE "#", backend_last_topic_);
+
+    ll_cmd_q_drain(d);
+    device_free(d);
+}
+
+static void test_open_link_request_does_not_reopen(void ** state) {
+    (void) state;
+    struct jsdrvp_mb_dev_s * d = device_alloc();
+    d->state = ST_CLOSED;
+
+    // A client open that the device never answers is bounded by the API open
+    // timeout, so it keeps requesting rather than reopening.
+    state_machine_process(d, EV_API_OPEN_REQUEST);
+    ll_rsp(d, JSDRV_MSG_OPEN, 0);
+    ll_rsp(d, JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN, 0);
+    assert_int_equal(ST_LINK_REQUEST, d->state);
+    link_request_timeouts(d, 2 * LINK_REPLAY_REOPEN_TIMEOUTS);
+    assert_int_equal(ST_LINK_REQUEST, d->state);
+
+    ll_cmd_q_drain(d);
+    device_free(d);
+}
+
 // --- Test: device-initiated PING is answered with PONG ---
 
 static void test_ping_answered_with_pong(void ** state) {
@@ -746,6 +872,10 @@ int main(void) {
             cmocka_unit_test(test_publish_rejected_when_closed),
             cmocka_unit_test(test_silence_revalidate_pong),
             cmocka_unit_test(test_silence_escalates_to_replay),
+            cmocka_unit_test(test_replay_escalates_to_ll_reopen),
+            cmocka_unit_test(test_replay_reopen_failure_ends_closed),
+            cmocka_unit_test(test_replay_reopen_close_request_acks),
+            cmocka_unit_test(test_open_link_request_does_not_reopen),
             cmocka_unit_test(test_silence_disabled_with_keepalive),
             cmocka_unit_test(test_silence_only_in_open),
     };

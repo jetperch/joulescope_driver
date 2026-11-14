@@ -505,6 +505,50 @@ static void test_sample_rate_decrease(void **state) {
     jsdrv_bufsig_free(&b);
 }
 
+static void restart_check(struct bufsig_s * b, uint64_t start, uint64_t length) {
+    struct jsdrv_buffer_request_s req;
+    memset(&req, 0, sizeof(req));
+    req.version = 1;
+    req.time_type = JSDRV_TIME_SAMPLES;
+    req.time.samples.start = start;
+    req.time.samples.length = length;
+    uint64_t rsp_u64[1 << 12];
+    struct jsdrv_buffer_response_s * rsp = (struct jsdrv_buffer_response_s *) rsp_u64;
+    assert_int_equal(0, process_request(b, &req, rsp));
+    check_samples(rsp, start, length);
+    float * data = (float *) rsp->data;
+    for (uint64_t i = 0; i < length; ++i) {
+        assert_false(isnan(data[i]));  // assert_float_equal accepts NaN
+    }
+}
+
+static void test_sample_id_restart_far_back(void **state) {
+    // A sample_id source that restarts without a device remove, such as a
+    // device reset, jumps back by more than the buffer.  The buffer must
+    // restart there, not drop every later frame as a duplicate.
+    initialize();
+    for (uint64_t sample_id = 2000000; sample_id < 2100000; sample_id += 1000) {
+        insert_samples(&b, sample_id, 1000);
+    }
+    insert_samples(&b, 1000, 1000);
+    insert_samples(&b, 2000, 1000);
+    restart_check(&b, 1000, 2000);
+    jsdrv_bufsig_free(&b);
+}
+
+static void test_sample_id_restart_near_back(void **state) {
+    // A backward jump within the buffer also restarts it, and keeps the
+    // first frame after the jump.
+    initialize();
+    for (uint64_t sample_id = 2000000; sample_id < 2100000; sample_id += 1000) {
+        insert_samples(&b, sample_id, 1000);
+    }
+    insert_samples(&b, 1950000, 1000);
+    insert_samples(&b, 1951000, 1000);
+    restart_check(&b, 1950000, 2000);
+    jsdrv_bufsig_free(&b);
+}
+
 static void test_summary_simple(void **state) {
     initialize();
     insert_samples(&b, 1000, 1000);
@@ -882,6 +926,8 @@ int main(void) {
             cmocka_unit_test(test_samples_all),
             cmocka_unit_test(test_samples_wrap),
             cmocka_unit_test(test_sample_rate_decrease),
+            cmocka_unit_test(test_sample_id_restart_far_back),
+            cmocka_unit_test(test_sample_id_restart_near_back),
             cmocka_unit_test(test_summary_simple),
             cmocka_unit_test(test_summary_level1),
             cmocka_unit_test(test_summary_nan_on_out_of_range),

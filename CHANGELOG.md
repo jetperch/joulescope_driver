@@ -23,8 +23,11 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.7
 
-2026 Nov 13 [in progress]
+2026 Nov 14
 
+* Bumped JS320 firmware from 1.1.13 to 1.1.14, which fixes sensor commands
+  lost right after open and sensor replies lost while streaming near the
+  sensor link capacity.
 * Fixed JS320 signal data that did not return after a USB data-only
   disconnect while streaming, such as a cable glitch or a hub port reset
   that keeps VBUS on.  The device kept streaming, but the reopened driver
@@ -42,6 +45,19 @@ This file contains the list of changes made to the Joulescope driver.
   protocol version now fails the open at once with that error, and a
   pong from an earlier ping no longer completes a later one.
   Thanks to Maxime Vincent for finding and diagnosing the race (PR #24).
+* Fixed the buffer dropping all new samples after a sample_id that jumps
+  back by more than the buffer length without a device remove, such as a
+  device reset.  The waveform then stopped updating while statistics
+  continued.  Any backward jump now restarts the buffer and keeps the new
+  samples.
+* Fixed the Windows bulk IN pipe stopping for good when WinUsb_ReadPipe
+  fails at once with no other read pending.  It now schedules the same
+  throttled re-arm as a failed read.
+* Fixed an open MiniBitty device (JS320) that stops answering without a
+  removal: the handshake replay requested forever while the client saw the
+  device as open.  After 5 s of unanswered requests, the driver now closes
+  and reopens the backend on the same session, and repeats until the
+  device answers or is removed.
 * Added the `minibitty data_cycle` command, which cuts a device's USB data
   lines or power through a USB Insight Hub and checks that streaming
   returns.  It runs `uih`, or with `--hub-stdio` asks its parent process to

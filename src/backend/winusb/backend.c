@@ -335,14 +335,17 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
         }
     }
 
+    if (!rc) {
+        // A ReadPipe that fails at once raises no completion event, so with
+        // no other read pending nothing would ever re-arm the pipe.
+        rc = bulk_in_pend(b);
+    }
     if (rc) {
         // One backoff step per pass, not per errored transfer: a suspend fails
         // all outstanding reads at once.
         bulk_in_retry_schedule(b);
-        return rc;
-    } else {
-        return bulk_in_pend(b);
     }
+    return rc;
 }
 
 static struct bulk_in_s * bulk_in_initialize(struct dev_s * dev, uint8_t pipe_id) {
