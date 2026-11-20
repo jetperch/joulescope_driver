@@ -21,6 +21,19 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.8
+
+2026 Nov 20 (unreleased)
+
+* Fixed occasional JS110 and JS220 sample drops on macOS during long
+  full-rate streaming.  macOS background bursts, such as its scheduled
+  photo and model analysis, delayed the USB threads by up to 19 ms, while
+  the queued bulk IN transfers held only about 16 ms of data.  The libusb
+  backend (macOS and Linux) now queues 16 transfers per stream, about
+  64 ms, and on macOS the backend and libusb event threads run at the
+  user-interactive quality of service.
+
+
 ## 2.5.7
 
 2026 Nov 14
