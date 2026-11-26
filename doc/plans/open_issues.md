@@ -30,7 +30,8 @@ archived in `completed/`:
 - `completed/dead_api_audit.md`: declared but unimplemented public API.
 
 Every item below was checked against the code on 2026-10-06.  Locations
-are current as of that date.  Follow CLAUDE.md for each item: write a
+are current as of that date, except section 2, which was re-checked on
+2026-11-19 (jsdrv 2.5.7).  Follow CLAUDE.md for each item: write a
 mini-plan for anything larger than a local fix, and add tests.  Mark
 items `[x]` as they land, with the commit.
 
@@ -60,8 +61,9 @@ mini-plan first.
 
 ### Features (Phase 6 of the 2026-07 review)
 
-- [ ] JS220 `JSDRV_DEVICE_OPEN_MODE_DEFAULTS` is a no-op
+- [x] JS220 `JSDRV_DEVICE_OPEN_MODE_DEFAULTS` is a no-op
       (`js220_usb.c:712-717`), while JS320 implements it.
+      Done: `e01817d` (#16), `open_defaults_restore()` in `js220_usb.c`.
 - [ ] UART: ship or remove.  The JS220 `handle_uart_in` is an empty stub
       (`js220_usb.c:1464-1469`).  JS320 channel 13 has no ctrl topic and
       `sample_rate 0` (`js320_drv.c:124`).  Topic names differ:
@@ -100,25 +102,29 @@ mini-plan first.
 ## 2. Correctness bugs
 
 - [ ] JS220 statistics `decimate_factor` is always 2
-      (`js220_stats.c:25-39`), so charge and energy use the wrong scale
-      when on-instrument sinc1 decimation is active.
+      (`devices/js220/js220_stats.c:34`): it reads the header bits that
+      `:26` already requires to equal `0x92`.  If on-instrument sinc1
+      decimation can change the stats rate, charge and energy use the
+      wrong scale.  Verify first: confirm from the JS220 gateware whether
+      the stats header ever reports a factor other than 2.  If not, this
+      is a cosmetic hardcode, not a scale bug.
 - [ ] JS110 sample processor delay: the emitted sample is 64 samples old
-      (`js110_sample_processor.c:164-165,235`) but is stamped with the
-      current `sample_id` (`js110_usb.c:1348`).  About 32 µs bias at
+      (`js110_sample_processor.c:164-165,236`) but is stamped with the
+      current `sample_id` (`js110_usb.c:1353`).  About 32 µs bias at
       2 Msps.
 - [ ] `jsdrv_downsample` group delay is computed (`downsample.c:81-150`)
       but has no accessor and is never compensated.
-- [ ] `src/pubsub.c:381-382`: the return-code suffix is appended without
+- [ ] `src/pubsub.c:446-447`: the return-code suffix is appended without
       a bounds check.  A 63-character topic writes past the end.
-- [ ] `src/pubsub.c:379`: `publish_return_code` creates topic nodes for
+- [ ] `src/pubsub.c:439`: `publish_return_code` creates topic nodes for
       unknown topics, so malformed responses grow the tree.
-- [ ] `src/time.c:59`: divides by `counter_rate` with no zero check, and
-      `jsdrv_tmf_get` can return 0 (`time_map_filter.c:122`).
-- [ ] `src/buffer_signal.c:674-675`: divides before the
-      `entries_length == 0` guard at :683.  Unreachable today.
-- [ ] `src/topic.c:44,52-53`: the `'/'` append has no bounds check, and
-      the terminator write depends on `jsdrv_fatal` not returning.
-- [ ] `src/log.c:239-255`: `jsdrv_log_unregister` returns 0 when the
+- [ ] `src/time.c:60`: divides by `counter_rate` with no zero check, and
+      `jsdrv_tmf_get` can return 0 (`time_map_filter.c:123`).
+- [ ] `src/buffer_signal.c:688-689`: divides before the
+      `entries_length == 0` guard at :697.  Unreachable today.
+- [ ] `src/topic.c:44-45,51-52`: the `'/'` append has no bounds check,
+      and the terminator write depends on `jsdrv_fatal` not returning.
+- [ ] `src/log.c:240-256`: `jsdrv_log_unregister` returns 0 when the
       handler is not found.
 
 ## 3. Threading and memory (from code_cleanup_plan.md)
@@ -209,6 +215,7 @@ mini-plan first.
 
 Not merged here, since each one has its own scope: `pubsub_api.md`, `example_dedup.md`,
 `mem_transaction_dedup.md` (not started), `emulated_device.md`,
-`node_maintenance.md`, `libusb_backend_test_harness.md`,
+`completed/node_maintenance.md`, `libusb_backend_test_harness.md`,
 `distributed_pubsub.md`, `log_format_checks.md`, `ul_thread_loop_dedup.md`,
-`usb_suspend_resume_windows_macos.md`, `linux_host_sleep_repro.md`.
+`usb_suspend_resume_windows_macos.md`,
+`completed/linux_host_sleep_repro.md`.

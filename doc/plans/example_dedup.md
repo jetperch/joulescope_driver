@@ -17,7 +17,8 @@
 
 # Deduplicate the jsdrv and minibitty example helpers
 
-**Status**: proposed
+**Status**: proposed, not started.  Re-checked 2026-11-19:
+`log_level_cvt` now has a third copy in `example/fuzz.c`.
 **Created**: 2026-10-06
 
 ## Context
@@ -49,7 +50,8 @@ files.
 
 1. Move the log-level table and `log_level_cvt` into
    `example/common/log_level.c`, with a unit test like
-   `device_match_test.c`.  Use it from both `main` functions.
+   `device_match_test.c`.  Use it from both `main` functions and from
+   `example/fuzz.c`.
 2. Move `app_scan` and `app_match_ex` into `example/common/app_match.c`.
    Make the `jsdrv` no-filter behavior a flag (`APP_MATCH_JOULESCOPE`).
    This needs a shared `struct app_s`, or a small struct with the

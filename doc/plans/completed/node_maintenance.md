@@ -17,7 +17,9 @@
 
 # Node.js binding (node_api) maintenance plan
 
-**Status**: proposed
+**Status**: COMPLETE for the decided scope (2026-11-19): buffer
+payload converters and a CI-run `npm test` landed in `9c1d933`.  The
+follow-ons below remain unscheduled.
 **Created**: 2026-07-31 (design review 2026-07)
 
 ## Current state

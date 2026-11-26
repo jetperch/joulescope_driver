@@ -28,7 +28,18 @@ Linux dev host.
 |---|---|---|---|
 | Linux | `libusb/backend.c` + `linux_usbfs.c` | landed | yes, `stream-live` 6/6 |
 | macOS | `libusb/backend.c` + `darwin_usb.c` | none needed (see below) | no |
-| Windows | `winusb/backend.c` (native, not libusb) | landed, built | tested 2026-07-13: **insufficient**, see measured behavior |
+| Windows | `winusb/backend.c` (native) | landed | desktop yes (2026-07-14); laptop no |
+
+Summary (2026-11-19): Linux is done.  On Windows, the S3 desktop and
+selective suspend (frozen and killed host) passed on 2026-07-14 with fw
+1.1.5 (bcdDevice 0x0002); see "Windows selective suspend" below.  Still
+open, all needing hardware except the code change in the last item:
+
+- Windows Modern Standby laptop acceptance test (and unplug-while-asleep).
+- macOS validation (not started).
+- "Related open items" at the end: host power events off Windows, retry
+  constant characterization, and the WinUSB bulk OUT pipe timeout (code,
+  then a desktop S3 re-run).
 
 ## The model, from Linux (what "works well" means)
 
@@ -315,7 +326,7 @@ watchdog reset; `c/comm/usbd/wd_en=0` is the manual mitigation on such hosts.
 Checked against the code on 2026-10-06.
 
 - [ ] Host power events on Linux and macOS.  `JSDRV_USBBK_MSG_POWER` is
-      only emitted by WinUSB (`winusb/backend.c:891`, from
+      only emitted by WinUSB (`winusb/backend.c:951`, from
       `device_change_notifier.c`).  `libusb/backend.c` has no power
       handling, so the mb_device SLEEP_REQ on suspend and the
       revalidate/replay on resume (`mb_device.c`) never run off Windows.
@@ -326,13 +337,13 @@ Checked against the code on 2026-10-06.
       IOKit `IORegisterForSystemPower`; Linux: logind `PrepareForSleep`)
       once the macOS validation above shows whether macOS resets on wake.
 - [ ] Bulk IN retry constants are not characterized on Windows
-      (`winusb/backend.c:60-65`, "conservative starting point") or macOS
-      (`libusb/backend.c:70-79`).  Measure during the Windows and macOS
+      (`winusb/backend.c:55-66`, "conservative starting point") or macOS
+      (`libusb/backend.c:68-80`).  Measure during the Windows and macOS
       validation runs above (step 6 and step 5).
 - [ ] WinUSB bulk OUT has no pipe timeout: `bulk_out_initialize` sets no
       `PIPE_TRANSFER_TIMEOUT`, so a wedged OUT pipe blocks forever.
       libusb uses 250 ms (`BULK_OUT_TIMEOUT_MS`).  The commented-out
-      timeout at `winusb/backend.c:390-393` is in `bulk_in_initialize`, not
+      timeout at `winusb/backend.c:394-397` is in `bulk_in_initialize`, not
       bulk OUT.  This interacts with the S3 measurement above: today, OUT
       writes queued while the device re-enumerates all flush when the pipe
       returns (the CONNECT_REQ burst).  With a timeout they fail instead,

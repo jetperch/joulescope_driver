@@ -17,6 +17,11 @@
 
 # Linux host sleep/resume failure reproduction (Fedora 44 customer report)
 
+**Status**: COMPLETE (2026-11-19).  Fixes shipped in jsdrv 2.3.3
+(`f4ba633`); S1 and S2 real-sleep runs passed (see Fix results).
+Customer confirmation on Fedora 44 is external.  macOS validation is
+tracked in `../usb_suspend_resume_windows_macos.md`.
+
 Customer (Fedora 44, UI 1.6.3 / jsdrv 2.3.2, JS320 fw 1.1.5): after host
 sleep/resume the UI never recovers the JS320 (JS220 recovers).  The UI must
 be restarted twice: the first restart shows only the power trace (i and v

@@ -23,7 +23,7 @@
  * Designed for host sleep/resume and unclean-close reproduction runs:
  * emits one JSON line per second to a file (flushed per line so evidence
  * survives kill -9 and host freezes), then exits with a code that encodes
- * the final streaming state.  See doc/plans/linux_host_sleep_repro.md.
+ * the final streaming state.  See doc/plans/completed/linux_host_sleep_repro.md.
  *
  * With --cycles, repeatedly stops and restarts the streams instead, and
  * reports sample_id skips and stale first frames per cycle.  See

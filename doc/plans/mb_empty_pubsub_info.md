@@ -16,7 +16,8 @@
 -->
 # MiniBitty adapter reports an empty ././info
 
-**Status**: proposed
+**Status**: proposed, not started.  Re-checked 2026-11-19: the step 4
+decode bug is confirmed (see step 4).
 **Created**: 2026-10-07
 
 ## Context
@@ -58,6 +59,11 @@ adapter firmware is the likely cause.
    `{'version': 9, 'version_major': 9, ...}`, which appears to read the
    stdmsg type as the version.  Check the `mb_stdmsg_header_s` layout
    against `_jsdrv_union_to_py` and add MB_STDMSG_PUBSUB_INFO decoding.
+   Confirmed 2026-11-19: `mb/stdmsg.h` defines `version` as a
+   little-endian `uint16_t` major.minor, so the major is `bin[1]`, but
+   `binding.pyx:513-514` reads `bin[0]` as major and `bin[1]` as minor
+   (swapped).  The binding also exposes no `type` field; it only checks
+   `bin[2]` for `MB_STDMSG_COMM_STATS`.
 
 Step 1 needs hardware.  Steps 3 and 4 build and pass the unit tests on
 their own.

@@ -16,7 +16,9 @@
 -->
 # Compiler-checked log format strings
 
-**Status**: proposed
+**Status**: proposed, not started.  Re-checked 2026-11-19 (jsdrv 2.5.7):
+`JSDRV_PRINTF_FORMAT` in `cmacro_inc.h` is still hard-coded to `(1, 2)`
+and unused, and `tmap.c:145` still logs a `double` with `PRIu64`.
 **Created**: 2026-10-08
 
 ## Context
@@ -32,8 +34,8 @@ mismatches in a Linux build, after removing `-Werror`.
 Real bugs, not just width differences:
 
 * `src/backend/libusb/backend.c:697`: `%d` for a `char *`.
-* `src/tmap.c:145`: `%lu` for a `double`; the following arguments print
-  garbage.
+* `src/tmap.c:145`: `PRIu64` (was `%lu`) for a `double`; the following
+  arguments print garbage.
 * `src/devices/js220/js220_usb.c:1603`: `%u` for two `uint64_t` values.
 * `src/devices/js220/js220_usb.c:1694`: `%zu` for an `int`.
 
