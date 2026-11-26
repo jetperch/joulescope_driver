@@ -47,6 +47,12 @@ We also added cmake build support:
 * CMakeLists.txt
 * include/*/config.h for platform-specific config
 
+We also raised the quality of service of the macOS event thread
+(`darwin_event_thread_main` in `libusb/os/darwin_usb.c`) to
+`QOS_CLASS_USER_INTERACTIVE`.  Its runloop delivers the asynchronous
+transfer completions, so macOS background bursts that delayed it
+starved the streaming bulk IN endpoints.
+
 We are including this libusb fork in the joulescope_driver project
 to simplify the build and distribution project.  libusb remains
 a separate project with the LGPL 2.1 license.

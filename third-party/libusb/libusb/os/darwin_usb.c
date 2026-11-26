@@ -24,6 +24,7 @@
 #include <time.h>
 #include <ctype.h>
 #include <pthread.h>
+#include <pthread/qos.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -477,6 +478,10 @@ static void *darwin_event_thread_main (void *arg0) {
      and crash reports. */
   pthread_setname_np ("org.libusb.device-hotplug");
 #endif
+
+  /* Jetperch: this thread's runloop delivers the async transfer completions.
+     Keep it ahead of background work so streaming endpoints stay serviced. */
+  pthread_set_qos_class_self_np (QOS_CLASS_USER_INTERACTIVE, 0);
 
 #if MAC_OS_X_VERSION_MIN_REQUIRED >= 1060 && MAC_OS_X_VERSION_MIN_REQUIRED < 101200
   /* Tell the Objective-C garbage collector about this thread.

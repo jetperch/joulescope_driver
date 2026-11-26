@@ -38,6 +38,9 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <pthread.h>
+#if defined(__APPLE__)
+#include <pthread/qos.h>
+#endif
 #include "libusb.h"
 
 
@@ -47,7 +50,10 @@
 #define BULK_IN_TIMEOUT_MS              (0U)    // no timeout
 #define BULK_IN_FRAME_LENGTH            (512U)
 #define BULK_IN_TRANSFER_SIZE           (64U * BULK_IN_FRAME_LENGTH)
-#define BULK_IN_TRANSFER_OUTSTANDING    (4U)
+// Queued transfers absorb host scheduling delays.  A device streams about
+// 8 MB/s, so 16 x 32 KiB holds about 64 ms.  macOS background bursts delayed
+// this thread by 17-19 ms, beyond the 16 ms that 4 transfers held.
+#define BULK_IN_TRANSFER_OUTSTANDING    (16U)
 #define ENDPOINT_COUNT                  (256U)
 #define CLOSE_TIMEOUT_MS                (2000U)
 
@@ -1170,6 +1176,13 @@ void * backend_thread(void * arg) {
     nfds_t nfds;
     struct timeval libusb_timeout_tv = {.tv_sec=0, .tv_usec=0};
     JSDRV_LOGI("jsdrv_usb_backend_thread start");
+#if defined(__APPLE__)
+    // This thread resubmits the bulk IN transfers: keep it ahead of
+    // background work, as the Windows backend does with its thread priority.
+    if (pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)) {
+        JSDRV_LOGW("pthread_set_qos_class_self_np failed");
+    }
+#endif
     struct backend_s * s = (struct backend_s *) arg;
     int rc = libusb_init(&s->ctx);
     if (rc) {
