@@ -23,7 +23,7 @@ This file contains the list of changes made to the Joulescope driver.
 
 ## 2.5.8
 
-2026 Nov 20 (unreleased)
+2026 Nov 26
 
 * Fixed occasional JS110 and JS220 sample drops on macOS during long
   full-rate streaming.  macOS background bursts, such as its scheduled
@@ -32,6 +32,7 @@ This file contains the list of changes made to the Joulescope driver.
   backend (macOS and Linux) now queues 16 transfers per stream, about
   64 ms, and on macOS the backend and libusb event threads run at the
   user-interactive quality of service.
+* Updated plans.
 
 
 ## 2.5.7
