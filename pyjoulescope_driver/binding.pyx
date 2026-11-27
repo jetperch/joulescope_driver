@@ -51,7 +51,13 @@ _log = logging.getLogger(__name__)
 
 
 class ElementType:
-    """The element type enumeration."""
+    """The element type enumeration, the "element_type" of stream data.
+
+    * UNDEFINED = 0: undefined
+    * INT = 2: signed integer
+    * UINT = 3: unsigned integer
+    * FLOAT = 4: floating point
+    """
     UNDEFINED = 0       #: Undefined
     INT = 2             #: signed integer
     UINT = 3            #: unsigned integer
@@ -59,7 +65,17 @@ class ElementType:
 
 
 class Field:
-    """The field enumeration."""
+    """The field enumeration, the "field_id" of stream data.
+
+    * UNDEFINED = 0: undefined
+    * CURRENT = 1: current, in A
+    * VOLTAGE = 2: voltage, in V
+    * POWER = 3: power, in W
+    * RANGE = 4: current or voltage range
+    * GPI = 5: general purpose input, with "index" giving the input
+    * UART = 6: UART
+    * RAW = 7: raw ADC data
+    """
     UNDEFINED = 0       #: undefined
     CURRENT   = 1       #: current
     VOLTAGE   = 2       #: voltage
@@ -590,7 +606,12 @@ cdef object _jsdrv_union_to_py(const c_jsdrv.jsdrv_union_s * value):
 
 
 class ErrorCode:
-    """The error code enumeration."""
+    """The error code enumeration.
+
+    The members match the C jsdrv_error_code_e, such as
+    ErrorCode.SUCCESS = 0 and ErrorCode.TIMED_OUT = 11.  The C API
+    "Error codes" page lists them all.
+    """
     # automatically maintained by error_code_update.py
     # ENUM_ERROR_CODE_START
     SUCCESS                     = 0
@@ -692,7 +713,13 @@ def error_code_to_str(ec):
 
 
 class LogLevel:
-    """The log level enumeration."""
+    """The log level enumeration, for :attr:`Driver.log_level`.
+
+    OFF = -1, EMERGENCY = 0, ALERT = 1, CRITICAL = 2, ERROR = 3,
+    WARNING = 4, NOTICE = 5, INFO = 6, DEBUG1 = 7, DEBUG2 = 8, DEBUG3 = 9
+    and ALL = 10.  :attr:`Driver.log_level` also accepts the lowercase
+    names, such as "warning".
+    """
     OFF         = -1
     EMERGENCY   = 0
     ALERT       = 1
@@ -755,10 +782,24 @@ def log_level_c_to_py(lvl):
 
 
 class SubscribeFlags:
-    """The available subscribe flags."""
+    """The available subscribe flags.
+
+    :meth:`Driver.subscribe` also accepts these as string mnemonics,
+    such as "pub" and "pub_retain".
+
+    * NONE = 0: no flags.
+    * RETAIN = 1: immediately forward the retained values, with PUB, or the
+      retained metadata, with METADATA_RSP.
+    * PUB = 2: receive normal topic publishes.
+    * METADATA_REQ = 4: receive metadata requests like "a/b/%".
+    * METADATA_RSP = 8: receive metadata responses like "a/b/c$".
+    * QUERY_REQ = 16: receive query requests like "a/b/&".
+    * QUERY_RSP = 32: receive query responses like "a/b/c?".
+    * RETURN_CODE = 64: receive return codes like "a/b/c#".
+    """
     NONE = 0                #: No flags (always 0).
     RETAIN = (1 << 0)       #: Immediately forward retained PUB and/or METADATA, depending upon JSDRV_PUBSUB_SFLAG_PUB and JSDRV_PUBSUB_SFLAG_METADATA_RSP.
-    PUB = (1 << 1)          #: Do not receive normal topic publish.
+    PUB = (1 << 1)          #: Receive normal topic publish.
     METADATA_REQ = (1 << 2) #: Subscribe to receive metadata requests like "%", "a/b/%", and "a/b/c%".
     METADATA_RSP = (1 << 3) #: Subscribe to receive metadata responses like "a/b/c$.
     QUERY_REQ = (1 << 4)    #: Subscribe to receive query requests like "&", "a/b/&", and "a/b/c&".
@@ -885,6 +926,17 @@ cdef class Driver:
     :class:`DeviceContext`, and :meth:`subscribe` returns a
     :class:`SubscribeContext`.
 
+    The Driver methods take full topics, which start with the device
+    path.  The :class:`DeviceContext` methods take topics relative to the
+    device.  These two calls publish the same value::
+
+        d.publish(f'{device_path}/s/i/range/mode', 'auto')
+        device.publish('s/i/range/mode', 'auto')
+
+    The topics for each model are in the JS320 and JS220 topic
+    references.  Each topic's metadata gives its data type, default and
+    options.
+
     The driver thread invokes the subscriber callbacks and completes
     every command, so a callback cannot wait on the driver.  A Driver
     method called from a callback is forced asynchronous, whatever its
@@ -1001,6 +1053,10 @@ cdef class Driver:
 
         :param topic: The topic string.
         :param value: The value, which must pass validation for the topic.
+            Use int for the integer and bool topics, float, str for
+            string topics and options given by name, such as 'auto',
+            or bytes.  The driver validates the value against the topic
+            metadata and converts an option name to its value.
         :param timeout: The timeout in seconds.  None (default) uses
             the default timeout and waits for the return code.  0 does
             not wait, so publish cannot raise for an invalid topic or value.
@@ -1068,7 +1124,10 @@ cdef class Driver:
         :param topic: The topic name.
         :param timeout: The timeout in seconds.  None (default) uses
             the default timeout.
-        :return: The value for the topic.
+        :return: The retained value for the topic.  Its Python type
+            follows the topic's data type: int for the integer and bool
+            types, float, str, a dict or list for JSON, or bytes.
+            Options are returned as their value, not their name.
         :raise: On error.
         """
         cdef c_jsdrv.jsdrv_union_s v
@@ -1275,9 +1334,17 @@ cdef class Driver:
             - query_rsp: Subscribe to all query responses.
             - return_code: Subscribe to all return code responses.
 
-        :param fn: The function to call on each publish.  Note that python
-            dynamically constructs bound methods.  To unsubscribe a method,
-            provide the exact  same bound method instance to unsubscribe.
+        :param fn: The function called as fn(topic, value) on each
+            publish, where topic is the full topic str.  The value has the
+            Python type described in :meth:`query`, except that the
+            measurement topics, such as "s/i/!data" and "s/stats/value",
+            give a dict described in "Streaming and statistics topics".
+            The driver thread calls fn, so fn must return quickly and
+            cannot wait on the driver: Driver methods called from fn run
+            asynchronously, as described for :class:`Driver`.
+            Python dynamically constructs bound methods, so to unsubscribe
+            a method, provide the exact same bound method instance to
+            unsubscribe.
         :param timeout: The timeout in float seconds to wait for this operation
             to complete.  None waits the default amount.
             0 does not wait and subscription will occur asynchronously.

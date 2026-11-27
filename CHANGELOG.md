@@ -21,6 +21,19 @@
 This file contains the list of changes made to the Joulescope driver.
 
 
+## 2.5.9
+
+2026 Nov 27
+
+* Documented the Python API for code written by people and LLM agents:
+  the subscribe callback fn(topic, value) and the thread that calls it, the
+  Python types that publish accepts and query returns, full topics for
+  Driver methods and relative topics for DeviceContext methods, and the
+  members of ElementType, Field, ErrorCode, LogLevel and SubscribeFlags,
+  which the documentation did not show.
+* Fixed the SubscribeFlags.PUB comment, which said the opposite.
+
+
 ## 2.5.8
 
 2026 Nov 26
