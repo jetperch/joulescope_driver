@@ -38,6 +38,8 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <unistd.h>
 #if defined(__APPLE__)
 #include <pthread/qos.h>
 #endif
@@ -56,6 +58,26 @@
 #define BULK_IN_TRANSFER_OUTSTANDING    (16U)
 #define ENDPOINT_COUNT                  (256U)
 #define CLOSE_TIMEOUT_MS                (2000U)
+
+// EXPERIMENT (exp/bulk_in_buffers): runtime overrides for the buffer sweep.
+//   JSDRV_BULK_IN_TRANSFER_SIZE   bytes per bulk IN transfer (multiple of 512)
+//   JSDRV_BULK_IN_TRANSFER_COUNT  transfers queued per bulk IN pipe
+//   JSDRV_TEST_STALL_MS           block the backend thread this long ...
+//   JSDRV_TEST_STALL_PERIOD_MS    ... once per period, to measure margin
+static uint32_t bulk_in_size_ = BULK_IN_TRANSFER_SIZE;
+static uint32_t bulk_in_count_ = BULK_IN_TRANSFER_OUTSTANDING;
+static uint32_t test_stall_ms_ = 0;
+static uint32_t test_stall_period_ms_ = 0;
+static uint32_t test_stall_next_ms_ = 0;
+static uint32_t submit_fail_count_ = 0;
+
+static uint32_t env_u32(const char * name, uint32_t dflt) {
+    const char * v = getenv(name);
+    if ((NULL == v) || !v[0]) {
+        return dflt;
+    }
+    return (uint32_t) strtoul(v, NULL, 0);
+}
 
 // This backend serves both Linux (linux_usbfs) and macOS (darwin_usb).  On
 // both, a bus suspend and a device removal both fail the in-flight bulk IN
@@ -122,12 +144,14 @@ struct transfer_s {
     struct libusb_transfer * transfer;      // user_data points to the transfer_s instance
     struct jsdrvp_msg_s * msg;              // not for BULK IN
     struct dev_s * device;
-    uint8_t buffer[BULK_IN_TRANSFER_SIZE];  // OUT uses msg->value.value.bin
     struct jsdrv_list_s item;
+    uint8_t buffer[];                       // bulk_in_size_ bytes; OUT uses msg->value.value.bin
 };
 
 struct dev_s {
     struct jsdrvp_ll_device_s ll_device;
+    uint64_t exp_bytes;         // EXPERIMENT: bulk IN bytes since exp_t0_ms
+    uint32_t exp_t0_ms;
     libusb_device * usb_device;
     libusb_device_handle * handle;
     struct backend_s * backend;
@@ -199,7 +223,7 @@ static struct transfer_s * transfer_alloc(struct dev_s * d) {
     if (NULL != item) {
         t = JSDRV_CONTAINER_OF(item, struct transfer_s, item);
     } else {
-        t = jsdrv_alloc_clr(sizeof(struct transfer_s));
+        t = jsdrv_alloc_clr(sizeof(struct transfer_s) + bulk_in_size_);
         jsdrv_list_initialize(&t->item);
         t->transfer = libusb_alloc_transfer(0);
     }
@@ -412,7 +436,10 @@ static const char * transfer_status_to_str(int32_t status) {
 static int submit_transfer(struct transfer_s * t) {
     int rc = libusb_submit_transfer(t->transfer);
     if (rc) {
-        JSDRV_LOGD1("libusb_submit_transfer returned %d", rc);
+        if (submit_fail_count_++ < 20) {
+            JSDRV_LOGW("libusb_submit_transfer returned %d (%s), failures=%u",
+                       rc, libusb_error_name(rc), (unsigned) submit_fail_count_);
+        }
         if (t->msg) {
             if ((t->transfer->endpoint & 0x7f) == 0) {
                 t->msg->extra.bkusb_ctrl.status = JSDRV_ERROR_IO;
@@ -602,7 +629,20 @@ static void on_bulk_in_done(struct libusb_transfer * transfer) {
     JSDRV_LOGD3("bulk_in_done(%s) status=%d, length=%d",
                 d->ll_device.prefix, transfer->status, t->transfer->actual_length);
     switch (transfer->status) {
-        case LIBUSB_TRANSFER_COMPLETED:
+        case LIBUSB_TRANSFER_COMPLETED: {
+            uint32_t now_ms = jsdrv_time_ms_u32();
+            if (0 == d->exp_t0_ms) {
+                d->exp_t0_ms = now_ms;
+            }
+            d->exp_bytes += (uint64_t) t->transfer->actual_length;
+            uint32_t dt_ms = now_ms - d->exp_t0_ms;
+            if (dt_ms >= 10000U) {
+                JSDRV_LOGI("bulk_in rate %s: %u B/s", d->ll_device.prefix,
+                           (unsigned) ((d->exp_bytes * 1000U) / dt_ms));
+                d->exp_bytes = 0;
+                d->exp_t0_ms = now_ms;
+            }
+        }
             bulk_in_retry_clear(d);
             bulk_in_start(t->device, pipe_id);
             if (0 == t->transfer->actual_length) {
@@ -693,7 +733,7 @@ static void bulk_in_retry_process(struct dev_s * d) {
             continue;
         }
         uint32_t outstanding = bulk_in_outstanding(d, (uint8_t) pipe_id);
-        for (; outstanding < BULK_IN_TRANSFER_OUTSTANDING; ++outstanding) {
+        for (; outstanding < bulk_in_count_; ++outstanding) {
             int rc = bulk_in_start(d, (uint8_t) pipe_id);
             if (LIBUSB_ERROR_NO_DEVICE == rc) {
                 // The kernel reports ENODEV only when the device is gone.  A
@@ -730,7 +770,7 @@ static int bulk_in_start(struct dev_s * d, uint8_t pipe_id) {
     }
     struct transfer_s * t = transfer_alloc(d);
     libusb_fill_bulk_transfer(t->transfer, d->handle,
-                              pipe_id, t->buffer, sizeof(t->buffer),
+                              pipe_id, t->buffer, (int) bulk_in_size_,
                               on_bulk_in_done, t, BULK_IN_TIMEOUT_MS);
     return submit_transfer(t);
 }
@@ -747,7 +787,7 @@ static void bulk_in_open(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     if (rv) {
         JSDRV_LOGI("bulk_in_open clear_halt failed with %d", rv);
     }
-    for (uint32_t i = 0; i < BULK_IN_TRANSFER_OUTSTANDING; ++i) {
+    for (uint32_t i = 0; i < bulk_in_count_; ++i) {
         bulk_in_start(d, pipe_id);
     }
     msg->value = jsdrv_union_i32(0);  // return code
@@ -1271,6 +1311,11 @@ void * backend_thread(void * arg) {
         }
 
         rc = poll(fds, nfds, timeout_ms);
+        if (test_stall_ms_ && ((int32_t) (jsdrv_time_ms_u32() - test_stall_next_ms_) >= 0)) {
+            test_stall_next_ms_ = jsdrv_time_ms_u32() + test_stall_period_ms_;
+            JSDRV_LOGW("test stall %u ms", (unsigned) test_stall_ms_);
+            usleep(test_stall_ms_ * 1000U);
+        }
         rc = libusb_handle_events_timeout_completed(s->ctx, &libusb_timeout_tv, NULL);
         while (handle_msg(s, msg_queue_pop_immediate(s->backend.cmd_q))) {
             ; //
@@ -1341,6 +1386,19 @@ static void finalize(struct jsdrvbk_s * backend) {
 
 int32_t jsdrv_usb_backend_factory(struct jsdrv_context_s * context, struct jsdrvbk_s ** backend) {
     JSDRV_LOGI("jsdrv_usb_backend_factory");
+    bulk_in_size_ = env_u32("JSDRV_BULK_IN_TRANSFER_SIZE", BULK_IN_TRANSFER_SIZE);
+    bulk_in_size_ = (bulk_in_size_ / BULK_IN_FRAME_LENGTH) * BULK_IN_FRAME_LENGTH;
+    if (bulk_in_size_ < 4096U + 8U) {
+        bulk_in_size_ = BULK_IN_TRANSFER_SIZE;  // control transfers share the buffer
+    }
+    bulk_in_count_ = env_u32("JSDRV_BULK_IN_TRANSFER_COUNT", BULK_IN_TRANSFER_OUTSTANDING);
+    test_stall_ms_ = env_u32("JSDRV_TEST_STALL_MS", 0);
+    test_stall_period_ms_ = env_u32("JSDRV_TEST_STALL_PERIOD_MS", 10000);
+    test_stall_next_ms_ = jsdrv_time_ms_u32() + 15000U;  // let streaming start first
+    JSDRV_LOGI("bulk_in transfer size=%u count=%u (%u KiB/pipe), test stall %u ms every %u ms",
+               (unsigned) bulk_in_size_, (unsigned) bulk_in_count_,
+               (unsigned) ((bulk_in_size_ / 1024U) * bulk_in_count_),
+               (unsigned) test_stall_ms_, (unsigned) test_stall_period_ms_);
     struct backend_s * s = jsdrv_alloc_clr(sizeof(struct backend_s));
     s->context = context;
     s->backend.prefix = 'u';

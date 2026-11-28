@@ -41,6 +41,7 @@
 #include <stdio.h>
 #include <wchar.h>
 #include <inttypes.h>
+#include <stdlib.h>
 
 
 #define DEVICES_MAX                     (256U)
@@ -49,6 +50,21 @@
 #define BULK_IN_FRAME_LENGTH            (512)
 #define BULK_IN_TRANSFER_SIZE           (64 * BULK_IN_FRAME_LENGTH)
 #define BULK_IN_TRANSFER_OUTSTANDING    (4)
+
+// EXPERIMENT (exp/bulk_in_buffers): runtime overrides for the buffer sweep.
+// See the libusb backend for the variable names.
+static uint32_t bulk_in_size_ = BULK_IN_TRANSFER_SIZE;
+static uint32_t bulk_in_count_ = BULK_IN_TRANSFER_OUTSTANDING;
+static uint32_t test_stall_ms_ = 0;
+static uint32_t test_stall_period_ms_ = 0;
+
+static uint32_t env_u32(const char * name, uint32_t dflt) {
+    const char * v = getenv(name);
+    if ((NULL == v) || !v[0]) {
+        return dflt;
+    }
+    return (uint32_t) strtoul(v, NULL, 0);
+}
 
 // A host sleep/resume fails the in-flight bulk IN reads, and so does a device
 // removal.  The completion error code cannot reliably tell them apart, so the
@@ -94,7 +110,7 @@ struct bulk_in_transfer_s {
     struct bulk_in_s * bulk;
     OVERLAPPED overlapped;
     struct jsdrv_list_s item;
-    uint8_t buffer[BULK_IN_TRANSFER_SIZE];
+    uint8_t buffer[];   // bulk_in_size_ bytes
 };
 
 struct bulk_in_s {
@@ -114,6 +130,8 @@ struct bulk_in_s {
     bool retry_pending;
     uint32_t retry_at_ms;
     uint32_t retry_delay_ms;
+    uint64_t exp_bytes;   // EXPERIMENT
+    uint32_t exp_t0_ms;
 };
 
 struct bulk_out_s {
@@ -159,7 +177,7 @@ static struct bulk_in_transfer_s * bulk_in_transfer_alloc(struct bulk_in_s * b) 
     if (item) {
         t = JSDRV_CONTAINER_OF(item, struct bulk_in_transfer_s, item);
     } else {
-        t = jsdrv_alloc_clr(sizeof(struct bulk_in_transfer_s));
+        t = jsdrv_alloc_clr(sizeof(struct bulk_in_transfer_s) + bulk_in_size_);
         jsdrv_list_initialize(&t->item);
     }
     t->bulk = b;
@@ -232,9 +250,9 @@ static int32_t bulk_in_pend(struct bulk_in_s * b) {
     JSDRV_LOGD2("bulk_in_pend");
     // Pend read operations
     size_t pending = jsdrv_list_length(&b->transfers_pending);
-    for (size_t idx = pending; idx < BULK_IN_TRANSFER_OUTSTANDING; ++idx) {
+    for (size_t idx = pending; idx < bulk_in_count_; ++idx) {
         struct bulk_in_transfer_s * t = bulk_in_transfer_alloc(b);
-        if (!WinUsb_ReadPipe(b->ep.dev->winusb, b->ep.pipe_id, t->buffer, BULK_IN_TRANSFER_SIZE, NULL, &t->overlapped)) {
+        if (!WinUsb_ReadPipe(b->ep.dev->winusb, b->ep.pipe_id, t->buffer, bulk_in_size_, NULL, &t->overlapped)) {
             DWORD ec = GetLastError();
             if (ec != ERROR_IO_PENDING) {
                 WINDOWS_LOGE("%s", "bulk_in_pend WinUsb_ReadPipe error");
@@ -305,6 +323,19 @@ static int32_t bulk_in_process(struct endpoint_s * ep) {
             m->value = jsdrv_union_bin(t->buffer, sz);
             m->extra.bkusb_stream.endpoint = b->ep.pipe_id;
             b->in_flight++;
+            {   // EXPERIMENT: byte rate
+                uint32_t now_ms = jsdrv_time_ms_u32();
+                if (0 == b->exp_t0_ms) {
+                    b->exp_t0_ms = now_ms;
+                }
+                b->exp_bytes += sz;
+                if ((now_ms - b->exp_t0_ms) >= 10000U) {
+                    JSDRV_LOGI("bulk_in rate %s: %u B/s", b->ep.dev->device.prefix,
+                               (unsigned) ((b->exp_bytes * 1000U) / (now_ms - b->exp_t0_ms)));
+                    b->exp_bytes = 0;
+                    b->exp_t0_ms = now_ms;
+                }
+            }
             msg_queue_push(b->ep.dev->device.rsp_q, m);
         } else {
             DWORD ec = GetLastError();
@@ -820,6 +851,7 @@ static DWORD WINAPI device_thread(LPVOID lpParam) {
     struct endpoint_s * ep;
     HANDLE handles[MAXIMUM_WAIT_OBJECTS];
     DWORD handle_count = 0;
+    uint32_t stall_next_ms = jsdrv_time_ms_u32() + 15000U;  // EXPERIMENT
 
     while (!d->do_exit) {
         if (d->update_handles) {
@@ -854,6 +886,11 @@ static DWORD WINAPI device_thread(LPVOID lpParam) {
             }
         }
         WaitForMultipleObjects(handle_count, handles, false, timeout_ms);
+        if (test_stall_ms_ && ((int32_t) (jsdrv_time_ms_u32() - stall_next_ms) >= 0)) {
+            stall_next_ms = jsdrv_time_ms_u32() + test_stall_period_ms_;
+            JSDRV_LOGW("test stall %u ms", (unsigned) test_stall_ms_);
+            Sleep(test_stall_ms_);
+        }
         //JSDRV_LOGD3("winusb ll thread %s", d->device.prefix);
         if (WAIT_OBJECT_0 == WaitForSingleObject(handles[0], 0)) {
             // note: ResetEvent handled automatically by msg_queue_pop_immediate
@@ -1272,6 +1309,18 @@ static void finalize(struct jsdrvbk_s * backend) {
 
 int32_t jsdrv_usb_backend_factory(struct jsdrv_context_s * context, struct jsdrvbk_s ** backend) {
     JSDRV_LOGI("jsdrv_usb_backend_factory");
+    bulk_in_size_ = env_u32("JSDRV_BULK_IN_TRANSFER_SIZE", BULK_IN_TRANSFER_SIZE);
+    bulk_in_size_ = (bulk_in_size_ / BULK_IN_FRAME_LENGTH) * BULK_IN_FRAME_LENGTH;
+    if (0 == bulk_in_size_) {
+        bulk_in_size_ = BULK_IN_TRANSFER_SIZE;
+    }
+    bulk_in_count_ = env_u32("JSDRV_BULK_IN_TRANSFER_COUNT", BULK_IN_TRANSFER_OUTSTANDING);
+    test_stall_ms_ = env_u32("JSDRV_TEST_STALL_MS", 0);
+    test_stall_period_ms_ = env_u32("JSDRV_TEST_STALL_PERIOD_MS", 10000);
+    JSDRV_LOGI("bulk_in transfer size=%u count=%u (%u KiB/pipe), test stall %u ms every %u ms",
+               (unsigned) bulk_in_size_, (unsigned) bulk_in_count_,
+               (unsigned) ((bulk_in_size_ / 1024U) * bulk_in_count_),
+               (unsigned) test_stall_ms_, (unsigned) test_stall_period_ms_);
     struct backend_s * s = jsdrv_alloc_clr(sizeof(struct backend_s));
     s->context = context;
     s->backend.prefix = 'u';
