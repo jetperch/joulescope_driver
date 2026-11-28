@@ -13,6 +13,7 @@ path = [
     "doc/architecture.svg",
     "doc/doxygen/footer.html",
     "doc/doxygen/header.html",
+    "doc/js110.json",
     "doc/js220.txt",
     "doc/js320.json",
     "doc/sphinx/_static/**",

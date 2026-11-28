@@ -50,7 +50,7 @@ when working with code in this repository.
   a connected device.
 * `node_api/` Node.js binding: out of scope unless asked.
 * Usage docs: `doc/getting_started.md`, `doc/streaming_topics.md`, the
-  topic references `doc/js220.txt` and `doc/js320.json`.
+  topic references `doc/js110.json`, `doc/js220.txt` and `doc/js320.json`.
 * Build and test C: `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
 * Build and test Python: `python setup.py build_ext --inplace` then
   `python -m pytest pyjoulescope_driver/test`.  Rebuild after editing

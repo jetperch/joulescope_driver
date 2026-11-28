@@ -1,0 +1,378 @@
+{
+  "s/i/range/select": {
+    "dtype": "u8",
+    "brief": "The current range selection.",
+    "default": 128,
+    "options": [
+      [
+        128,
+        "auto"
+      ],
+      [
+        1,
+        "10 A"
+      ],
+      [
+        2,
+        "2 A"
+      ],
+      [
+        4,
+        "180 mA"
+      ],
+      [
+        8,
+        "18 mA"
+      ],
+      [
+        16,
+        "1.8 mA"
+      ],
+      [
+        32,
+        "180 \u00b5A"
+      ],
+      [
+        64,
+        "18 \u00b5A"
+      ],
+      [
+        0,
+        "off"
+      ]
+    ]
+  },
+  "s/i/range/mode": {
+    "dtype": "u8",
+    "brief": "The current range suppression mode.",
+    "default": 2,
+    "options": [
+      [
+        0,
+        "off"
+      ],
+      [
+        1,
+        "mean"
+      ],
+      [
+        2,
+        "interp",
+        "interpolate"
+      ],
+      [
+        3,
+        "nan"
+      ]
+    ]
+  },
+  "s/i/range/pre": {
+    "dtype": "u8",
+    "brief": "The number of samples before the range switch to include.",
+    "default": 1,
+    "range": [
+      0,
+      8
+    ]
+  },
+  "s/i/range/win": {
+    "dtype": "u8",
+    "brief": "The window type.",
+    "default": 2,
+    "options": [
+      [
+        0,
+        "manual"
+      ],
+      [
+        1,
+        "m"
+      ],
+      [
+        2,
+        "n"
+      ]
+    ]
+  },
+  "s/i/range/win_sz": {
+    "dtype": "u8",
+    "brief": "The manual window size.",
+    "default": 10,
+    "range": [
+      0,
+      31
+    ]
+  },
+  "s/i/range/post": {
+    "dtype": "u8",
+    "brief": "The number of samples after the range switch to include.",
+    "default": 1,
+    "range": [
+      0,
+      8
+    ]
+  },
+  "s/i/range/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable current range input data stream (u4).",
+    "default": 0
+  },
+  "s/i/lsb_src": {
+    "dtype": "u8",
+    "brief": "The current signal least-significant bit mapping.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "normal"
+      ],
+      [
+        2,
+        "gpi0"
+      ],
+      [
+        3,
+        "gpi1"
+      ]
+    ]
+  },
+  "s/i/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable data stream for float32 current.",
+    "default": 0
+  },
+  "s/v/range/select": {
+    "dtype": "u8",
+    "brief": "The voltage range selection.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "15 V"
+      ],
+      [
+        1,
+        "5 V"
+      ]
+    ]
+  },
+  "s/v/lsb_src": {
+    "dtype": "u8",
+    "brief": "The voltage signal least-significant bit mapping.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "normal"
+      ],
+      [
+        2,
+        "gpi0"
+      ],
+      [
+        3,
+        "gpi1"
+      ]
+    ]
+  },
+  "s/v/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable data stream for float32 voltage.",
+    "default": 0
+  },
+  "s/extio/voltage": {
+    "dtype": "u32",
+    "brief": "The external IO voltage.",
+    "default": 3300,
+    "options": [
+      [
+        0,
+        "0V",
+        "off"
+      ],
+      [
+        1800,
+        "1.8V"
+      ],
+      [
+        2100,
+        "2.1V"
+      ],
+      [
+        2500,
+        "2.5V"
+      ],
+      [
+        2700,
+        "2.7V"
+      ],
+      [
+        3000,
+        "3.0V"
+      ],
+      [
+        3300,
+        "3.3V"
+      ],
+      [
+        3600,
+        "3.6V"
+      ],
+      [
+        5000,
+        "5.0V"
+      ]
+    ]
+  },
+  "s/gpo/0/value": {
+    "dtype": "bool",
+    "brief": "The general-purpose output 0 value.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "off"
+      ],
+      [
+        1,
+        "on"
+      ]
+    ]
+  },
+  "s/gpo/1/value": {
+    "dtype": "bool",
+    "brief": "The general-purpose output 1 value.",
+    "default": 0,
+    "options": [
+      [
+        0,
+        "off"
+      ],
+      [
+        1,
+        "on"
+      ]
+    ]
+  },
+  "s/p/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable data stream for float32 power.",
+    "default": 0
+  },
+  "s/gpi/0/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable general purpose input 0 data stream (u1).",
+    "default": 0
+  },
+  "s/gpi/1/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable general purpose input 1 data stream (u1).",
+    "default": 0
+  },
+  "s/stats/scnt": {
+    "dtype": "u32",
+    "brief": "Number of 2 Msps samples per block.",
+    "default": 1000000,
+    "range": [
+      1,
+      2000000
+    ]
+  },
+  "s/stats/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable host-side stats input data stream (u8).",
+    "default": 0
+  },
+  "s/sstats/ctrl": {
+    "dtype": "bool",
+    "brief": "Enable on-instrument stats input data stream (u8).",
+    "default": 1
+  },
+  "h/fs": {
+    "dtype": "u32",
+    "brief": "The sampling frequency.",
+    "default": 2000000,
+    "options": [
+      [
+        2000000,
+        "2 MHz"
+      ],
+      [
+        1000000,
+        "1 MHz"
+      ],
+      [
+        500000,
+        "500 kHz"
+      ],
+      [
+        200000,
+        "200 kHz"
+      ],
+      [
+        100000,
+        "100 kHz"
+      ],
+      [
+        50000,
+        "50 kHz"
+      ],
+      [
+        20000,
+        "20 kHz"
+      ],
+      [
+        10000,
+        "10 kHz"
+      ],
+      [
+        5000,
+        "5 kHz"
+      ],
+      [
+        2000,
+        "2 kHz"
+      ],
+      [
+        1000,
+        "1 kHz"
+      ],
+      [
+        500,
+        "500 Hz"
+      ],
+      [
+        200,
+        "200 Hz"
+      ],
+      [
+        100,
+        "100 Hz"
+      ],
+      [
+        50,
+        "50 Hz"
+      ],
+      [
+        20,
+        "20 Hz"
+      ],
+      [
+        10,
+        "10 Hz"
+      ],
+      [
+        5,
+        "5 Hz"
+      ],
+      [
+        2,
+        "2 Hz"
+      ],
+      [
+        1,
+        "1 Hz"
+      ]
+    ]
+  }
+}

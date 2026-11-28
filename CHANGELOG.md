@@ -32,6 +32,8 @@ This file contains the list of changes made to the Joulescope driver.
   members of ElementType, Field, ErrorCode, LogLevel and SubscribeFlags,
   which the documentation did not show.
 * Fixed the SubscribeFlags.PUB comment, which said the opposite.
+* Added the JS110 topic reference, doc/js110.json, generated from a JS110
+  with `python -m pyjoulescope_driver metadata`.
 
 
 ## 2.5.8
